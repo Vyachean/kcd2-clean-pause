@@ -6,9 +6,14 @@ import argparse
 import hashlib
 from pathlib import Path
 import shutil
+import sys
 import zipfile
 
-from build_from_game import (
+TOOLS_DIR = Path(__file__).resolve().parent
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+from build_from_game import (  # noqa: E402
     MANIFEST,
     MOD_DIR,
     PAK_OUTPUT,
@@ -18,7 +23,7 @@ from build_from_game import (
     render_lua,
     validate_build,
 )
-from profile_patch import ProfilePatchError, patch_profile
+from profile_patch import ProfilePatchError, patch_profile  # noqa: E402
 
 
 def prepare_profile(profile_path: Path) -> tuple[bytes, str, str, object]:
