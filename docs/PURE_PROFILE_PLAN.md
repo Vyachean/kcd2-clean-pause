@@ -65,7 +65,7 @@ The map has a Start handoff action, a B-press sink and a B-release resume action
 
 KCD2 uses last-mod-wins for `defaultProfile.xml`, so the fixed 1.5.6 release needs the complete patched profile.
 
-The patched target profile is versioned as release source at:
+The patched target profile is versioned at:
 
 ```text
 vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz
@@ -115,7 +115,7 @@ See `docs/TESTING.md`.
 
 ## Compatibility policy
 
-`defaultProfile.xml` is a whole-file conflict point. The 1.5.6 release source is deliberately pinned to that game version. Test without another mod replacing `defaultProfile.xml`; supporting another KCD2 version requires regenerating/reviewing the vendored target profile and publishing a new tagged release.
+`defaultProfile.xml` is a whole-file conflict point. The 1.5.6 release source is deliberately pinned to that game version. Test without another mod replacing `defaultProfile.xml`; supporting another KCD2 version requires regenerating/reviewing the versioned target profile and publishing a new tagged release.
 
 Generated `.pak` and install `.zip` files are never tracked in Git.
 
