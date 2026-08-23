@@ -29,17 +29,25 @@ Primary acceptance target:
 
 The current implementation uses only KCD2's normal `.pak`/Lua mod path. It does **not** require `version.dll`, ASI, KCSE, an external process, or an overlay.
 
-The installable build must be generated from the target installation's exact `Libs/Config/defaultProfile.xml`, either extracted automatically from `Data/IPL_GameData.pak` or supplied as an already extracted file. `defaultProfile.xml` is a whole-file override, so the repository never tracks the retail profile or generated install ZIPs.
+KCD2 uses last-mod-wins for `defaultProfile.xml`, so this implementation is intentionally version-specific. The repository contains the patched Xbox 1.5.6 profile as release source and GitHub Actions packages it into the installable mod. No user's game file or GitHub Actions secret is required to reproduce a release.
 
-The first Xbox Store 1.5.6 source profile has been validated. Its provenance is recorded in [docs/RETAIL_TEST1.md](docs/RETAIL_TEST1.md).
+The original Xbox Store 1.5.6 profile used to prepare that source is documented in [docs/RETAIL_TEST1.md](docs/RETAIL_TEST1.md).
 
 ## Downloads
 
-**GitHub Releases are the canonical distribution channel.** Generated `.pak`/`.zip` files are not committed to this repository.
+**GitHub Releases are the canonical distribution channel.** Generated `.pak`/`.zip` files are not committed to the repository.
 
-Retail candidates are produced by `.github/workflows/release.yml`. The workflow validates the repository, materializes the exact retail profile from a protected GitHub Actions secret, verifies its SHA-256, builds through `tools/build_from_profile.py`, validates the resulting ZIP/PAK, uploads a CI artifact, and publishes the same ZIP as a GitHub Release asset.
+The normal release flow is:
 
-Release pipeline details are in [docs/RELEASE.md](docs/RELEASE.md).
+```text
+PR / source commit
+  -> CI validation
+  -> version tag (for example v0.1.0-rc.1)
+  -> GitHub Actions build
+  -> GitHub Release + ZIP + SHA256SUMS.txt
+```
+
+`.github/workflows/release.yml` is triggered by `v*` tags and builds only from files contained in that tagged commit. See [docs/RELEASE.md](docs/RELEASE.md).
 
 ## Architecture
 
@@ -51,7 +59,7 @@ ordinary gameplay        open_menu/open_menu
 dialogue/cutscene/etc.   open_pause_menu/open_pause_menu
 ```
 
-Both are already bound to `xi_start` in the retail profile. The builder keeps their action IDs and physical bindings intact, but turns each action into a single-fire `consoleCmd` routed to Clean Pause.
+Both are already bound to `xi_start` in the retail profile. The patched release profile keeps their action IDs and physical bindings intact, but turns each action into a single-fire `consoleCmd` routed to Clean Pause.
 
 First Start:
 
@@ -86,6 +94,22 @@ The vanilla menu then owns its normal pause/input lifecycle.
 
 Relevant retail `actionPass` filters that already allow a vanilla pause action are extended with the three temporary Clean Pause actions. Existing `actionFail` restrictions are left untouched.
 
+## Release source
+
+The target-specific patched profile used by releases is stored at:
+
+```text
+vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz
+```
+
+Its decompressed SHA-256 is:
+
+```text
+28e210454d749869b1fa26d4414ba3c055157e731856f9610d6ffce5ddfbc373
+```
+
+`tools/build_release.py` verifies this digest and builds the same package that the tag workflow publishes.
+
 ## Safety constraints
 
 The implementation intentionally does **not**:
@@ -100,9 +124,9 @@ The implementation intentionally does **not**:
 
 A previous experiment using `InitActionMaps()` disabled controller input globally. That API is permanently forbidden here.
 
-## Local build paths
+## Development builders
 
-The repository also keeps two fail-closed builders for development/reproduction.
+The repository also keeps fail-closed tools for preparing/checking another exact game profile during development.
 
 ### From the installed game PAK
 
@@ -116,7 +140,7 @@ python tools/build_from_game.py "C:\XboxGames\Kingdom Come- Deliverance II\Conte
 python tools/build_from_profile.py "C:\path\to\defaultProfile.xml"
 ```
 
-Both use the same profile patcher/runtime/build validator. Public test distribution must still go through the CI release workflow rather than committing their output.
+These are maintainer/development paths. Public downloads are produced by `tools/build_release.py` from the tagged repository source.
 
 ## Installation
 
@@ -136,9 +160,9 @@ Do not install this `.pak` beside `KingdomCome.exe`.
 
 ## Compatibility
 
-Because the official mod path requires overriding the complete `defaultProfile.xml`, this test build conflicts with another mod that also supplies that file. Do not test Clean Pause together with another keybind/profile mod until their changes are merged intentionally.
+Because the official mod path requires overriding the complete `defaultProfile.xml`, this build conflicts with another mod that also supplies that file. Do not test Clean Pause together with another keybind/profile mod until their changes are merged intentionally.
 
-The release workflow minimizes version risk by accepting only the exact verified retail profile rather than bundling one in Git.
+The release target is explicitly KCD2 1.5.6. A future game update requires a new reviewed target profile and a new release.
 
 ## What retail testing still has to prove
 
@@ -157,6 +181,6 @@ See [docs/TESTING.md](docs/TESTING.md) for the exact test sequence.
 - [docs/RESEARCH.md](docs/RESEARCH.md) — confirmed retail/API findings and remaining hypotheses;
 - [docs/TESTING.md](docs/TESTING.md) — Xbox Store 1.5.6 acceptance procedure;
 - [docs/RETAIL_TEST1.md](docs/RETAIL_TEST1.md) — provenance of the first real Xbox retail test candidate;
-- [docs/RELEASE.md](docs/RELEASE.md) — CI artifact / GitHub Release pipeline;
+- [docs/RELEASE.md](docs/RELEASE.md) — tag-based CI / GitHub Release pipeline;
 - [docs/PURE_PROFILE_PLAN.md](docs/PURE_PROFILE_PLAN.md) — implementation-stage status;
 - [docs/PURE_MOD_REFERENCES.md](docs/PURE_MOD_REFERENCES.md) — source/reference evidence.
