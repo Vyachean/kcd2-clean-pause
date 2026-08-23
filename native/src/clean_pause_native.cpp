@@ -7,6 +7,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 #include <string>
 
 namespace clean_pause {
@@ -16,7 +17,7 @@ using namespace kcd2;
 
 std::atomic_bool g_stopping{false};
 std::atomic_bool g_cleanPaused{false};
-std::atomic<std::uint32_t> g_swallowRelease{0};
+std::atomic<std::uint32_t> g_swallowRelease{static_cast<std::uint32_t>(KeyId::None)};
 
 HMODULE g_selfModule{};
 void* g_environment{};
@@ -171,19 +172,19 @@ struct RuntimeEnvironment {
     DWORD mainThreadId{};
 };
 
-bool ValidateEnvironmentCandidate(std::uint8_t* candidate, RuntimeEnvironment& out)
+bool ValidateEnvironmentCandidate(const std::uint8_t* candidate, RuntimeEnvironment& out)
 {
     if (!IsReadable(candidate, kEnvSize))
         return false;
 
     RuntimeEnvironment value{};
     __try {
-        value.base = candidate;
-        value.scriptSystem = *reinterpret_cast<void**>(candidate + kEnvScriptSystemOffset);
-        value.input = *reinterpret_cast<void**>(candidate + kEnvInputOffset);
-        value.game = *reinterpret_cast<void**>(candidate + kEnvGameOffset);
-        value.system = *reinterpret_cast<void**>(candidate + kEnvSystemOffset);
-        value.mainThreadId = *reinterpret_cast<DWORD*>(candidate + kEnvMainThreadIdOffset);
+        value.base = const_cast<std::uint8_t*>(candidate);
+        value.scriptSystem = *reinterpret_cast<void* const*>(candidate + kEnvScriptSystemOffset);
+        value.input = *reinterpret_cast<void* const*>(candidate + kEnvInputOffset);
+        value.game = *reinterpret_cast<void* const*>(candidate + kEnvGameOffset);
+        value.system = *reinterpret_cast<void* const*>(candidate + kEnvSystemOffset);
+        value.mainThreadId = *reinterpret_cast<const DWORD*>(candidate + kEnvMainThreadIdOffset);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -221,7 +222,7 @@ bool ValidateEnvironmentCandidate(std::uint8_t* candidate, RuntimeEnvironment& o
 
 bool FindRuntimeEnvironment(HMODULE whGame, RuntimeEnvironment& result)
 {
-    const auto* base = reinterpret_cast<std::uint8_t*>(whGame);
+    const auto* base = reinterpret_cast<const std::uint8_t*>(whGame);
     if (!IsReadable(base, sizeof(IMAGE_DOS_HEADER)))
         return false;
 
@@ -239,7 +240,7 @@ bool FindRuntimeEnvironment(HMODULE whGame, RuntimeEnvironment& result)
         if (!(flags & IMAGE_SCN_MEM_READ) || !(flags & IMAGE_SCN_MEM_WRITE))
             continue;
 
-        auto* start = base + section->VirtualAddress;
+        const auto* start = base + section->VirtualAddress;
         const std::size_t size = section->Misc.VirtualSize;
         if (size < kEnvSize)
             continue;
@@ -372,7 +373,7 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
 
     const auto releaseToSwallow = static_cast<KeyId>(g_swallowRelease.load(std::memory_order_relaxed));
     if (released && releaseToSwallow == key) {
-        g_swallowRelease.store(0, std::memory_order_relaxed);
+        g_swallowRelease.store(static_cast<std::uint32_t>(KeyId::None), std::memory_order_relaxed);
         return;
     }
 
