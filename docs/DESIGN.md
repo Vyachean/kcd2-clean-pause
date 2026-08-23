@@ -6,184 +6,241 @@ Clean Pause exists for one reason: **pause KCD2 without obscuring the frame the 
 
 This is especially useful for rereading subtitles, but the feature is global and should behave consistently during normal gameplay, dialogue, and in-engine cutscenes.
 
-The visible result matters more than the specific mechanism used internally.
+The visible result matters more than the internal mechanism.
 
 ## Required state model
 
 ### `Running`
 
-The game is operating normally.
-
-Preferred transition:
+The game operates normally.
 
 ```text
 Menu / Start -> CleanPaused
 ```
 
-The player must not be left looking at the vanilla pause overlay during this transition.
+The vanilla pause overlay must not be rendered during this transition.
 
 ### `CleanPaused`
 
 Requirements:
 
 - game/dialogue/cutscene progression is stopped;
-- renderer remains active enough to keep the current image visible;
-- no pause overlay is visible;
-- the current HUD/subtitle remains present where the game permits it;
-- controller input needed to leave this state remains functional.
+- current rendered image remains visible;
+- no pause overlay/darkening/replacement screen is visible;
+- current HUD/subtitle remains present where the game permits it;
+- only the controller actions needed to leave Clean Pause remain active.
 
 Transitions:
 
 ```text
-B / ui_back    -> Running
-Menu / Start   -> VanillaMenu
+B            -> Running
+Menu / Start -> VanillaMenu
 ```
 
 ### `VanillaMenu`
 
-This is KCD2's own pause menu, not a clone or replacement.
+This is KCD2's untouched pause menu, not a clone or replacement.
 
-Clean Pause relinquishes ownership once the vanilla menu accepts the handoff. Closing the vanilla menu should resume ordinary gameplay rather than silently re-enter Clean Pause.
+Clean Pause relinquishes native-pause ownership before handing off to the vanilla menu. Closing that menu returns to ordinary `Running` behavior rather than silently re-entering Clean Pause.
 
-## Current preferred architecture
+## Pause primitive
 
-Research changed the preferred pause primitive. `t_scale 0` remains useful evidence that rendering can continue while simulation is stopped, but the prototype now uses **KCD2's native `Game.PauseGame(true)`**.
+The current implementation uses:
+
+```lua
+Game.PauseGame(true)
+Game.PauseGame(false)
+```
+
+rather than `t_scale 0`.
 
 Reasons:
 
-- it is the engine's real pause mechanism;
-- it should stop more subsystems coherently than only changing simulation time scale;
-- it avoids having to capture and restore an arbitrary `t_scale` value;
-- it is already used by KCD2 game scripts;
-- the pause menu and the act of pausing can be treated as separate concerns.
+- it is KCD2/CryEngine's native pause primitive;
+- it should stop more subsystems coherently than changing only simulation time scale;
+- it does not require capturing/restoring arbitrary `t_scale` values;
+- it separates **pausing the game** from **displaying the pause menu**.
 
-The working hypothesis is that subtitles disappear during the normal pause experience because the ingame menu/UI state replaces or hides them, not because native game pause inherently requires the overlay. Retail testing must prove this.
+The working product hypothesis is that the current subtitle can remain visible when the game is natively paused without starting the ingame menu. Retail testing is authoritative.
 
-## Input/menu strategy: reuse the vanilla action, do not remap it
+## Input architecture
 
-Current KCD2 `player.lua` documents the relevant actions as:
+### Exact vanilla action
 
-- `ui_start_pause` — Menu / Start;
-- `ui_back` — Back / B UI action.
-
-The prototype wraps `Player.OnAction` at runtime. It does **not** replace `player.lua`, alter `defaultProfile.xml`, or add a second binding to the physical Menu button.
-
-### First Menu / Start press
-
-The normal KCD2/CryEngine flow opens the ingame menu. Clean Pause observes `ui_start_pause` and attempts a same-input-cycle transformation:
+KCD2 `player.lua` identifies:
 
 ```text
-vanilla ui_start_pause
-        |
-        v
-vanilla menu starts / attempts to start
-        |
-        v
-MenuEvents.DisplayIngameMenu(false)
-        |
-        +-- hides/stops vanilla ingame menu
-        +-- relinquishes vanilla menu pause/filter state
-        |
-        v
-Game.PauseGame(true)
-        |
-        v
-CleanPaused (no menu UI)
+ui_start_pause
+ui_back
 ```
 
-The bridge call is made through the existing FlashUI script API:
+The final UX should reuse the physical Menu/Start button rather than create a second global pause shortcut.
+
+### Semantic interception, not physical-button replacement
+
+A supplemental action map adds:
+
+```text
+clean_pause_start  -> xi_start
+clean_pause_resume -> xi_b
+```
+
+An `actionFail` filter blocks only:
+
+```text
+ui_start_pause
+```
+
+CryEngine applies action filters before actions enter the dispatch priority list. Therefore in gameplay one physical Start press resolves as:
+
+```text
+physical xi_start
+  |
+  +-- ui_start_pause       -> filtered before vanilla UI listener
+  |
+  +-- clean_pause_start    -> CleanPause.StartPressed()
+```
+
+This is deliberately different from the discarded prototypes that put an additional action on an occupied controller button while allowing the vanilla action to fire too.
+
+## Supplemental profile loading
+
+The mod may add uniquely named action maps/filters through:
 
 ```lua
-UIAction.CallFunction("MenuEvents", 0, "DisplayIngameMenu", false)
+ActionMapManager.LoadFromXML(...)
 ```
 
-`UIAction.CallFunction` can dispatch functions to a UI-to-system event system, so no `Menu.gfx` replacement is needed.
+It must never call:
 
-### Resume with B
+```lua
+ActionMapManager.InitActionMaps(...)
+```
 
-While Clean Pause owns the pause state:
+`LoadFromXML()` still mutates the action-map manager's current profile version. Therefore loading a guessed XML version is forbidden.
+
+Bootstrap:
+
+1. read effective `Libs/Config/defaultProfile.xml` with `System.LoadTextFile`;
+2. parse the current root profile version;
+3. load a supplemental profile only when an explicitly supported matching version exists;
+4. verify the custom filters after loading;
+5. otherwise leave vanilla controls unchanged.
+
+The initial prototype supports only version `22`.
+
+## Lifecycle-scoped interception
+
+Blocking `ui_start_pause` globally would break Start behavior in the front-end or other UI contexts. The interceptor therefore follows runtime context.
+
+A pause-aware timer monitor keeps the block enabled only where appropriate:
 
 ```text
-ui_back -> Game.PauseGame(false) -> Running
+front-end / no player -> vanilla pause action allowed
+only_ui active        -> vanilla pause action allowed
+running gameplay      -> vanilla pause action blocked
+CleanPaused           -> vanilla pause action blocked
 ```
 
-The prototype also uses KCD2's existing `only_ui` filter while clean-paused, matching the input isolation used by the vanilla ingame menu without changing any binding.
+The supplemental custom action map can remain loaded; its commands are state-gated and harmless outside Clean Pause. The important mutation is the narrow vanilla-action filter, which is lifecycle-scoped.
 
-### Second Menu / Start press
+If the player disappears while Clean Pause owns native pause, the implementation releases that pause and removes clean-pause isolation.
 
-While clean-paused, Menu / Start deliberately transfers ownership to the real menu:
+## Clean Pause input isolation
+
+While clean-paused, an `actionPass` filter permits only:
+
+```text
+clean_pause_start
+clean_pause_resume
+```
+
+This prevents ordinary gameplay actions from firing against the frozen simulation while keeping the two explicit exits usable.
+
+Other KCD2 action filters can intersect with this filter. Dialogue/cutscene retail testing must prove that their active filter sets do not exclude the custom Start/B actions.
+
+## Transitions
+
+### Running -> CleanPaused
+
+`clean_pause_start`:
+
+1. verify gameplay interception is currently active;
+2. enable/verify `clean_pause_only`;
+3. call `Game.PauseGame(true)`;
+4. mark Clean Pause ownership.
+
+No vanilla menu API is invoked.
+
+### CleanPaused -> Running
+
+`clean_pause_resume`:
+
+1. disable `clean_pause_only`;
+2. call `Game.PauseGame(false)`;
+3. clear Clean Pause ownership;
+4. refresh gameplay interception.
+
+### CleanPaused -> VanillaMenu
+
+Second `clean_pause_start`:
+
+1. disable `clean_pause_only`;
+2. disable the `ui_start_pause` block so the real menu owns normal Start behavior;
+3. call `Game.PauseGame(false)` to relinquish Clean Pause ownership;
+4. invoke:
 
 ```lua
 UIAction.CallFunction("MenuEvents", 0, "DisplayIngameMenu", true)
 ```
 
-The vanilla menu then owns pause/unpause and UI filtering until it closes.
+5. let KCD2's real menu enable its own `only_ui` filter and manage pause/unpause;
+6. after the menu closes, the lifecycle monitor observes `only_ui == false` and restores gameplay interception.
 
-## Why this is fail-safer than the old controller prototypes
+No `Menu.gfx` replacement and no menu-close callback are required.
 
-The current prototype:
-
-- installs no controller map;
-- calls no `InitActionMaps`;
-- changes no persistent user/controller configuration;
-- adds no parallel action to R3/View/RB/Menu;
-- leaves the initial/front-end menu untouched because the hook lives on the in-game Player action path;
-- refuses to take clean-pause ownership if the `MenuEvents` bridge cannot be called.
-
-If the retail KCD2 build does not expose `MenuEvents.DisplayIngameMenu`, the expected failure is simply ordinary vanilla pause behaviour plus a log entry — not broken controller input.
-
-## Critical unresolved ordering question
-
-The exact retail ordering between KCD2's UI input listener and `Player.OnAction` must be measured.
-
-Two acceptable cases exist:
-
-1. vanilla menu handling occurs before `Player.OnAction`: the synchronous `DisplayIngameMenu(false)` call can close it in the same input cycle;
-2. the game has already been modified by Warhorse so `ui_start_pause` reaches Player early enough and the bridge still prevents any rendered overlay.
-
-A problematic case is:
-
-- `Player.OnAction` runs first;
-- the prototype closes a menu that is not open yet;
-- the vanilla UI listener opens it after the Lua hook returns.
-
-That case is safe for controller state but fails the visual goal. If observed, the next experiment is a pause-aware zero-delay `Script.SetTimer(..., true)` finalizer, or a narrower native blocking-action hook. Do not solve it by remapping Menu/Start.
+If the menu bridge fails, the transition rolls back to Clean Pause.
 
 ## Architecture boundaries
 
 ### Pause state controller
 
-Owns only whether Clean Pause itself owns native game pause.
+Owns only Clean Pause's native-pause state and safe transitions.
 
-### Player action observer
-
-Observes `ui_start_pause` / `ui_back` while preserving the original `Player.OnAction` implementation.
-
-It must never become a general-purpose input framework.
-
-### Vanilla menu bridge
+### Supplemental input adapter
 
 Owns only:
 
-```text
-MenuEvents.DisplayIngameMenu(false/true)
-```
+- two custom semantic actions;
+- one narrow vanilla-action block;
+- one clean-pause allowlist filter;
+- lifecycle scoping.
 
-It never draws or replaces the menu.
+It must not become a general keybinding framework.
+
+### Vanilla menu bridge
+
+Owns only the explicit transition into KCD2's existing pause menu through `MenuEvents.DisplayIngameMenu(true)`.
+
+It never draws or replaces UI.
 
 ## Forbidden approaches
 
 ### `ActionMapManager.InitActionMaps()`
 
-Never call it from this mod. It clears/reinitializes existing action maps and controller/device mappings. A previous prototype disabled Xbox-controller input globally, including the initial menu.
+Never call it. It clears/reinitializes existing action maps and controller/device mappings. A discarded prototype disabled Xbox-controller input globally, including the initial menu.
 
-### Parallel binding on an already-used controller button
+### Global `ui_start_pause` filtering
 
-Do not add another Menu/R3/View/RB binding while leaving vanilla behaviour active.
+The vanilla pause action may be blocked only while Clean Pause intentionally owns gameplay Start semantics. Main/front-end and vanilla UI contexts must retain normal behavior.
+
+### Parallel occupied-button binding without semantic suppression
+
+A custom Start/R3/View/RB action is not sufficient if its vanilla semantic action is still dispatched.
 
 ### Full replacement of `defaultProfile.xml`
 
-Too broad and fragile for changing one interaction.
+Too broad, fragile across updates, conflicts with other mods and user layouts.
 
 ### Replacement of `Libs/UI/Menu.gfx`
 
@@ -195,15 +252,18 @@ The goal is native-feeling pause, not a subtitle companion application.
 
 ## Safety rules
 
-- Failure of the bridge/hook must preserve vanilla controls.
-- Main-menu controller navigation must not depend on Clean Pause code.
-- Clean Pause must not persist any input configuration.
+- Unsupported profile versions fail closed to vanilla behavior.
+- Failure to verify supplemental filters must not enable the vanilla pause block.
+- Main-menu controller navigation must not depend on Clean Pause.
+- No persistent input configuration may be written.
 - Cleanup must be idempotent.
-- If clean-pause acquisition fails after hiding the vanilla menu, restore the vanilla menu immediately.
-- Never report the implementation as released until retail Xbox Store testing proves subtitle persistence and zero visible menu flash.
+- If native-pause acquisition fails, input isolation must be removed.
+- If vanilla-menu handoff fails, restore Clean Pause atomically.
+- A transition to no-player state must not leave Clean Pause's native pause owned.
+- Never call a prototype released until Xbox Store retail testing proves zero overlay and subtitle persistence.
 
 ## Compatibility target
 
-First-class test target is the Windows PC build distributed through Xbox Store / Xbox app / Game Pass with an Xbox controller.
+First-class target is the Windows PC build distributed through Xbox Store / Xbox app / Game Pass with an Xbox controller.
 
 Do not assume Steam-only launch arguments, ASI loaders, address libraries, or writable game-install paths are available.
