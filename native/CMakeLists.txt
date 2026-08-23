@@ -25,6 +25,7 @@ FetchContent_MakeAvailable(minhook)
 
 add_library(kcd2_clean_pause_native SHARED
   src/version_proxy.cpp
+  src/version.def
   src/clean_pause_native.cpp
   src/clean_pause_native.h
   src/kcd2_abi.h
