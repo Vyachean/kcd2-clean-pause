@@ -1,10 +1,10 @@
 # Research notes
 
-This file records findings that should constrain implementation decisions. It deliberately distinguishes confirmed behaviour from hypotheses.
+This file records findings that constrain implementation decisions. Confirmed behaviour is kept separate from retail hypotheses.
 
-## Confirmed findings
+## Confirmed KCD2 findings
 
-### KCD2 Lua mod bootstrap
+### Lua mod bootstrap
 
 KCD2 supports Lua mod entry points under:
 
@@ -14,108 +14,335 @@ Scripts/Mods/<modid>.lua
 
 inside a mod `.pak`.
 
-### `t_scale` exists and is modifiable
+### Exact player pause/back actions
 
-KCD2 exposes `t_scale`, and existing mods use it to alter game speed, including during cutscenes. This makes `t_scale 0` a strong candidate for a clean freeze because it does not inherently require opening a pause UI.
+Current KCD2 `Scripts/Scripts/Entities/actor/player.lua` contains:
 
-What is **not yet confirmed** is whether every subtitle/UI timer uses the same scaled clock. A retail test must prove that the currently displayed subtitle remains visible at `t_scale 0`.
+```lua
+function Player:OnAction(action, activation, value)
+    -- called by engine when some action happen
+    -- for now got just ui_back, ui_start_pause
+```
+
+Therefore the relevant action names are confirmed:
+
+- `ui_start_pause` — normal Menu / Start pause action;
+- `ui_back` — UI back action.
+
+This makes a runtime wrapper around `Player.OnAction` a useful observation point without inventing a new controller binding.
+
+Source:
+
+- https://github.com/muyuanjin/kcd2-mod-docs/blob/main/Scripts/Scripts/Entities/actor/player.lua
+
+### Native game pause exists
+
+KCD2's Lua API exposes:
+
+```lua
+Game.PauseGame(...)
+```
+
+and KCD2's own `SinglePlayer.lua` calls:
+
+```lua
+Game.PauseGame(true)
+```
+
+This is now the preferred clean-pause primitive to test before `t_scale 0`.
+
+Sources:
+
+- https://github.com/Jefferson25625/kcd2-exports/blob/main/KCD2_LuaAPI_Reference.md
+- https://github.com/muyuanjin/kcd2-mod-docs/blob/main/Scripts/Scripts/GameRules/SinglePlayer.lua
+
+### FlashUI can call UI event systems from Lua
+
+KCD2 exposes `UIAction.CallFunction`. CryEngine's implementation first attempts a UI element and then, if no element matches, looks up a UI-to-system event system by the same name and synchronously sends the requested event.
+
+Conceptually:
+
+```lua
+UIAction.CallFunction(eventSystemName, 0, eventName, ...)
+```
+
+Source API docs:
+
+- https://github.com/muyuanjin/kcd2-mod-docs/blob/main/script_bind_2025_01_14/!!MEMBERTYPE_Methods_CScriptBindUIAction.html
+
+Reference implementation:
+
+- https://github.com/MergHQ/CRYENGINE/blob/release/Code/CryEngine/CryAction/FlashUI/ScriptBind_UIAction.cpp
+
+### `ActionMapManager.EnableActionFilter` is exposed
+
+KCD2 script-bind documentation includes:
+
+```lua
+ActionMapManager.EnableActionFilter(name, enabled)
+```
+
+The prototype uses the already-existing `only_ui` filter rather than modifying any bindings.
+
+Source:
+
+- https://github.com/muyuanjin/kcd2-mod-docs/blob/main/script_bind_2025_01_14/CScriptBind_ActionMapManager__EnableActionFilter@IFunctionHandler_@char_@bool.html
 
 ### `ActionMapManager.InitActionMaps()` is unsafe for this use
 
-CryEngine's `InitActionMaps(path)` clears the manager before loading the provided profile. In practice, an early Clean Pause prototype invoked it with a profile containing only the mod's action map and all Xbox-controller input stopped working, including in the initial game menu.
+CryEngine's `InitActionMaps(path)` clears existing action maps, filters, controller layouts and input-device mappings before loading the supplied file.
 
-This failure is now a permanent design constraint: **Clean Pause must never call `InitActionMaps()` at runtime.**
+A previous Clean Pause prototype invoked it with a profile containing only the mod action map.
 
-### `ActionMapManager.LoadFromXML()` is different
+**Observed result on the target game:** all Xbox-controller input stopped working, including the initial menu.
 
-`LoadFromXML(path)` can add uniquely named action maps without first clearing all existing action maps and device mappings.
+Permanent constraint:
 
-However, adding a second action map on a button already used by KCD2 does not automatically consume or replace the vanilla action. This makes it insufficient by itself for the preferred Menu/Start UX.
+> Clean Pause must never call `ActionMapManager.InitActionMaps()`.
 
-### There is no useful free button on a standard Xbox controller
+Reference implementation:
 
-Prototype bindings demonstrated the underlying problem:
+- https://github.com/MibuWolf/CryGame/blob/master/Code/CryEngine/CryAction/ActionMapManager.cpp
+
+### `LoadFromXML()` does not solve physical-button conflicts by itself
+
+`ActionMapManager.LoadFromXML()` can add uniquely named action maps without the global reset performed by `InitActionMaps()`.
+
+However, adding a second action to a physical button does not remove the existing KCD2 action. Earlier R3/View/RB experiments therefore produced double-action/conflict problems.
+
+### There is no useful free standard Xbox button
+
+Observed/known conflicts include:
 
 - R3: crouch / hard lock;
 - View/Back: Skip Time;
 - Menu/Start: vanilla pause menu;
 - RB: combat unlock;
-- other face, shoulder, trigger and D-pad inputs already have ordinary gameplay functions.
+- remaining normal controls already serve gameplay/UI functions.
 
-Therefore the final design should **intercept the existing pause action** instead of inventing another global controller shortcut.
+The final UX should reuse the game's own pause action rather than invent a global extra shortcut.
 
-### Full pause-menu replacement is the wrong layer
+## Confirmed CryEngine pause-menu architecture relevant to KCD2
 
-KCD2's menu UI can be modified, but replacing `Libs/UI/Menu.gfx` is high-conflict and has known edge cases around input, closing, click-through and pause state. Clean Pause should invoke the vanilla menu when requested, not reimplement it.
+The following is confirmed from CryEngine reference source. KCD2 clearly retains related concepts (`ui_start_pause`, FlashUI, the action-map APIs), but the exact runtime event-system name still requires testing on the retail build.
 
-## Discarded prototypes
+### UI input handles `ui_start_pause`
 
-No prototype ZIP created before this repository should be considered a release.
+CryEngine `CUIInput` registers:
 
-### 0.2 / 0.3
+```cpp
+ADD_HANDLER(ui_start_pause, OnActionStartPause);
+```
 
-Experimented with long-press controller bindings. These did not solve conflicts with the vanilla action on the same physical button.
+and its pause handler opens the ingame menu via:
 
-### 0.4
+```cpp
+pMenuEvents->DisplayIngameMenu(true);
+```
 
-Used `ActionMapManager.InitActionMaps()` to load a custom profile.
+`CUIInput` is registered as an `IBlockingActionListener` / "always" action listener.
 
-**Result:** normal Xbox-controller input was disabled globally, including the initial menu.
+Source:
 
-**Status:** fundamentally invalid approach; never reuse.
+- https://github.com/MergHQ/CRYENGINE/blob/release/Code/GameSDK/GameDll/UI/UIInput.cpp
 
-### 0.5
+### Blocking always listeners run before normal listeners
 
-Moved toward `LoadFromXML()` and RB to avoid the global reset failure.
+`CActionMapManager::HandleAcceptedEvents` processes always listeners first. If one reports the action handled, later normal action listeners are skipped for that delivery path.
 
-This is safer than 0.4 but still treats controller-button selection as the main problem. It does not satisfy the preferred UX and still leaves vanilla-button conflicts in some contexts.
+This means `Player.OnAction` must not be assumed to be a pre-consumption hook simply because KCD2 documents `ui_start_pause` there. Retail ordering must be observed.
 
-**Status:** not a final architecture.
+Source:
 
-## Preferred implementation hypothesis
+- https://github.com/MibuWolf/CryGame/blob/master/Code/CryEngine/CryAction/ActionMapManager.cpp
 
-The cleanest user experience is to preserve the physical meaning of the normal pause button:
+### Vanilla menu pause and menu UI are separable
+
+CryEngine `CUIMenuEvents` exposes a UI-to-system event system named:
+
+```text
+MenuEvents
+```
+
+with:
+
+```text
+DisplayIngameMenu(bool)
+```
+
+Opening the menu:
+
+1. sets the ingame-menu state;
+2. calls native `PauseGame(true, true)`;
+3. enables the existing `only_ui` filter;
+4. emits the UI event that displays the menu.
+
+Closing the menu:
+
+1. calls `PauseGame(false, true)`;
+2. disables `only_ui`;
+3. emits the UI event that hides the menu.
+
+Reference source:
+
+- https://github.com/MergHQ/CRYENGINE/blob/release/Code/GameSDK/GameDll/UI/UIMenuEvents.cpp
+
+This separation is the key to the new prototype: ask the real menu subsystem to close, then immediately acquire native pause without emitting a menu-start event.
+
+## Current implementation hypothesis: same-cycle menu cancellation
+
+The repository prototype now tests this flow:
 
 ```text
 Running
-  Menu/Start
-      ↓
-CleanPaused
-  ├─ resume → Running
-  └─ Menu/Start → Vanilla pause menu
+  |
+  | Menu / Start -> ui_start_pause
+  v
+vanilla pause handling
+  |
+  v
+Player.OnAction observer
+  |
+  +-> UIAction.CallFunction("MenuEvents", 0, "DisplayIngameMenu", false)
+  |
+  +-> Game.PauseGame(true)
+  |
+  +-> enable existing "only_ui" filter
+  v
+CleanPaused, no menu UI
 ```
 
-This requires interception of the vanilla pause action **before** KCD2 opens its menu.
+Resume:
 
-The implementation should find the narrowest hook that can both observe and consume that action.
+```text
+ui_back
+  -> disable only_ui
+  -> Game.PauseGame(false)
+  -> Running
+```
 
-## Research questions
+Vanilla-menu handoff:
 
-Resolve these before calling an implementation production-ready:
+```text
+CleanPaused + ui_start_pause
+  -> UIAction.CallFunction("MenuEvents", 0, "DisplayIngameMenu", true)
+  -> vanilla menu owns pause lifecycle
+```
 
-1. What exact action name(s) are generated by `xi_start` / Menu in current retail KCD2?
-2. Which layer opens the vanilla pause menu: player action handling, game rules, UI action, or another listener?
-3. Can a retail Lua hook consume that action before the vanilla handler executes?
-4. If `Player:OnAction` sees the event, does returning early actually prevent the pause UI, or has UI handling already happened elsewhere?
-5. Is there a dedicated pause/menu API that lets the mod invoke the original vanilla menu after Clean Pause relinquishes its state?
-6. Does `t_scale 0` preserve the current subtitle indefinitely in:
-   - normal dialogue;
-   - in-engine cinematics;
-   - ordinary gameplay HUD messages?
-7. Do prerendered videos ignore `t_scale`?
-8. Does audio pause appropriately, or is a second narrowly scoped audio pause mechanism required?
-9. What happens if the game changes state while Clean Pause is active (loading, death, fast travel, save/load, cutscene transition)?
-10. How should closing the vanilla pause menu behave after entering it from Clean Pause: resume gameplay or return to Clean Pause?
+No controller binding is added or replaced.
 
-## Evidence to gather during development
+## Why this is worth testing before a native hook
 
-For every candidate input hook, record:
+If `Player.OnAction` occurs after the vanilla UI handler but before rendering, the menu can potentially be opened and closed inside a single input/update cycle and never appear on screen.
 
-- exact KCD2 game version/storefront;
-- relevant `kcd.log` lines;
-- action name and activation mode observed;
-- whether vanilla pause UI opened;
-- whether the action was consumed;
-- whether all controller input remained functional after returning to the main menu.
+It also avoids the largest compatibility risks:
 
-Prefer small instrumented probes over speculative implementation.
+- no controller remapping;
+- no full `defaultProfile.xml` patch;
+- no `Menu.gfx` replacement;
+- no ASI loader;
+- no storefront-specific address library.
+
+### Fail-safe behaviour
+
+If `UIAction.CallFunction("MenuEvents", ...)` does not resolve on retail KCD2, the prototype refuses to acquire Clean Pause. The vanilla menu remains authoritative.
+
+If native pause acquisition fails after hiding the menu, the prototype asks the vanilla menu to open again.
+
+Neither failure path changes persistent controller configuration.
+
+## Important unresolved ordering case
+
+A possible failure sequence is:
+
+```text
+Player.OnAction first
+  -> DisplayIngameMenu(false) sees nothing open
+  -> Clean Pause acquires native pause
+  -> later vanilla CUIInput opens the menu
+```
+
+This would leave controls safe but fail the visual requirement.
+
+If retail testing shows this ordering, next pure-Lua experiment:
+
+- use `Script.SetTimer(0, callback, userData, true)` as a pause-aware deferred finalizer;
+- close the vanilla menu after the input pipeline has completed;
+- measure whether it still happens before a rendered frame.
+
+KCD2 script-bind docs explicitly support timers that update during pause.
+
+If even a zero-delay finalizer produces a visible one-frame menu flash, pure Lua is insufficient for the strict goal and the next step is a **narrow native blocking-action hook for `ui_start_pause`**, not controller remapping.
+
+## `SimulateOnAction` cannot drive the vanilla UI path
+
+KCD2 exposes `Actor.SimulateOnAction`, but CryEngine's implementation directly invokes:
+
+```cpp
+pActor->OnAction(action, mode, value);
+```
+
+It bypasses `ActionMapManager` and therefore bypasses the UI blocking listener that handles normal menu input.
+
+So this is **not** a valid way to synthesize `ui_back` into the vanilla menu.
+
+Sources:
+
+- https://github.com/muyuanjin/kcd2-mod-docs/blob/main/script_bind_2025_01_14/C_ScriptBindActor__SimulateOnAction@IFunctionHandler__@char__@int@float.html
+- https://github.com/CryDevPortal/CryGame/blob/master/Game/GameDll/ScriptBind_Actor.cpp
+
+## `t_scale` remains a fallback, not the preferred primitive
+
+KCD2 exposes `t_scale`, and speed-control mods demonstrate that it affects in-engine cutscenes.
+
+It remains useful if native `Game.PauseGame(true)` proves to hide subtitles or fails to pause a target scene type. But native pause should be tested first because it is more likely to stop audio, dialogue and engine subsystems coherently.
+
+## Full pause-menu replacement remains rejected
+
+Replacing `Libs/UI/Menu.gfx` is high-conflict and unnecessary if the existing menu event system can be bridged. Clean Pause should invoke the vanilla menu deliberately, not own a fork of it.
+
+## Discarded prototypes
+
+No prototype ZIP created before this repository is a release.
+
+### 0.2 / 0.3
+
+Long-press bindings; vanilla actions on the same physical buttons still fired.
+
+### 0.4
+
+Called `InitActionMaps()` with a custom profile.
+
+**Result:** controller disabled globally.
+
+**Never reuse this design.**
+
+### 0.5
+
+Used safer `LoadFromXML()` plus RB, but still solved the wrong problem by searching for an alternative physical button.
+
+## Retail questions that remain
+
+1. Does Xbox Store KCD2 expose `MenuEvents.DisplayIngameMenu` under exactly that name?
+2. Does `Player.OnAction` observe `ui_start_pause` in the retail input ordering used by the current build?
+3. Does the first Start result in **zero visible menu flash**?
+4. Does `Game.PauseGame(true)` leave the current rendered frame and subtitle visible?
+5. Does it stop dialogue audio and cutscene progression coherently?
+6. Does `ui_back` reach the Player hook while `only_ui` is enabled so B can resume?
+7. Does second Start cleanly open and hand control to the normal pause menu?
+8. What happens in prerendered videos?
+9. Do loading/death/save transitions require explicit recovery hooks?
+
+## Evidence required from retail testing
+
+Record:
+
+- exact KCD2 version/storefront;
+- `[Clean Pause]` lines from `kcd.log`;
+- whether `ui_start_pause` and `ui_back` were observed;
+- whether any vanilla menu frame became visible;
+- subtitle persistence;
+- audio behaviour;
+- resume behaviour;
+- vanilla-menu handoff;
+- controller behaviour after returning to main menu.
