@@ -74,4 +74,49 @@ The exact resume button is intentionally not fixed yet. It should be chosen only
 
 Previous throwaway prototypes established that changing `t_scale` is a promising way to freeze game simulation while leaving the renderer active, but controller integration must be designed more carefully. In particular, calling `ActionMapManager.InitActionMaps()` from a mod is unsafe because it clears/reinitializes the game's existing action maps and can disable normal controller input.
 
-See [docs/DESIGN.md](docs/DESIGN.md) and [docs/RESEARCH.md](docs/RESEARCH.md) before implementing input handling.
+The repository contains a deliberately safe state-controller skeleton, but **no controller hook is installed yet**. The unresolved task is to consume KCD2's existing vanilla pause action before it opens the pause menu.
+
+See:
+
+- [docs/DESIGN.md](docs/DESIGN.md) — target state model and architectural constraints;
+- [docs/RESEARCH.md](docs/RESEARCH.md) — confirmed findings, discarded prototypes and open questions;
+- [docs/TESTING.md](docs/TESTING.md) — retail acceptance matrix and safety gate.
+
+## Repository layout
+
+```text
+mod/
+  mod.manifest                 Development manifest
+src/
+  Scripts/Mods/clean_pause.lua Safe clean-pause state controller; no input remapping
+tools/
+  build.py                     Reproducible development PAK builder
+docs/
+  DESIGN.md
+  RESEARCH.md
+  TESTING.md
+```
+
+## Development build
+
+Requires Python 3:
+
+```bash
+python tools/build.py
+```
+
+This creates:
+
+```text
+release/clean_pause/
+  mod.manifest
+  Data/clean_pause.pak
+```
+
+Validate an existing generated build with:
+
+```bash
+python tools/build.py --check
+```
+
+Generated releases are intentionally ignored by Git until there is a tested release process.
