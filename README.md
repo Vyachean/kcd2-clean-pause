@@ -1,6 +1,6 @@
 # KCD2 Clean Pause
 
-A small mod for **Kingdom Come: Deliverance II** whose primary goal is to provide a real pause that does **not cover or replace the current game image**.
+A small mod for **Kingdom Come: Deliverance II** whose goal is to provide a real pause that **does not cover or replace the current game image**.
 
 ## Goal
 
@@ -28,7 +28,7 @@ A correct implementation must:
 - keep ordinary Xbox-controller input working in the front-end menu and in game;
 - never globally replace or clear KCD2's existing action maps;
 - never require persistent controller remapping;
-- fail safely back to vanilla behaviour if its hook/bridge is unavailable.
+- fail safely back to vanilla behaviour if its compatibility checks fail.
 
 ## Target platform
 
@@ -68,58 +68,68 @@ No extra controller shortcut is introduced.
 
 ## Current status
 
-**Experimental prototype; no supported release yet.**
+**Experimental action-filter prototype; no supported release yet.**
 
-Research has identified the exact KCD2 player actions:
-
-```text
-ui_start_pause
-ui_back
-```
-
-The current prototype wraps the existing `Player.OnAction` handler and attempts to turn the normal first pause invocation into a clean native pause without changing any controller mapping.
-
-The current approach is:
+Research established that KCD2's vanilla pause action is `ui_start_pause`. CryEngine action filters are evaluated before actions are dispatched, so the current prototype blocks that semantic action while allowing a separate `clean_pause_start` action on the same physical Xbox Menu/Start input.
 
 ```text
-ui_start_pause
-  -> synchronously close the vanilla ingame menu through
-     MenuEvents.DisplayIngameMenu(false)
-  -> Game.PauseGame(true)
-  -> use the game's existing only_ui input filter
-  -> keep the rendered game frame visible
+physical xi_start
+  |
+  +-- ui_start_pause       -> blocked before vanilla UI handler
+  |
+  +-- clean_pause_start    -> Game.PauseGame(true)
 ```
 
 While clean-paused:
 
 ```text
-ui_back        -> resume
-ui_start_pause -> open the real vanilla pause menu
+B            -> Game.PauseGame(false)
+Menu / Start -> real MenuEvents.DisplayIngameMenu(true)
 ```
 
-The prototype intentionally contains **no `ActionMapManager.InitActionMaps()` call, custom controller action map, `defaultProfile.xml` replacement, or `Menu.gfx` replacement.**
+The implementation uses native `Game.PauseGame(true)` rather than `t_scale 0` for the first retail test. This should pause game subsystems more coherently, but subtitle persistence and exact audio/cutscene behavior still require testing in the shipped game.
 
-The remaining decisive questions can only be answered in the retail Xbox Store build:
+### Fail-closed input bootstrap
 
-- does KCD2 expose `MenuEvents.DisplayIngameMenu` under the inherited CryEngine name;
-- is `Player.OnAction` ordered such that the pause menu can be cancelled before a frame is rendered;
-- does `Game.PauseGame(true)` keep the current subtitle visible;
-- does it stop dialogue audio/cutscene progression coherently;
-- does B reliably reach `ui_back` while clean-paused.
+`ActionMapManager.LoadFromXML()` changes the action-map manager's profile version, so the mod does not load a guessed profile version.
 
-If a menu appears for even one rendered frame, this pure-Lua interception point is not sufficient for the final zero-overlay requirement. The next experiment will be a pause-aware zero-delay finalizer; if that still flashes, the correct fallback is a narrow native hook for `ui_start_pause`, not controller remapping.
+At runtime it:
 
-## Safety history
+1. reads the effective `Libs/Config/defaultProfile.xml` through `System.LoadTextFile`;
+2. extracts its version;
+3. loads the packaged `cleanPauseProfile_v22.xml` only if the effective version is exactly `22`;
+4. verifies the custom filters before enabling interception;
+5. otherwise leaves vanilla controls untouched.
+
+The vanilla Start action is also scoped to gameplay. It is not blocked in the front-end/main menu or while KCD2's existing `only_ui` filter owns menu input.
+
+### Forbidden old approach
 
 An old throwaway prototype called `ActionMapManager.InitActionMaps()` and disabled all Xbox-controller input, including the initial menu. That API clears the existing action-map/input configuration and is permanently forbidden in this project.
 
 No prototype ZIP made before this repository is a supported release.
 
+## What still requires a retail test
+
+Static/source verification cannot prove the visual and subsystem behavior of the Xbox Store retail build. The decisive acceptance checks are:
+
+- controller navigation remains normal in the initial/front-end menu;
+- first gameplay Menu/Start reaches Clean Pause with **zero visible pause-menu frame**;
+- current subtitle remains visible indefinitely;
+- native pause stops dialogue/cutscene/audio progression coherently;
+- B resumes while natively paused;
+- second Menu/Start opens the untouched vanilla pause menu;
+- dialogue/cutscene action-filter contexts still allow the custom Start/B actions.
+
+See [docs/TESTING.md](docs/TESTING.md) for the exact matrix.
+
 ## Documentation
 
-- [docs/DESIGN.md](docs/DESIGN.md) — state model and current native-pause/menu-bridge architecture;
-- [docs/RESEARCH.md](docs/RESEARCH.md) — confirmed API findings, source references and discarded approaches;
-- [docs/TESTING.md](docs/TESTING.md) — exact retail test procedure and release gate.
+- [docs/DESIGN.md](docs/DESIGN.md) — state model and architectural constraints;
+- [docs/FILTER_PROTOTYPE.md](docs/FILTER_PROTOTYPE.md) — current deterministic input architecture;
+- [docs/ROOT_VERSION_RESEARCH.md](docs/ROOT_VERSION_RESEARCH.md) — version-safe supplemental-profile loading;
+- [docs/RESEARCH.md](docs/RESEARCH.md) — confirmed API findings and discarded approaches;
+- [docs/TESTING.md](docs/TESTING.md) — retail test procedure and release gate.
 
 ## Repository layout
 
@@ -127,11 +137,15 @@ No prototype ZIP made before this repository is a supported release.
 mod/
   mod.manifest
 src/
-  Scripts/Mods/clean_pause.lua  Experimental pure-Lua implementation
+  Libs/Config/cleanPauseProfile_v22.xml
+  Scripts/Mods/clean_pause.lua
 tools/
-  build.py                      Reproducible development PAK builder
+  build.py
+  probe_profile_version.py
 docs/
   DESIGN.md
+  FILTER_PROTOTYPE.md
+  ROOT_VERSION_RESEARCH.md
   RESEARCH.md
   TESTING.md
 ```
@@ -158,4 +172,4 @@ Validate a generated build with:
 python tools/build.py --check
 ```
 
-Generated builds are intentionally ignored by Git until the retail behaviour above is proven.
+GitHub Actions also checks Lua 5.1 syntax, input-safety invariants, the XML action/filter contract, and generated PAK structure. Development artifacts are not treated as releases until retail acceptance passes.
