@@ -1,0 +1,165 @@
+name: Publish retail candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Prerelease tag, e.g. xbox-1.5.6-test1"
+        required: true
+        default: "xbox-1.5.6-test1"
+      title:
+        description: "Release title"
+        required: true
+        default: "KCD2 Clean Pause — Xbox 1.5.6 test1"
+      prerelease:
+        description: "Publish as prerelease"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_PROFILE_SHA256: "69ad9fd618cd31961fef8eb061f3f2723997df5e0fb257ec74d0d5f555592565"
+      PROFILE_GZIP_B64: ${{ secrets.KCD2_XBOX_156_DEFAULT_PROFILE_GZIP_B64 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Lua 5.1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1
+
+      - name: Validate source before packaging
+        run: |
+          luac5.1 -p src/Scripts/Mods/clean_pause.lua
+          python -m unittest discover -s tests -v
+
+      - name: Materialize exact retail profile from Actions secret
+        shell: python
+        run: |
+          import base64
+          import gzip
+          import hashlib
+          import os
+          from pathlib import Path
+
+          encoded = os.environ.get("PROFILE_GZIP_B64", "").strip()
+          if not encoded:
+              raise SystemExit(
+                  "Missing Actions secret KCD2_XBOX_156_DEFAULT_PROFILE_GZIP_B64; "
+                  "see docs/RELEASE.md"
+              )
+
+          try:
+              compressed = base64.b64decode(encoded, validate=True)
+              profile = gzip.decompress(compressed)
+          except Exception as exc:
+              raise SystemExit(f"Retail profile secret is not valid gzip+base64: {exc}") from exc
+
+          digest = hashlib.sha256(profile).hexdigest()
+          expected = os.environ["EXPECTED_PROFILE_SHA256"]
+          if digest != expected:
+              raise SystemExit(
+                  f"Retail profile SHA-256 mismatch: expected {expected}, got {digest}"
+              )
+
+          output = Path(".release-input/defaultProfile.xml")
+          output.parent.mkdir(parents=True, exist_ok=True)
+          output.write_bytes(profile)
+          print(f"Verified retail profile SHA-256: {digest}")
+
+      - name: Build installable mod through repository builder
+        run: python tools/build_from_profile.py .release-input/defaultProfile.xml
+
+      - name: Validate and name release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='${{ inputs.tag }}'
+          if [[ ! "$tag" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "Unsafe release tag: $tag" >&2
+            exit 1
+          fi
+          asset="kcd2-clean-pause-${tag}.zip"
+          mv release/kcd2-clean-pause-xbox-1.5.6-test.zip "release/$asset"
+          unzip -t "release/$asset"
+          (cd release && sha256sum "$asset" > SHA256SUMS.txt)
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
+
+      - name: Validate installable package contents
+        shell: python
+        run: |
+          from io import BytesIO
+          import os
+          from pathlib import Path
+          import zipfile
+
+          asset = Path("release") / os.environ["ASSET"]
+          with zipfile.ZipFile(asset) as outer:
+              expected_outer = {
+                  "clean_pause/mod.manifest",
+                  "clean_pause/Data/clean_pause.pak",
+              }
+              names = set(outer.namelist())
+              if names != expected_outer:
+                  raise SystemExit(f"Unexpected release members: {sorted(names)}")
+              pak_bytes = outer.read("clean_pause/Data/clean_pause.pak")
+
+          with zipfile.ZipFile(BytesIO(pak_bytes)) as pak:
+              expected_pak = {
+                  "Libs/Config/defaultProfile.xml",
+                  "Scripts/Mods/clean_pause.lua",
+              }
+              names = set(pak.namelist())
+              if names != expected_pak:
+                  raise SystemExit(f"Unexpected PAK members: {sorted(names)}")
+              if any(pak.getinfo(name).compress_type != zipfile.ZIP_STORED for name in names):
+                  raise SystemExit("Game PAK entries must use ZIP_STORED")
+
+          print("Installable release package validated")
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.tag }}
+          path: |
+            release/${{ env.ASSET }}
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            "${{ inputs.tag }}"
+            "release/$ASSET"
+            "release/SHA256SUMS.txt"
+            --target "${{ github.sha }}"
+            --title "${{ inputs.title }}"
+            --notes "Generated by GitHub Actions from the exact verified Xbox Store 1.5.6 retail profile. Runtime acceptance is still required; see docs/TESTING.md."
+          )
+          if [[ '${{ inputs.prerelease }}' == 'true' ]]; then
+            args+=(--prerelease)
+          fi
+
+          if gh release view "${{ inputs.tag }}" >/dev/null 2>&1; then
+            gh release upload "${{ inputs.tag }}" "release/$ASSET" release/SHA256SUMS.txt --clobber
+          else
+            gh release create "${args[@]}"
+          fi
