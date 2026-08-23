@@ -1,161 +1,148 @@
 # KCD2 Clean Pause
 
-A small mod for **Kingdom Come: Deliverance II** whose primary goal is to provide a real pause that does **not cover or replace the current game image**.
+Clean Pause is a small **Kingdom Come: Deliverance II** mod whose goal is to pause the game without covering the current rendered frame.
 
-## Goal
-
-When the player pauses, the game should stop while the current rendered frame remains visible exactly as it was — especially the current subtitle line.
-
-Target experience:
-
-1. Press the normal **Menu / Start** button.
-2. Gameplay, dialogue, or an in-engine cutscene freezes.
-3. **No pause-menu overlay, darkening layer, replacement screen, OCR overlay, or external application appears.**
-4. The current frame, HUD and subtitle remain visible for as long as needed.
-5. Press **B** to resume, or press **Menu / Start** again to deliberately open KCD2's normal pause menu.
-
-The normal pause menu is a **secondary action**, not the first screen shown when pausing.
-
-## Core invariants
-
-A correct implementation must:
-
-- preserve the visible frame while paused;
-- preserve the current subtitle whenever the game itself permits it;
-- work in normal gameplay, dialogue and in-engine cutscenes;
-- show no custom UI merely to implement pause;
-- keep the untouched vanilla KCD2 pause menu available;
-- keep ordinary Xbox-controller input working in the front-end menu and in game;
-- never globally replace or clear KCD2's existing action maps;
-- never require persistent controller remapping;
-- fail safely back to vanilla behaviour if its hook/bridge is unavailable.
-
-## Target platform
-
-Primary target:
-
-- PC version distributed through **Xbox Store / Xbox app / Game Pass**;
-- Xbox controller.
-
-Other PC storefronts can be supported later if the implementation is portable.
-
-## Non-goals
-
-This project is not intended to become:
-
-- a subtitle OCR/translation application;
-- an external overlay;
-- a dialogue-history tool;
-- a replacement pause-menu UI;
-- a general keybinding framework;
-- a gameplay speed-control mod.
-
-The feature should remain small and native-feeling.
-
-## Desired controller UX
+Target UX with an Xbox controller:
 
 ```text
-Running game
-    |
-    +-- Menu / Start --> Clean Pause
-                         |
-                         +-- B -----------> Running game
-                         |
-                         +-- Menu / Start -> Vanilla KCD2 pause menu
+Running
+  Menu / Start -> Clean Pause
+
+Clean Pause
+  B            -> Resume
+  Menu / Start -> vanilla KCD2 pause menu
 ```
 
-No extra controller shortcut is introduced.
+The first Start press must not show the vanilla pause overlay, even for one frame. The main product use case is being able to leave the current subtitle visible for as long as needed.
+
+## Target
+
+Primary acceptance target:
+
+- KCD2 **1.5.6**;
+- PC Xbox Store / Xbox app / Game Pass;
+- Xbox controller.
 
 ## Current status
 
-**Experimental prototype; no supported release yet.**
+**Retail test candidate; not a released mod yet.**
 
-Research has identified the exact KCD2 player actions:
+The current implementation uses only KCD2's normal `.pak`/Lua mod path. It does **not** require `version.dll`, ASI, KCSE, an external process, or an overlay.
+
+The test build is generated from the target installation's own `Data/IPL_GameData.pak`. This is deliberate: `Libs/Config/defaultProfile.xml` is a whole-file override, so shipping a copied profile from another game build would be unsafe.
+
+## Architecture
+
+KCD2 1.5.6 uses two different semantic Start actions:
 
 ```text
-ui_start_pause
-ui_back
+ordinary gameplay        open_menu/open_menu
+
+dialogue/cutscene/etc.   open_pause_menu/open_pause_menu
 ```
 
-The current prototype wraps the existing `Player.OnAction` handler and attempts to turn the normal first pause invocation into a clean native pause without changing any controller mapping.
+Both are already bound to `xi_start` in the retail profile. The builder keeps their action IDs and physical bindings intact, but turns each action into a single-fire `consoleCmd` routed to Clean Pause.
 
-The current approach is:
+First Start:
 
 ```text
-ui_start_pause
-  -> synchronously close the vanilla ingame menu through
-     MenuEvents.DisplayIngameMenu(false)
+retail open_menu/open_pause_menu
+  -> CleanPause.Enter()
+  -> enable clean_pause_controls
   -> Game.PauseGame(true)
-  -> use the game's existing only_ui input filter
-  -> keep the rendered game frame visible
+  -> CleanPaused
 ```
 
-While clean-paused:
+`clean_pause_controls` is defined in the patched retail profile as:
 
 ```text
-ui_back        -> resume
-ui_start_pause -> open the real vanilla pause menu
+priority="overlays"
+exclusivity="1"
 ```
 
-The prototype intentionally contains **no `ActionMapManager.InitActionMaps()` call, custom controller action map, `defaultProfile.xml` replacement, or `Menu.gfx` replacement.**
+It is disabled outside Clean Pause. While active it owns:
 
-The remaining decisive questions can only be answered in the retail Xbox Store build:
+- Start press -> `clean_pause_open_menu`;
+- B press -> sink action so a dialogue/cutscene press cannot escape;
+- B release -> `clean_pause_resume`.
 
-- does KCD2 expose `MenuEvents.DisplayIngameMenu` under the inherited CryEngine name;
-- is `Player.OnAction` ordered such that the pause menu can be cancelled before a frame is rendered;
-- does `Game.PauseGame(true)` keep the current subtitle visible;
-- does it stop dialogue audio/cutscene progression coherently;
-- does B reliably reach `ui_back` while clean-paused.
+B resumes with `Game.PauseGame(false)`. Second Start does **not** unpause first; it disables the temporary controls map and calls the real KCD2/CryEngine UI event bridge:
 
-If a menu appears for even one rendered frame, this pure-Lua interception point is not sufficient for the final zero-overlay requirement. The next experiment will be a pause-aware zero-delay finalizer; if that still flashes, the correct fallback is a narrow native hook for `ui_start_pause`, not controller remapping.
+```lua
+UIAction.CallFunction("MenuEvents", -1, "DisplayIngameMenu", true)
+```
 
-## Safety history
+The vanilla menu then owns its normal pause/input lifecycle.
 
-An old throwaway prototype called `ActionMapManager.InitActionMaps()` and disabled all Xbox-controller input, including the initial menu. That API clears the existing action-map/input configuration and is permanently forbidden in this project.
+Relevant retail `actionPass` filters that already allow a vanilla pause action are extended with the three temporary Clean Pause actions. Existing `actionFail` restrictions are left untouched.
 
-No prototype ZIP made before this repository is a supported release.
+## Safety constraints
+
+The implementation intentionally does **not**:
+
+- call `ActionMapManager.InitActionMaps()`;
+- call runtime `ActionMapManager.LoadFromXML()`;
+- call the retail-unavailable `ActionMapManager.EnableActionFilter()`;
+- replace `Player.OnAction`;
+- remap the controller persistently;
+- replace `Menu.gfx`;
+- install native DLL/ASI code.
+
+A previous experiment using `InitActionMaps()` disabled controller input globally. That API is permanently forbidden here.
+
+## Build a retail test ZIP
+
+Requires Python 3.
+
+Run against the KCD2 installation directory that contains `Data/IPL_GameData.pak`, for example:
+
+```powershell
+python tools/build_from_game.py "C:\XboxGames\Kingdom Come- Deliverance II\Content"
+```
+
+The builder fails closed unless the installed profile has the expected 1.5.6 structure and both Start routes are bound to `xi_start`.
+
+Output:
+
+```text
+release/kcd2-clean-pause-xbox-1.5.6-test.zip
+```
+
+For Xbox Store / Game Pass, extract `clean_pause` into:
+
+```text
+%USERPROFILE%\Documents\kingdomcome_mods\
+```
+
+so the final path is:
+
+```text
+%USERPROFILE%\Documents\kingdomcome_mods\clean_pause\mod.manifest
+```
+
+Do not install this `.pak` beside `KingdomCome.exe`.
+
+## Compatibility
+
+Because the official mod path requires overriding the complete `defaultProfile.xml`, this test build conflicts with another mod that also supplies that file. Do not test Clean Pause together with another keybind/profile mod until their changes are merged intentionally.
+
+The builder minimizes version risk by copying and patching the exact profile from the installed game rather than bundling one in the repository.
+
+## What retail testing still has to prove
+
+Static validation cannot prove these engine behaviours:
+
+1. `Game.PauseGame(true)` keeps the current subtitle/frame visible;
+2. the overlay-priority exclusive controls map suppresses lower gameplay/dialogue/cutscene input exactly as expected on retail 1.5.6;
+3. `MenuEvents.DisplayIngameMenu(true)` is exposed under the inherited CryEngine event-system name;
+4. dialogue/cutscene audio and progression resume coherently.
+
+See [docs/TESTING.md](docs/TESTING.md) for the exact test sequence.
 
 ## Documentation
 
-- [docs/DESIGN.md](docs/DESIGN.md) — state model and current native-pause/menu-bridge architecture;
-- [docs/RESEARCH.md](docs/RESEARCH.md) — confirmed API findings, source references and discarded approaches;
-- [docs/TESTING.md](docs/TESTING.md) — exact retail test procedure and release gate.
-
-## Repository layout
-
-```text
-mod/
-  mod.manifest
-src/
-  Scripts/Mods/clean_pause.lua  Experimental pure-Lua implementation
-tools/
-  build.py                      Reproducible development PAK builder
-docs/
-  DESIGN.md
-  RESEARCH.md
-  TESTING.md
-```
-
-## Development build
-
-Requires Python 3:
-
-```bash
-python tools/build.py
-```
-
-Creates:
-
-```text
-release/clean_pause/
-  mod.manifest
-  Data/clean_pause.pak
-```
-
-Validate a generated build with:
-
-```bash
-python tools/build.py --check
-```
-
-Generated builds are intentionally ignored by Git until the retail behaviour above is proven.
+- [docs/DESIGN.md](docs/DESIGN.md) — current state machine and official-only architecture;
+- [docs/RESEARCH.md](docs/RESEARCH.md) — confirmed retail/API findings and remaining hypotheses;
+- [docs/TESTING.md](docs/TESTING.md) — Xbox Store 1.5.6 acceptance procedure;
+- [docs/PURE_PROFILE_PLAN.md](docs/PURE_PROFILE_PLAN.md) — implementation-stage status;
+- [docs/PURE_MOD_REFERENCES.md](docs/PURE_MOD_REFERENCES.md) — source/reference evidence.

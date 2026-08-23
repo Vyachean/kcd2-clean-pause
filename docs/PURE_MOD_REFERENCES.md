@@ -1,115 +1,93 @@
-# Pure-mod reference evidence
+# Official-mod reference evidence
 
-This note records concrete documentation and working-mod evidence relevant to implementing Clean Pause as a normal KCD2 `.pak` mod on PC Xbox Store / Xbox app / Game Pass.
+This note records the evidence behind the current `.pak`/Lua implementation.
 
-## 1. Packaged keybinds are a normal KCD2 modding mechanism
+## Warhorse mod structure
 
-`kcd2-mod-docs` explicitly lists hotkeys via `Libs/Config/defaultProfile.xml` using console-command actions as a stable Lua-layer pattern.
+Warhorse's KCD2 Modding Wiki documents `mod.manifest`, `Data/*.pak` mirroring base-game paths, `Scripts/Mods/<modid>.lua` as a mod bootstrap, and whole-file override behaviour when multiple mods provide the same data path.
 
-Independent KCD2 modding notes likewise identify `defaultProfile.xml` and `keybindSuperactions.xml` as the standard keybinding data files.
+Mirror:
 
-Implication: the core Clean Pause input path does not need a native DLL merely to receive a controller button. The earlier PR #2 failure was specific to runtime supplemental action-map loading, not to packaged keybinds in general.
+- https://github.com/muyuanjin/kcd2-mod-docs/tree/main/official-wiki
 
-## 2. Quicksave proves `xi_start` works in a normal packaged profile
+## Xbox/Game Pass normal-mod location
 
-Magus' Quicksave mod documents this working Xbox/PlayStation controller action:
+Current KCD2 Vortex support and Xbox-specific Nexus instructions place normal mods in `%USERPROFILE%\Documents\kingdomcome_mods`, not beside `KingdomCome.exe`.
+
+## Retail profile evidence
+
+KCD2 1.5.6's effective profile has two separate Start routes:
 
 ```xml
-<action name="MagusQuickSaveController"
-        onHold="1"
-        holdTriggerDelay="0.3"
-        holdRepeatDelay="-1"
-        xboxpad="xi_start"
-        pspad="pad_start"
-        consoleCmd="1" />
+<actionmap name="open_menu" ...>
+  <action name="open_menu" ... xboxpad="xi_start" ... />
+</actionmap>
+
+<actionmap name="open_pause_menu" ...>
+  <action name="open_pause_menu" ... xboxpad="xi_start" ... />
+</actionmap>
 ```
 
-Recent user reports on the mod page confirm it works on KCD2 1.5 / 1.5.3. The author also confirms that conflicting key-changing mods must merge the relevant files.
+Dialogue and cutscene maps include `open_pause_menu`; ordinary gameplay includes `open_menu`.
 
-Implication: Start/Menu can be routed to a Clean Pause console command through a normal `defaultProfile.xml` override. This is substantially stronger evidence than the failed `ActionMapManager.LoadFromXML()` prototype.
+## Packaged `consoleCmd` actions
 
-## 3. Retail Player.lua confirms the relevant semantic actions
+KCD2 action profiles support `consoleCmd="1"`. Existing controller quicksave/keybind mods use the same profile mechanism, including `xi_start`.
 
-The extracted KCD2 Player script contains:
+Implication: receiving Start does not itself require native code. PR #2 only disproved a **runtime supplemental** Start map on the tested Xbox build.
+
+## Retail pause API
+
+Warhorse ScriptBind docs expose `Game.PauseGame(bool)` and retail KCD2 scripts call `Game.PauseGame(true)`.
+
+## Retail ActionMapManager API
+
+Warhorse's retail method list includes `EnableActionMap` and `IsFilterEnabled`, but not `EnableActionFilter`.
+
+Reference:
+
+- https://github.com/muyuanjin/kcd2-mod-docs/blob/main/script_bind_2025_01_14/!!MEMBERTYPE_Methods_CScriptBind_ActionMapManager.html
+
+## KCD2 1.5.6 priority/exclusivity evidence
+
+`libKCD2` reverse engineering identifies `m_priority`, `m_exclusivity`, `Enable`, `GetPriority` and `GetExclusivity` on the retail 1.5.6 `IActionMap` object.
+
+Reference:
+
+- https://github.com/JerryYOJ/libKCD2/blob/master/include/Offsets/vtables/IActionMap.h
+
+The game's own profile uses this model for mutually exclusive gameplay, dialogue, cutscene, menu and overlay contexts. Clean Pause therefore uses an overlay-priority exclusive temporary map.
+
+## `UIAction.CallFunction`
+
+Warhorse documents `UIAction.CallFunction(elementName, instanceID, functionName, ...)` and explicitly permits `elementName` to identify a C++ UIEventSystem.
+
+Reference:
+
+- https://github.com/muyuanjin/kcd2-mod-docs/blob/main/script_bind_2025_01_14/CScriptBind_UIAction__CallFunction@IFunctionHandler_@char_@int@char_.html
+
+## `MenuEvents.DisplayIngameMenu(bool)` reference
+
+CryEngine GameSDK registers a UI-to-system event system `MenuEvents` with `DisplayIngameMenu(bool)`. Its normal open path pauses the game, enables `only_ui`, and emits the real ingame-menu UI event.
+
+Reference:
+
+- https://github.com/MergHQ/CRYENGINE/blob/release/Code/GameSDK/GameDll/UI/UIMenuEvents.cpp
+
+The current implementation calls:
 
 ```lua
-function Player:OnAction(action, activation, value)
-    -- ... for now got just ui_back, ui_start_pause
-```
-
-This independently confirms the semantic names `ui_back` and `ui_start_pause` in retail KCD2.
-
-Do not infer from this alone that overriding `Player:OnAction` can suppress the vanilla pause menu; dispatch ordering remains a separate concern. The preferred pure-mod design avoids that problem by changing the packaged binding so the original pause action is not generated for the first Start press.
-
-## 4. Existing pure-Lua menu mods handle Escape/B and menu state
-
-KCD2 Native Menus Framework uses the Player Event Dispatcher helper so a custom Lua-driven menu can close via Escape / Xbox B. Its changelog also documents fixes around restoring normal character/map/inventory keybind behavior after a custom menu closes and preventing its menu from opening while other game menus are active.
-
-Implication: B/Escape handling and menu-state lifecycle are established pure-mod patterns in KCD2. We should reuse the same conceptual lifecycle rather than inventing a controller remap.
-
-## 5. `UIAction.CallFunction` can invoke a UIEventSystem
-
-Warhorse's ScriptBind documentation defines:
-
-```lua
-UIAction.CallFunction(elementName, instanceID, functionName, [arg1], ...)
-```
-
-and explicitly states that `elementName` can be a UI element name **or a UIEventSystem name defined in C++**.
-
-This is the preferred mechanism to investigate for the second Start transition from Clean Pause to the untouched vanilla pause menu.
-
-## 6. CryEngine reference implementation exposes `MenuEvents.DisplayIngameMenu(bool)`
-
-The matching CryEngine GameSDK implementation registers a UI event system named `MenuEvents` with a UI-to-system event:
-
-```text
-DisplayIngameMenu(bool Display)
-```
-
-Its reference behavior is:
-
-- `true` -> pause the game, enable `only_ui`, emit `OnStartIngameMenu`;
-- `false` -> unpause, disable `only_ui`, emit `OnStopIngameMenu`.
-
-Therefore the most promising pure-Lua handoff candidate is:
-
-```lua
-Game.PauseGame(false)
 UIAction.CallFunction("MenuEvents", -1, "DisplayIngameMenu", true)
 ```
 
-This is **not yet proven in KCD2 retail** because the exact `MenuEvents` event-system name has not yet been observed directly in KCD2 1.5.6. It should be tested as a narrow runtime probe rather than assumed.
+**without first unpausing**. The exact event-system name still requires direct retail KCD2 1.5.6 confirmation.
 
-## 7. Retail pause primitive is documented
+## Whole-file compatibility cost
 
-Warhorse exposes:
+Warhorse recommends granular patch formats where they exist, but no official granular patch format is documented for `defaultProfile.xml`.
 
-```lua
-Game.PauseGame(true)
-Game.PauseGame(false)
-```
-
-and retail scripts use `Game.PauseGame(true)` themselves.
-
-This remains the preferred Clean Pause primitive. `t_scale` is fallback-only if retail testing shows that the native pause removes subtitles or otherwise violates the product requirement.
-
-## 8. Compatibility cost of `defaultProfile.xml`
-
-`defaultProfile.xml` and `keybindSuperactions.xml` are whole-file conflict points under normal KCD2 mod loading. Existing mods and community documentation explicitly require manual merge/load-order handling when multiple keybind mods replace the same files.
-
-For the first Clean Pause release this is acceptable if:
-
-- the patch against the vanilla 1.5.6 profile is minimal and documented;
-- a manual merge snippet is provided;
-- no unrelated bindings are changed.
+Consequently the builder reads the exact installed profile and patches it locally instead of shipping a copied profile. This avoids a stale-profile mismatch but not conflicts with another mod replacing the same file.
 
 ## Current conclusion
 
-The evidence supports continuing the pure `.pak` implementation. The remaining unknowns are narrow:
-
-1. obtain or reproduce the exact effective 1.5.6 pause entries in `defaultProfile.xml`;
-2. verify `UIAction.CallFunction("MenuEvents", -1, "DisplayIngameMenu", true)` on KCD2 1.5.6;
-3. verify `Game.PauseGame(true)` leaves the current subtitle/frame visible.
-
-A native DLL is not justified unless one of these pure-mod capabilities is disproven in retail testing.
+The official path has enough documented/observed capability to deserve a complete retail test before native code is considered necessary. Remaining unknowns are subtitle retention, input isolation semantics, retail `MenuEvents` availability, and coherent audio/cutscene pause/resume.
