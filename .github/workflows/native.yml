@@ -1,0 +1,73 @@
+name: Native prototype
+
+on:
+  push:
+    branches:
+      - prototype/native-input
+    paths:
+      - "native/**"
+      - ".github/workflows/native.yml"
+  pull_request:
+    paths:
+      - "native/**"
+      - ".github/workflows/native.yml"
+
+jobs:
+  build-native:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure x64 Release
+        run: cmake -S native -B build/native -A x64
+
+      - name: Build x64 Release
+        run: cmake --build build/native --config Release --parallel
+
+      - name: Verify proxy DLL
+        shell: pwsh
+        run: |
+          $dll = "build/native/Release/version.dll"
+          if (-not (Test-Path $dll)) { throw "Missing $dll" }
+          $exports = & dumpbin /nologo /exports $dll | Out-String
+          @(
+            "GetFileVersionInfoA",
+            "GetFileVersionInfoW",
+            "GetFileVersionInfoSizeA",
+            "GetFileVersionInfoSizeW",
+            "VerQueryValueA",
+            "VerQueryValueW"
+          ) | ForEach-Object {
+            if ($exports -notmatch [regex]::Escape($_)) {
+              throw "Missing required version.dll export: $_"
+            }
+          }
+          Get-FileHash $dll -Algorithm SHA256
+
+      - name: Package Game Pass development build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          Copy-Item build/native/Release/version.dll artifact/version.dll
+          @"
+          KCD2 Clean Pause - native development prototype
+
+          TARGET: KCD2 1.5.6, Windows Xbox Store / Xbox app / Game Pass.
+
+          Install version.dll next to KingdomCome.exe and WHGame.dll.
+          Typical Game Pass path:
+            C:\XboxGames\Kingdom Come- Deliverance II\Content\
+
+          IMPORTANT:
+          - Back up/remove any other version.dll from that directory first.
+          - This is not a release build.
+          - The DLL writes kcd2_clean_pause_native.log beside itself.
+          - Remove version.dll to uninstall.
+          "@ | Set-Content -Encoding UTF8 artifact/README.txt
+          Compress-Archive -Path artifact/* -DestinationPath kcd2-clean-pause-native-dev.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kcd2-clean-pause-native-dev
+          path: kcd2-clean-pause-native-dev.zip
+          if-no-files-found: error
