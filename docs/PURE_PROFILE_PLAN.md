@@ -4,34 +4,70 @@ Primary target: KCD2 1.5.6, PC Xbox Store / Xbox app / Game Pass.
 
 ## Decision
 
-Use the official KCD2 `.pak`/Lua path first. Native DLL/ASI code remains fallback-only and is not part of the current test candidate.
+Use the official KCD2 `.pak`/Lua path first. Native DLL/ASI remains fallback-only.
 
 ## Stage status
 
-### 1. Establish exact retail Start routes — complete
+### 1. Establish exact retail pause routes — complete
 
-Confirmed effective profile routes:
+Confirmed in the extracted Xbox Store 1.5.6 profile:
 
 ```text
-open_menu/open_menu             -> xi_start
-open_pause_menu/open_pause_menu -> xi_start
+open_menu/open_menu             -> keyboard=_keybinds_ref_, xboxpad=xi_start
+open_pause_menu/open_pause_menu -> keyboard=_keybinds_ref_, xboxpad=xi_start
+overlays priority               -> 12
 ```
-
-The same routes and `overlays` priority 12 were confirmed in the actual extracted Xbox Store 1.5.6 profile selected for retail testing. See `docs/RETAIL_TEST1.md`.
 
 ### 2. Exact-profile development builders — complete
 
-Two maintainer/development source paths are supported:
+- `tools/build_from_game.py` reads `Data/IPL_GameData.pak`;
+- `tools/build_from_profile.py` accepts an extracted `defaultProfile.xml`.
 
-- `tools/build_from_game.py` reads the target installation's `Data/IPL_GameData.pak`;
-- `tools/build_from_profile.py` accepts an already extracted exact `defaultProfile.xml`.
+Both fail closed when the expected target structure is absent.
 
-Both fail closed unless the expected 1.5.6 structure exists and patch both retail Start actions while preserving action IDs and physical bindings.
+### 3. rc1 retail test — failed, root cause confirmed
 
-### 3. Clean Pause state machine — complete for retail testing
+`v0.1.0-rc.1` produced no pause from either Escape or Xbox Start.
+
+Root cause:
+
+- rc1 emitted `consoleCmd="1"`;
+- KCD2 keybind actions use exact `consoleCMD="1"`;
+- rc1 had replaced the original pause route completely, so command failure also removed vanilla pause.
+
+rc1 is not a valid acceptance candidate.
+
+### 4. Fail-safe pause entry — implemented for rc2
+
+Each retail pause route is split into custom press + original release fallback:
 
 ```text
-Running + routed Start
+press
+  -> clean_pause_enter_gameplay / clean_pause_enter_pause_context
+  -> consoleCMD="1"
+  -> CleanPause.Enter()
+
+release
+  -> original open_menu / open_pause_menu
+  -> vanilla fallback
+```
+
+If Clean Pause succeeds, it enables `clean_pause_controls` before release and the explicit `clean_pause_block_start_release` sink consumes that release.
+
+If the custom command/bootstrap fails, the controls map never activates and the original release opens normal vanilla pause.
+
+### 5. Context/filter preservation — implemented
+
+The custom entry action is mirrored anywhere an existing pause action appears in an `actionFail` filter. This includes the exact retail `no_menu` filter.
+
+Relevant `actionPass` filters receive the custom entry plus all temporary Clean Pause controls.
+
+The exact target profile contains no `actionPass` filters.
+
+### 6. Clean Pause state machine — implemented for retail testing
+
+```text
+Running + custom press
   -> enable clean_pause_controls
   -> Game.PauseGame(true)
   -> CleanPaused
@@ -41,84 +77,79 @@ CleanPaused + B release
   -> Game.PauseGame(false)
   -> Running
 
-CleanPaused + Start
+CleanPaused + Escape/Start press
   -> disable clean_pause_controls
   -> MenuEvents.DisplayIngameMenu(true)
   -> vanilla menu owns pause lifecycle
 ```
 
-### 4. Input isolation without retail `EnableActionFilter` — complete for retail testing
+The `MenuEvents` handoff remains a runtime gate.
 
-The old design incorrectly depended on `ActionMapManager.EnableActionFilter`, which is not in the target retail Lua method list.
+### 7. Self-contained release source — complete
 
-Replacement:
-
-```xml
-<actionmap name="clean_pause_controls"
-           priority="overlays"
-           exclusivity="1">
-```
-
-The map has a Start handoff action, a B-press sink and a B-release resume action. Relevant existing `actionPass` filters are extended; existing `actionFail` restrictions are preserved. The exact retail profile selected for the first candidate contains no `actionPass` filters.
-
-### 5. Self-contained release source — complete
-
-KCD2 uses last-mod-wins for `defaultProfile.xml`, so the fixed 1.5.6 release needs the complete patched profile.
-
-The patched target profile is versioned as deterministic gzip+base64 text at:
+Versioned target source:
 
 ```text
 vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz.b64
 ```
 
-`tools/build_release.py` decodes it, verifies the decompressed SHA-256 and packages that source together with the repository Lua/runtime and manifest.
-
-This removes the previous GitHub Actions Secret/manual retail-file dependency. A release is reproducible from its Git tag alone.
-
-### 6. Static validation — complete
-
-CI covers Lua syntax, exact-profile patch unit tests, both routed Start actions, overlay-priority/exclusive controls, B press/release contract, actionPass extension, forbidden runtime mutation checks, synthetic exact-profile generation, and the real self-contained release build.
-
-PR validation never publishes its generated package.
-
-### 7. Tag-based GitHub Releases — implemented
-
-`.github/workflows/release.yml` follows the normal release flow:
+Current patched-profile SHA-256:
 
 ```text
-version tag (v*)
-  -> checkout tag
-  -> validate
-  -> tools/build_release.py
-  -> ZIP + SHA256SUMS.txt
-  -> GitHub Release assets
+9838db3747f7f36e0c9c281b8770bc7300998515407515b65493b8e9a9bcd14e
 ```
 
-A tag with a suffix such as `v0.1.0-rc.1` is published as a prerelease. A stable tag such as `v0.1.0` is a normal release.
+`tools/build_release.py` verifies the hash and the full fail-safe XML contract before packaging.
 
-See `docs/RELEASE.md`.
+### 8. Static validation — implemented
 
-### 8. Xbox Store 1.5.6 retail acceptance — next
+CI proves:
 
-Must prove:
+- Lua 5.1 syntax;
+- exact `consoleCMD` spelling and absence of wrong-case `consoleCmd`;
+- original pause actions remain release-only, non-console fallbacks;
+- custom entries are press-only Escape/Start console commands;
+- exclusive controls map contains Start/Escape release and B press sinks;
+- actionFail/actionPass mirroring;
+- forbidden runtime input mutation remains absent;
+- synthetic development build succeeds;
+- self-contained retail release build contains the same contract.
 
-1. title/front-end controller remains normal;
-2. first Start enters Clean Pause with zero menu frame;
-3. current subtitle remains visible;
-4. overlay-priority exclusivity isolates unrelated input;
-5. B resumes without dialogue/cutscene skip;
-6. second Start opens the real vanilla pause menu through `MenuEvents`;
-7. closing that menu returns to ordinary gameplay;
-8. dialogue/cutscene/audio progression pauses and resumes coherently.
+### 9. GitHub release flow — implemented
+
+Normal flow:
+
+```text
+implementation PR -> merge
+release PR changes VERSION -> CI -> merge
+main Release workflow -> tag v<VERSION> -> ZIP + SHA256SUMS -> GitHub Release
+```
+
+No generated ZIP/PAK is committed. No Actions Secret or user game file is required at publication time.
+
+### 10. Xbox Store 1.5.6 rc2 retail acceptance — next
+
+Must prove in order:
+
+1. Escape and Xbox Start are never dead controls;
+2. corrected custom press route enters Clean Pause;
+3. successful entry consumes the corresponding release;
+4. if custom entry cannot execute, vanilla release fallback still opens pause;
+5. first Clean Pause has zero vanilla-menu frame;
+6. subtitle/frame remain visible;
+7. unrelated input is isolated;
+8. B resumes without dialogue/cutscene skip;
+9. second Escape/Start opens the real vanilla menu;
+10. dialogue/cutscene/audio progression resumes coherently.
 
 See `docs/TESTING.md`.
 
 ## Compatibility policy
 
-`defaultProfile.xml` is a whole-file conflict point. The 1.5.6 release source is deliberately pinned to that game version. Test without another mod replacing `defaultProfile.xml`; supporting another KCD2 version requires regenerating/reviewing the versioned target profile and publishing a new tagged release.
+`defaultProfile.xml` is a whole-file conflict point. The release source is pinned to KCD2 1.5.6 and conflicts with another mod that replaces that file unless intentionally merged.
 
-Generated `.pak` and install `.zip` files are never tracked in Git.
+A new KCD2 version requires regeneration/review of the target profile and a new release.
 
 ## Native fallback criteria
 
-Revisit native code only if retail testing proves that a required behaviour cannot be achieved through this official path, especially input isolation, menu handoff, zero-overlay entry, or subtitle/frame retention.
+Return to native input interception only if retail testing proves an essential behavior cannot be delivered safely through the official profile/Lua path. A failure of one uncertain API is not enough by itself; the official route must first exhaust safe fallbacks.
