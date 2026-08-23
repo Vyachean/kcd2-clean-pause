@@ -1,12 +1,10 @@
 # Deterministic action-filter prototype
 
-This document describes the preferred next prototype. It supersedes the timing-dependent `Player.OnAction` cancellation experiment if retail loading succeeds.
+This branch implements the preferred controller architecture. It replaces the earlier timing-dependent `Player.OnAction`/menu-cancellation experiment.
 
 ## Why this approach
 
-CryEngine evaluates action filters before an action is added to the event priority list. Therefore an `actionFail` filter containing only `ui_start_pause` prevents KCD2's vanilla pause action from ever reaching its UI blocking listener, while a separate custom action bound to the same physical Xbox Menu/Start input can still run because it has a different action ID.
-
-Conceptually:
+CryEngine evaluates action filters before an action is added to the dispatch priority list. An `actionFail` filter containing only `ui_start_pause` can therefore suppress KCD2's vanilla pause action before the UI listener sees it, while a custom action on the same physical Xbox Menu/Start button still runs because it has a different action ID.
 
 ```text
 physical xi_start
@@ -16,127 +14,148 @@ physical xi_start
   +-- clean_pause_start    -- allowed -> CleanPause.StartPressed()
 ```
 
-This removes the ordering/race problem of trying to close the vanilla pause menu after it starts.
+There is no menu-open/menu-close race and no need for a spare controller button.
 
-## Required XML pieces
+## Packaged profile
 
-The runtime-loaded XML should define:
+`src/Libs/Config/cleanPauseProfile_v22.xml` defines:
 
-1. a uniquely named action map with:
-   - `clean_pause_start` on `xi_start`;
-   - `clean_pause_resume` on `xi_b`;
-2. an `actionFail` filter containing only `ui_start_pause`;
-3. an `actionPass` filter containing only the two Clean Pause actions for clean-paused input isolation.
+- `clean_pause_controls`
+  - `clean_pause_start` -> `xi_start`
+  - `clean_pause_resume` -> `xi_b`
+- `clean_pause_block_vanilla_pause` (`actionFail`)
+  - blocks only `ui_start_pause`
+- `clean_pause_only` (`actionPass`)
+  - permits only the two Clean Pause actions while clean-paused
 
-Illustrative structure:
+The build validator checks this contract structurally rather than treating the XML as opaque data.
 
-```xml
-<profile version="22">
-  <actionmap name="clean_pause_controls" version="22">
-    <action
-      name="clean_pause_start"
-      consoleCmd="1"
-      onPress="1"
-      xboxpad="xi_start" />
-    <action
-      name="clean_pause_resume"
-      consoleCmd="1"
-      onPress="1"
-      xboxpad="xi_b" />
-  </actionmap>
+## Version-safe loading
 
-  <actionfilter name="clean_pause_block_vanilla_pause" type="actionFail">
-    <filter name="ui_start_pause" />
-  </actionfilter>
+`ActionMapManager.LoadFromXML()` changes the action-map manager's in-memory version to the supplemental XML root version. Loading a guessed version is therefore unsafe.
 
-  <actionfilter name="clean_pause_only" type="actionPass">
-    <filter name="clean_pause_start" />
-    <filter name="clean_pause_resume" />
-  </actionfilter>
-</profile>
+The prototype does not ask the user to supply this value. At runtime it:
+
+1. reads the effective `Libs/Config/defaultProfile.xml` through `System.LoadTextFile`;
+2. extracts its root profile version;
+3. loads `cleanPauseProfile_v22.xml` only when the detected version is exactly `22`;
+4. otherwise leaves vanilla controls untouched and logs the reason.
+
+The supported-version check happens **before** `LoadFromXML()`.
+
+## Partial-load safety
+
+The Lua binding for `LoadFromXML()` does not return the underlying C++ success value. The bootstrap therefore performs additional checks:
+
+- confirms the packaged profile is readable before loading it;
+- statically validates the action-map/action schema at build time;
+- loads the profile;
+- proves both custom filters exist by enabling them and querying `IsFilterEnabled()`;
+- leaves both filters disabled until initialization is complete.
+
+No code path calls `InitActionMaps()`.
+
+## Lifecycle-scoped interception
+
+The vanilla Start action is **not blocked globally**.
+
+A pause-aware `Script.SetTimer` monitor keeps the interception state synchronized with game context:
+
+```text
+no gameplay player        -> vanilla ui_start_pause allowed
+only_ui enabled           -> vanilla ui_start_pause allowed
+active gameplay           -> vanilla ui_start_pause blocked
+Clean Pause               -> vanilla ui_start_pause blocked
 ```
 
-The root/action-map version must be verified against current KCD2 before this is treated as production configuration. Existing KCD/CryEngine profiles and working KCD2 custom action examples use action-map version `22`, but the retail KCD2 root profile has not yet been directly extracted into this repository.
+This matters for the front-end/main menu and for KCD2's own UI. Loading the mod must not make Menu/Start unusable outside gameplay.
+
+If the player disappears while Clean Pause owns native pause, the monitor performs recovery: removes clean-pause input isolation, resumes native pause, and drops interception.
 
 ## Runtime states
 
-### Installation/bootstrap
+### Running gameplay
 
-Before mutating action-map state:
+- custom controller map enabled;
+- `clean_pause_block_vanilla_pause` enabled;
+- `clean_pause_only` disabled.
 
-1. prove `ActionMapManager.LoadFromXML` exists;
-2. prove the vanilla menu bridge is available;
-3. load the uniquely named map/filters with `LoadFromXML`;
-4. enable only the custom map and `clean_pause_block_vanilla_pause` filter.
+Start therefore invokes `clean_pause_start` without the vanilla pause menu receiving `ui_start_pause`.
 
-If any prerequisite fails, do not enable the filter. Vanilla pause must remain usable.
-
-### Running
-
-Enabled:
-
-- `clean_pause_controls` action map;
-- `clean_pause_block_vanilla_pause` actionFail filter.
-
-Disabled:
-
-- `clean_pause_only` actionPass filter.
-
-Result:
-
-- all ordinary KCD2 actions work except `ui_start_pause`;
-- physical Menu/Start invokes `clean_pause_start` instead;
-- custom B action may also dispatch but is a no-op while running.
+The custom B action is harmless while running because `CleanPause.Resume()` is a no-op unless Clean Pause owns the pause state.
 
 ### Enter Clean Pause
 
 `clean_pause_start`:
 
-1. call `Game.PauseGame(true)`;
-2. enable `clean_pause_only`.
+1. verifies gameplay interception is active;
+2. enables `clean_pause_only`;
+3. verifies the pass filter is enabled;
+4. calls `Game.PauseGame(true)`;
+5. records `clean_paused` state.
 
-Because `clean_pause_only` is an `actionPass`, only `clean_pause_start` and `clean_pause_resume` continue through the action manager. Ordinary gameplay/UI actions are isolated without changing bindings.
+No menu UI is opened.
 
 ### Resume
 
 `clean_pause_resume`:
 
-1. disable `clean_pause_only`;
-2. call `Game.PauseGame(false)`;
-3. return to Running.
+1. disables `clean_pause_only`;
+2. calls `Game.PauseGame(false)`;
+3. returns to `running`;
+4. refreshes gameplay interception.
 
 ### Open vanilla pause menu
 
-`clean_pause_start` while clean-paused:
+Start while clean-paused:
 
-1. disable `clean_pause_only`;
-2. temporarily disable `clean_pause_block_vanilla_pause` if full vanilla Start semantics are required inside the menu;
-3. invoke `MenuEvents.DisplayIngameMenu(true)`;
-4. let the vanilla menu own pause/input lifecycle.
+1. disables `clean_pause_only`;
+2. disables `clean_pause_block_vanilla_pause` immediately;
+3. releases Clean Pause's `Game.PauseGame(true)` ownership;
+4. calls the real `MenuEvents.DisplayIngameMenu(true)` through `UIAction.CallFunction`;
+5. lets KCD2's vanilla menu install/use its own `only_ui` lifecycle.
 
-The preferred production version should listen to `MenuEvents.OnStopIngameMenu` and restore `clean_pause_block_vanilla_pause` when the vanilla menu closes. If this event listener is unavailable on retail KCD2, the simpler fallback is to keep the pause-block filter enabled while the vanilla menu is open; B will still close the menu, but Start-to-close may be unavailable.
+No UI event callback is required. While the vanilla menu is open, `only_ui` keeps our gameplay interception disabled. After the menu closes, the monitor sees `only_ui == false` and restores Clean Pause interception automatically.
 
-## Safety advantage
+If the menu bridge call fails, the transition rolls back to Clean Pause: native pause and both clean-pause filters are restored.
 
-Unlike the discarded prototypes, this design does not:
+## Explicit emergency recovery
+
+Development builds expose:
+
+```text
+clean_pause_disable
+```
+
+It releases a Clean Pause if owned, disables both custom filters, disables the custom action map, and restores vanilla pause behavior for the remainder of the session.
+
+## Safety advantages
+
+This design does not:
 
 - call `InitActionMaps`;
-- replace existing action maps;
-- edit persistent controller configuration;
-- rely on a free controller button;
-- rely on `Player.OnAction` ordering;
-- allow the vanilla pause action and Clean Pause action to execute simultaneously.
+- replace `defaultProfile.xml`;
+- replace controller layouts;
+- persist user keybind changes;
+- replace `Menu.gfx`;
+- depend on a free Xbox button;
+- depend on `Player.OnAction` listener ordering;
+- intentionally change main-menu input.
 
-`LoadFromXML` still needs retail validation because it changes the in-memory action manager. The load must happen only after all prerequisites are known and must use unique map/filter names.
+## Retail acceptance still required
 
-## Evidence still required
+Static/source research cannot prove presentation behavior in the shipped Xbox Store build. Before merge/release, test:
 
-Before merging this design as the default implementation:
+1. controller navigation is normal in the initial menu;
+2. detected profile version is accepted and initialization succeeds;
+3. first gameplay Start enters Clean Pause with **zero pause-menu frame/flash**;
+4. the current frame remains visible;
+5. the current subtitle remains visible indefinitely;
+6. dialogue/cutscene progression and audio actually stop under `Game.PauseGame(true)`;
+7. B resumes reliably while natively paused;
+8. second Start opens the untouched vanilla pause menu;
+9. B/Start/navigation inside the vanilla menu remain normal;
+10. after closing the menu, Start again enters Clean Pause;
+11. dialogue and in-engine cutscene action filters still allow the custom Start/B actions.
 
-- verify the XML root/action-map version on current retail KCD2;
-- verify `LoadFromXML` accepts the custom map plus filters without disturbing existing maps;
-- verify `xi_start` and `xi_b` custom actions dispatch on Xbox Store PC;
-- verify `ui_start_pause` is actually suppressed when the filter is enabled;
-- verify `clean_pause_only` still permits the custom actions while native game pause is active;
-- verify `MenuEvents.OnStopIngameMenu` can be observed if used for filter restoration;
-- verify current subtitle visibility under `Game.PauseGame(true)`.
+The last item is the remaining controller-context risk: other KCD2 `actionPass` filters can intersect with our custom action IDs. Existing cutscene-capable controller mods are strong precedent, but the retail test is authoritative.
