@@ -48,7 +48,11 @@ T Missing(T value)
 
 } // namespace
 
-extern "C" __declspec(dllexport) BOOL WINAPI GetFileVersionInfoA(
+// These functions intentionally use Proxy_* C names. version.def exports them
+// under the real Windows version.dll API names, avoiding collisions with the
+// dllimport declarations from winver.h.
+
+extern "C" BOOL WINAPI Proxy_GetFileVersionInfoA(
     LPCSTR filename, DWORD handle, DWORD length, LPVOID data)
 {
     using Fn = BOOL(WINAPI*)(LPCSTR, DWORD, DWORD, LPVOID);
@@ -56,7 +60,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI GetFileVersionInfoA(
     return fn ? fn(filename, handle, length, data) : Missing(FALSE);
 }
 
-extern "C" __declspec(dllexport) BOOL WINAPI GetFileVersionInfoW(
+extern "C" BOOL WINAPI Proxy_GetFileVersionInfoW(
     LPCWSTR filename, DWORD handle, DWORD length, LPVOID data)
 {
     using Fn = BOOL(WINAPI*)(LPCWSTR, DWORD, DWORD, LPVOID);
@@ -64,7 +68,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI GetFileVersionInfoW(
     return fn ? fn(filename, handle, length, data) : Missing(FALSE);
 }
 
-extern "C" __declspec(dllexport) BOOL WINAPI GetFileVersionInfoExA(
+extern "C" BOOL WINAPI Proxy_GetFileVersionInfoExA(
     DWORD flags, LPCSTR filename, DWORD handle, DWORD length, LPVOID data)
 {
     using Fn = BOOL(WINAPI*)(DWORD, LPCSTR, DWORD, DWORD, LPVOID);
@@ -72,7 +76,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI GetFileVersionInfoExA(
     return fn ? fn(flags, filename, handle, length, data) : Missing(FALSE);
 }
 
-extern "C" __declspec(dllexport) BOOL WINAPI GetFileVersionInfoExW(
+extern "C" BOOL WINAPI Proxy_GetFileVersionInfoExW(
     DWORD flags, LPCWSTR filename, DWORD handle, DWORD length, LPVOID data)
 {
     using Fn = BOOL(WINAPI*)(DWORD, LPCWSTR, DWORD, DWORD, LPVOID);
@@ -80,23 +84,21 @@ extern "C" __declspec(dllexport) BOOL WINAPI GetFileVersionInfoExW(
     return fn ? fn(flags, filename, handle, length, data) : Missing(FALSE);
 }
 
-extern "C" __declspec(dllexport) DWORD WINAPI GetFileVersionInfoSizeA(
-    LPCSTR filename, LPDWORD handle)
+extern "C" DWORD WINAPI Proxy_GetFileVersionInfoSizeA(LPCSTR filename, LPDWORD handle)
 {
     using Fn = DWORD(WINAPI*)(LPCSTR, LPDWORD);
     const auto fn = Resolve<Fn>("GetFileVersionInfoSizeA");
     return fn ? fn(filename, handle) : Missing<DWORD>(0);
 }
 
-extern "C" __declspec(dllexport) DWORD WINAPI GetFileVersionInfoSizeW(
-    LPCWSTR filename, LPDWORD handle)
+extern "C" DWORD WINAPI Proxy_GetFileVersionInfoSizeW(LPCWSTR filename, LPDWORD handle)
 {
     using Fn = DWORD(WINAPI*)(LPCWSTR, LPDWORD);
     const auto fn = Resolve<Fn>("GetFileVersionInfoSizeW");
     return fn ? fn(filename, handle) : Missing<DWORD>(0);
 }
 
-extern "C" __declspec(dllexport) DWORD WINAPI GetFileVersionInfoSizeExA(
+extern "C" DWORD WINAPI Proxy_GetFileVersionInfoSizeExA(
     DWORD flags, LPCSTR filename, LPDWORD handle)
 {
     using Fn = DWORD(WINAPI*)(DWORD, LPCSTR, LPDWORD);
@@ -104,7 +106,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI GetFileVersionInfoSizeExA(
     return fn ? fn(flags, filename, handle) : Missing<DWORD>(0);
 }
 
-extern "C" __declspec(dllexport) DWORD WINAPI GetFileVersionInfoSizeExW(
+extern "C" DWORD WINAPI Proxy_GetFileVersionInfoSizeExW(
     DWORD flags, LPCWSTR filename, LPDWORD handle)
 {
     using Fn = DWORD(WINAPI*)(DWORD, LPCWSTR, LPDWORD);
@@ -112,7 +114,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI GetFileVersionInfoSizeExW(
     return fn ? fn(flags, filename, handle) : Missing<DWORD>(0);
 }
 
-extern "C" __declspec(dllexport) DWORD WINAPI VerFindFileA(
+extern "C" DWORD WINAPI Proxy_VerFindFileA(
     DWORD flags,
     LPCSTR filename,
     LPCSTR winDir,
@@ -128,7 +130,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI VerFindFileA(
               : Missing<DWORD>(0);
 }
 
-extern "C" __declspec(dllexport) DWORD WINAPI VerFindFileW(
+extern "C" DWORD WINAPI Proxy_VerFindFileW(
     DWORD flags,
     LPCWSTR filename,
     LPCWSTR winDir,
@@ -144,7 +146,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI VerFindFileW(
               : Missing<DWORD>(0);
 }
 
-extern "C" __declspec(dllexport) DWORD WINAPI VerInstallFileA(
+extern "C" DWORD WINAPI Proxy_VerInstallFileA(
     DWORD flags,
     LPCSTR srcFilename,
     LPCSTR destFilename,
@@ -160,7 +162,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI VerInstallFileA(
               : Missing<DWORD>(0);
 }
 
-extern "C" __declspec(dllexport) DWORD WINAPI VerInstallFileW(
+extern "C" DWORD WINAPI Proxy_VerInstallFileW(
     DWORD flags,
     LPCWSTR srcFilename,
     LPCWSTR destFilename,
@@ -176,23 +178,21 @@ extern "C" __declspec(dllexport) DWORD WINAPI VerInstallFileW(
               : Missing<DWORD>(0);
 }
 
-extern "C" __declspec(dllexport) DWORD WINAPI VerLanguageNameA(
-    DWORD language, LPSTR buffer, DWORD bufferLength)
+extern "C" DWORD WINAPI Proxy_VerLanguageNameA(DWORD language, LPSTR buffer, DWORD bufferLength)
 {
     using Fn = DWORD(WINAPI*)(DWORD, LPSTR, DWORD);
     const auto fn = Resolve<Fn>("VerLanguageNameA");
     return fn ? fn(language, buffer, bufferLength) : Missing<DWORD>(0);
 }
 
-extern "C" __declspec(dllexport) DWORD WINAPI VerLanguageNameW(
-    DWORD language, LPWSTR buffer, DWORD bufferLength)
+extern "C" DWORD WINAPI Proxy_VerLanguageNameW(DWORD language, LPWSTR buffer, DWORD bufferLength)
 {
     using Fn = DWORD(WINAPI*)(DWORD, LPWSTR, DWORD);
     const auto fn = Resolve<Fn>("VerLanguageNameW");
     return fn ? fn(language, buffer, bufferLength) : Missing<DWORD>(0);
 }
 
-extern "C" __declspec(dllexport) BOOL WINAPI VerQueryValueA(
+extern "C" BOOL WINAPI Proxy_VerQueryValueA(
     LPCVOID block, LPCSTR subBlock, LPVOID* buffer, PUINT length)
 {
     using Fn = BOOL(WINAPI*)(LPCVOID, LPCSTR, LPVOID*, PUINT);
@@ -200,7 +200,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI VerQueryValueA(
     return fn ? fn(block, subBlock, buffer, length) : Missing(FALSE);
 }
 
-extern "C" __declspec(dllexport) BOOL WINAPI VerQueryValueW(
+extern "C" BOOL WINAPI Proxy_VerQueryValueW(
     LPCVOID block, LPCWSTR subBlock, LPVOID* buffer, PUINT length)
 {
     using Fn = BOOL(WINAPI*)(LPCVOID, LPCWSTR, LPVOID*, PUINT);
