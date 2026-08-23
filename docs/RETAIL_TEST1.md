@@ -25,13 +25,13 @@ The profile contains no `actionPass` filters, so this exact target does not need
 
 ## Repository release source
 
-For releases, `tools/profile_patch.py` was applied to that verified retail profile and the resulting **patched** target profile is versioned with the mod source at:
+For releases, `tools/profile_patch.py` was applied to that verified retail profile and the resulting **patched** target profile is versioned with the mod source as deterministic gzip+base64 text at:
 
 ```text
-vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz
+vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz.b64
 ```
 
-Decompressed patched-profile SHA-256:
+Decoded/decompressed patched-profile SHA-256:
 
 ```text
 28e210454d749869b1fa26d4414ba3c055157e731856f9610d6ffce5ddfbc373
@@ -39,7 +39,7 @@ Decompressed patched-profile SHA-256:
 
 This makes a release self-contained and reproducible from its Git tag. GitHub Actions does not need a user's game installation or a repository secret.
 
-The compressed profile is release source, not a generated install package. Generated `.pak` and install `.zip` files remain excluded from Git.
+The encoded profile is target release source, not a generated install package. Generated `.pak` and install `.zip` files remain excluded from Git.
 
 ## Build paths
 
@@ -50,7 +50,7 @@ Development helpers:
 
 Canonical release builder:
 
-- `tools/build_release.py` — verifies and packages the vendored patched Xbox 1.5.6 source.
+- `tools/build_release.py` — decodes, verifies and packages the versioned patched Xbox 1.5.6 source.
 
 `.github/workflows/validate.yml` exercises the release builder on PRs. `.github/workflows/release.yml` runs from version tags and attaches the resulting package to GitHub Releases.
 
