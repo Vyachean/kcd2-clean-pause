@@ -17,6 +17,11 @@ PAK_PATH = RELEASE_DIR / "Data" / "clean_pause.pak"
 LUA_ENTRY = "Scripts/Mods/clean_pause.lua"
 PROFILE_ENTRY = "Libs/Config/cleanPauseProfile_v22.xml"
 PROFILE_VERSION = "22"
+FORBIDDEN_PAK_ENTRIES = {
+    "libs/config/defaultprofile.xml",
+    "libs/config/keybindsuperactions.xml",
+    "libs/ui/menu.gfx",
+}
 
 
 def build() -> Path:
@@ -98,6 +103,12 @@ def validate() -> None:
 
         if any(name.lower().startswith("data/") for name in names):
             raise SystemExit("PAK paths must be relative to Data, not contain Data/")
+
+        forbidden = sorted(
+            name for name in names if name.lower() in FORBIDDEN_PAK_ENTRIES
+        )
+        if forbidden:
+            raise SystemExit(f"Forbidden broad game-file replacement(s): {forbidden}")
 
         unsupported = [
             name
