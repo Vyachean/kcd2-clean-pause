@@ -1,28 +1,29 @@
 # Release pipeline
 
-Clean Pause uses a conventional GitHub release flow:
+Clean Pause uses a conventional GitHub release flow with a source-controlled version:
 
 ```text
-source commit / PR
+release PR changes VERSION
   -> CI validation
-  -> version tag
-  -> GitHub Actions build
+  -> merge to main
+  -> GitHub Actions builds the merged commit
+  -> creates v<VERSION> tag
   -> GitHub Release + downloadable ZIP
 ```
 
-Generated `.pak` and install ZIP files are never committed to Git.
+A pre-existing matching `v*` tag is also supported. Generated `.pak` and install ZIP files are never committed to Git.
 
 ## Self-contained release source
 
-A release tag must be reproducible from that tag alone. Release builds therefore do not depend on GitHub Secrets, a developer workstation, or files copied from a user's game installation at release time.
+A release must be reproducible from its source commit. Release builds therefore do not depend on GitHub Secrets, a developer workstation, or files copied from a user's game installation at release time.
 
-For the fixed Xbox Store / Xbox app / Game Pass **KCD2 1.5.6** target, the repository versions the already patched target profile as deterministic gzip+base64 text at:
+For the fixed Xbox Store / Xbox app / Game Pass **KCD2 1.5.6** target, the repository versions the patched target profile at:
 
 ```text
 vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz.b64
 ```
 
-This is target-specific source input, not a generated release artifact. `tools/build_release.py` base64-decodes and decompresses it to the patched `Libs/Config/defaultProfile.xml` required by the official KCD2 mod package.
+This is deterministic gzip+base64 target source, not a generated installable artifact. `tools/build_release.py` decodes it, verifies the patched-profile SHA-256 and packages it into the KCD2 mod.
 
 Verified original retail profile SHA-256:
 
@@ -30,42 +31,41 @@ Verified original retail profile SHA-256:
 69ad9fd618cd31961fef8eb061f3f2723997df5e0fb257ec74d0d5f555592565
 ```
 
-Decoded patched profile SHA-256:
+Decoded/decompressed patched profile SHA-256:
 
 ```text
 28e210454d749869b1fa26d4414ba3c055157e731856f9610d6ffce5ddfbc373
 ```
 
-`tools/build_release.py` verifies that digest before packaging.
+## Normal development and release flow
 
-## Normal development flow
-
-1. Make implementation changes in a branch.
-2. Open/update a PR.
-3. `.github/workflows/validate.yml` runs Lua syntax checks, unit tests, the synthetic exact-profile proof, and the real self-contained release build.
-4. Merge the approved release candidate.
-5. Create a semantic version tag, for example:
+1. Make implementation changes in a branch and pass PR CI.
+2. When a candidate is ready, open a release PR that changes `VERSION` to the intended semantic version, for example:
 
 ```text
-v0.1.0-rc.1
+0.1.0-rc.1
 ```
 
-6. Push the tag.
-7. `.github/workflows/release.yml` builds exactly that tagged commit and publishes the assets on GitHub Releases.
+3. CI validates that exact release source, including a real self-contained package build.
+4. Merge the release PR to `main`.
+5. `.github/workflows/release.yml` observes the `VERSION` change, resolves tag `v0.1.0-rc.1`, rebuilds and validates the merged commit, then creates the tag and GitHub Release in one publication step.
 
-Tags containing a prerelease suffix such as `-rc.1` are published as GitHub prereleases. A tag such as `v0.1.0` becomes a normal release.
+A version containing `-` is published as a prerelease. A version such as `0.1.0` is published as a normal release.
+
+Directly pushing an existing matching tag such as `v0.1.0` is also supported; the workflow refuses a tag that does not match the checked-out `VERSION`.
 
 ## Release workflow
 
-The tag-triggered workflow:
+The workflow:
 
-1. checks out the tag;
+1. resolves `VERSION` and the corresponding `v<VERSION>` tag;
 2. checks Lua syntax and runs unit tests;
 3. calls `python tools/build_release.py`;
 4. validates the generated install ZIP;
 5. creates `SHA256SUMS.txt`;
 6. uploads the same files as a GitHub Actions artifact;
-7. creates a GitHub Release with generated release notes and attaches the ZIP/checksum files.
+7. refuses to overwrite an existing GitHub Release;
+8. creates the tag at the validated merge commit when needed and publishes the GitHub Release with the ZIP/checksum assets.
 
 No release-specific secret or manually supplied retail file is involved.
 
@@ -105,6 +105,6 @@ For a new target version:
 3. version the new patched target profile under a game-version-specific directory;
 4. update the expected hash/target metadata;
 5. pass PR CI;
-6. tag a new release.
+6. bump `VERSION` in the release PR and merge it.
 
-This keeps every published release reproducible from its Git tag and makes game-version changes reviewable in normal Git history.
+This keeps every published release reproducible from its source commit and makes game-version changes reviewable in normal Git history.

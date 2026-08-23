@@ -2,19 +2,63 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - VERSION
     tags:
       - "v*"
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout tag
+      - name: Checkout release source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid VERSION: $version" >&2
+            exit 1
+          fi
+
+          expected_tag="v${version}"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            if [[ "$GITHUB_REF_NAME" != "$expected_tag" ]]; then
+              echo "Tag $GITHUB_REF_NAME does not match VERSION $version" >&2
+              exit 1
+            fi
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="$expected_tag"
+          fi
+
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          else
+            prerelease=false
+          fi
+
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "PRERELEASE=$prerelease" >> "$GITHUB_ENV"
+          echo "Release version: $version"
+          echo "Release tag: $tag"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,8 +82,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          asset="kcd2-clean-pause-${tag}.zip"
+          asset="kcd2-clean-pause-${TAG}.zip"
           mv release/kcd2-clean-pause-xbox-1.5.6-test.zip "release/$asset"
           unzip -t "release/$asset"
           (cd release && sha256sum "$asset" > SHA256SUMS.txt)
@@ -48,7 +91,7 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.ref_name }}
+          name: ${{ env.TAG }}
           path: |
             release/${{ env.ASSET }}
             release/SHA256SUMS.txt
@@ -61,16 +104,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to overwrite it" >&2
+            exit 1
+          fi
+
+          remote_tag_sha="$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')"
           args=(
-            "${GITHUB_REF_NAME}"
+            "$TAG"
             "release/$ASSET"
             "release/SHA256SUMS.txt"
-            --verify-tag
             --generate-notes
-            --title "KCD2 Clean Pause ${GITHUB_REF_NAME}"
+            --title "KCD2 Clean Pause $TAG"
           )
 
-          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+          if [[ -n "$remote_tag_sha" ]]; then
+            if [[ "$remote_tag_sha" != "$GITHUB_SHA" ]]; then
+              echo "Existing tag $TAG points to $remote_tag_sha, expected $GITHUB_SHA" >&2
+              exit 1
+            fi
+            args+=(--verify-tag)
+          else
+            args+=(--target "$GITHUB_SHA")
+          fi
+
+          if [[ "$PRERELEASE" == "true" ]]; then
             args+=(--prerelease)
           fi
 
