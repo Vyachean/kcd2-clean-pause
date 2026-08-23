@@ -15,6 +15,7 @@ GAMEPLAY_MAP = "open_menu"
 GAMEPLAY_ACTION = "open_menu"
 PAUSE_MAP = "open_pause_menu"
 PAUSE_ACTION = "open_pause_menu"
+CONSOLE_COMMAND_ATTR = "consoleCMD"
 
 
 class ProfilePatchError(RuntimeError):
@@ -175,7 +176,10 @@ def _patch_existing_action(text: str, routed: RoutedAction) -> str:
     ):
         new_tag = _remove_attr(new_tag, attr)
     new_tag = _set_attr(new_tag, "onPress", "1")
-    new_tag = _set_attr(new_tag, "consoleCmd", "1")
+    # KCD2 retail keybind/superaction data uses this exact attribute spelling.
+    # XML attribute names are case-sensitive; consoleCmd silently leaves the
+    # action as a normal gameplay action and consumes the original pause route.
+    new_tag = _set_attr(new_tag, CONSOLE_COMMAND_ATTR, "1")
 
     for attr in ("name", "xboxpad", "pspad", "keyboard", "noModifiers"):
         before = _attr_pattern(attr).search(old_tag)
@@ -253,13 +257,13 @@ def patch_profile(xml_text: str) -> tuple[str, PatchInfo]:
         + f'<actionmap name="{CONTROLS_MAP}" priority="{CONTROLS_PRIORITY}" exclusivity="1">'
         + newline
         + inner
-        + f'<action name="{MENU_ACTION}" onPress="1" xboxpad="xi_start" pspad="pad_start" noModifiers="1" consoleCmd="1" />'
+        + f'<action name="{MENU_ACTION}" onPress="1" xboxpad="xi_start" pspad="pad_start" noModifiers="1" {CONSOLE_COMMAND_ATTR}="1" />'
         + newline
         + inner
         + f'<action name="{B_PRESS_ACTION}" onPress="1" xboxpad="xi_b" pspad="pad_circle" />'
         + newline
         + inner
-        + f'<action name="{RESUME_ACTION}" onRelease="1" xboxpad="xi_b" pspad="pad_circle" consoleCmd="1" />'
+        + f'<action name="{RESUME_ACTION}" onRelease="1" xboxpad="xi_b" pspad="pad_circle" {CONSOLE_COMMAND_ATTR}="1" />'
         + newline
         + indent
         + "</actionmap>"
@@ -288,9 +292,13 @@ def _validate_routed_action(root: ET.Element, routed: RoutedAction) -> None:
             f"patched profile has unexpected {routed.map_name}/{routed.action_name} count"
         )
     action = actions[0]
-    if action.get("consoleCmd") != "1" or action.get("onPress") != "1":
+    if action.get(CONSOLE_COMMAND_ATTR) != "1" or action.get("onPress") != "1":
         raise ProfilePatchError(
-            f"{routed.map_name}/{routed.action_name} is not a single-fire console command"
+            f"{routed.map_name}/{routed.action_name} is not a single-fire KCD2 console command"
+        )
+    if action.get("consoleCmd") is not None:
+        raise ProfilePatchError(
+            f"{routed.map_name}/{routed.action_name} uses wrong-case consoleCmd attribute"
         )
     if any(action.get(name) is not None for name in ("onRelease", "onHold", "always")):
         raise ProfilePatchError(
@@ -326,16 +334,20 @@ def _validate_patch(patched: str, info: PatchInfo) -> None:
         return found[0]
 
     menu = action(MENU_ACTION)
-    if menu.get("onPress") != "1" or menu.get("xboxpad") != "xi_start" or menu.get("consoleCmd") != "1":
+    if menu.get("onPress") != "1" or menu.get("xboxpad") != "xi_start" or menu.get(CONSOLE_COMMAND_ATTR) != "1":
         raise ProfilePatchError("Clean Pause menu-handoff action contract is invalid")
+    if menu.get("consoleCmd") is not None:
+        raise ProfilePatchError("Clean Pause menu-handoff uses wrong-case consoleCmd attribute")
 
     b_press = action(B_PRESS_ACTION)
-    if b_press.get("onPress") != "1" or b_press.get("xboxpad") != "xi_b" or b_press.get("consoleCmd") is not None:
+    if b_press.get("onPress") != "1" or b_press.get("xboxpad") != "xi_b" or b_press.get(CONSOLE_COMMAND_ATTR) is not None:
         raise ProfilePatchError("Clean Pause B press sink contract is invalid")
 
     resume = action(RESUME_ACTION)
-    if resume.get("onRelease") != "1" or resume.get("onPress") is not None or resume.get("xboxpad") != "xi_b" or resume.get("consoleCmd") != "1":
+    if resume.get("onRelease") != "1" or resume.get("onPress") is not None or resume.get("xboxpad") != "xi_b" or resume.get(CONSOLE_COMMAND_ATTR) != "1":
         raise ProfilePatchError("Clean Pause resume action contract is invalid")
+    if resume.get("consoleCmd") is not None:
+        raise ProfilePatchError("Clean Pause resume uses wrong-case consoleCmd attribute")
 
     routed = {info.gameplay.action_name, info.pause.action_name}
     for action_filter in root.findall("actionfilter"):
