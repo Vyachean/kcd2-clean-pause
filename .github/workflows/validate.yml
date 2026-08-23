@@ -101,7 +101,7 @@ jobs:
           required_profile_fragments = (
               'name="open_menu"',
               'name="open_pause_menu"',
-              'consoleCmd="1"',
+              'consoleCMD="1"',
               'name="clean_pause_controls" priority="overlays" exclusivity="1"',
               'name="clean_pause_open_menu"',
               'name="clean_pause_block_b_press"',
@@ -111,6 +111,8 @@ jobs:
           for fragment in required_profile_fragments:
               if fragment not in profile:
                   raise SystemExit(f"Generated profile missing: {fragment}")
+          if 'consoleCmd="1"' in profile:
+              raise SystemExit("Generated profile contains wrong-case consoleCmd attribute")
 
           if "__CLEAN_PAUSE_GAMEPLAY_COMMAND__" in lua or "__CLEAN_PAUSE_PAUSE_COMMAND__" in lua:
               raise SystemExit("Generated Lua still contains routed-command placeholder")
@@ -150,9 +152,14 @@ jobs:
                   raise SystemExit(f"Unexpected release PAK members: {pak.namelist()}")
               if any(pak.getinfo(name).compress_type != zipfile.ZIP_STORED for name in expected_pak):
                   raise SystemExit("Release PAK entries must be stored")
+              profile = pak.read("Libs/Config/defaultProfile.xml").decode("utf-8")
+              if profile.count('consoleCMD="1"') != 4:
+                  raise SystemExit("Release profile must contain exactly four KCD2 consoleCMD actions")
+              if 'consoleCmd="1"' in profile:
+                  raise SystemExit("Release profile contains wrong-case consoleCmd attribute")
 
           print("Self-contained release package validated")
 
       # CI builds both synthetic proof and the real target package, but does not
-      # publish either from PR validation. GitHub Releases are created only from
-      # version tags by .github/workflows/release.yml.
+      # publish either from PR validation. GitHub Releases are created by
+      # .github/workflows/release.yml after VERSION changes reach main.
