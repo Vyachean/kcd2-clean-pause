@@ -45,14 +45,15 @@ class ProfilePatchTests(unittest.TestCase):
         self.assertEqual(action.get("xboxpad"), "xi_start")
         self.assertEqual(action.get("pspad"), "pad_start")
 
-    def test_patch_adds_resume_map_and_action_pass_filter(self) -> None:
+    def test_patch_adds_release_resume_map_and_action_pass_filter(self) -> None:
         patched, info = patch_profile(self.source)
         root = ET.fromstring(patched)
 
         controls = [m for m in root.findall("actionmap") if m.get("name") == CONTROLS_MAP]
         self.assertEqual(len(controls), 1)
         resume = next(a for a in controls[0].findall("action") if a.get("name") == RESUME_ACTION)
-        self.assertEqual(resume.get("onPress"), "1")
+        self.assertEqual(resume.get("onRelease"), "1")
+        self.assertIsNone(resume.get("onPress"))
         self.assertEqual(resume.get("xboxpad"), "xi_b")
         self.assertEqual(resume.get("pspad"), "pad_circle")
         self.assertEqual(resume.get("consoleCmd"), "1")
