@@ -12,11 +12,13 @@
 --   * reads the effective vanilla defaultProfile.xml version before loading
 --     the supplemental action map
 --   * unsupported/unknown profile versions fail closed to vanilla controls
+--   * ui_start_pause is blocked only during active gameplay, never globally
 
 CleanPause = CleanPause or {
     state = "running",
     initialized = false,
     profileVersion = nil,
+    monitorScheduled = false,
 }
 
 local VANILLA_PROFILE = "Libs/Config/defaultProfile.xml"
@@ -26,9 +28,11 @@ local CUSTOM_PROFILE = "Libs/Config/cleanPauseProfile_v22.xml"
 local MAP_CONTROLS = "clean_pause_controls"
 local FILTER_BLOCK_VANILLA = "clean_pause_block_vanilla_pause"
 local FILTER_CLEAN_ONLY = "clean_pause_only"
+local FILTER_ONLY_UI = "only_ui"
 
 local MENU_EVENT_SYSTEM = "MenuEvents"
 local DISPLAY_INGAME_MENU = "DisplayIngameMenu"
+local MONITOR_INTERVAL_MS = 100
 
 local function log(message)
     if System and System.LogAlways then
@@ -40,6 +44,8 @@ local function hasRequiredApis()
     return System
         and type(System.LoadTextFile) == "function"
         and type(System.AddCCommand) == "function"
+        and Script
+        and type(Script.SetTimer) == "function"
         and ActionMapManager
         and type(ActionMapManager.LoadFromXML) == "function"
         and type(ActionMapManager.EnableActionMap) == "function"
@@ -145,6 +151,89 @@ local function callVanillaMenu(display)
     return true
 end
 
+local function shouldInterceptVanillaPause()
+    if not CleanPause.initialized then
+        return false
+    end
+
+    if CleanPause.state == "clean_paused" then
+        return true
+    end
+
+    -- Main/front-end menus have no player. In-game UI such as the real pause
+    -- menu enables only_ui. In both cases the vanilla Start action must remain
+    -- untouched.
+    return player ~= nil and not filterEnabled(FILTER_ONLY_UI)
+end
+
+function CleanPause.RefreshInterception()
+    if not CleanPause.initialized then
+        return false
+    end
+
+    -- If the gameplay actor disappears while we own native pause (load/main
+    -- menu transition), release our pause before dropping interception.
+    if CleanPause.state == "clean_paused" and player == nil then
+        setFilter(FILTER_CLEAN_ONLY, false)
+        pauseGame(false)
+        CleanPause.state = "running"
+        log("player disappeared; clean pause recovered")
+    end
+
+    local desired = shouldInterceptVanillaPause()
+    local current = filterEnabled(FILTER_BLOCK_VANILLA)
+
+    if desired ~= current then
+        if not setFilter(FILTER_BLOCK_VANILLA, desired) then
+            return false
+        end
+
+        if filterEnabled(FILTER_BLOCK_VANILLA) ~= desired then
+            log("vanilla pause interception state could not be verified")
+            return false
+        end
+    end
+
+    return true
+end
+
+function CleanPause.OnMonitorTimer(userData, timerId)
+    CleanPause.monitorScheduled = false
+
+    if not CleanPause.initialized then
+        return
+    end
+
+    CleanPause.RefreshInterception()
+    CleanPause.ScheduleMonitor()
+end
+
+function CleanPause.ScheduleMonitor()
+    if not CleanPause.initialized or CleanPause.monitorScheduled then
+        return false
+    end
+
+    local ok, result = pcall(function()
+        return Script.SetTimer(
+            MONITOR_INTERVAL_MS,
+            CleanPause.OnMonitorTimer,
+            CleanPause,
+            true
+        )
+    end)
+
+    if not ok or result == nil then
+        log("lifecycle monitor could not be scheduled; disabling interception")
+        setFilter(FILTER_BLOCK_VANILLA, false)
+        CleanPause.initialized = false
+        CleanPause.monitorScheduled = false
+        return false
+    end
+
+    CleanPause.monitorScheduled = true
+    return true
+end
+
 function CleanPause.IsPaused()
     return CleanPause.state == "clean_paused"
 end
@@ -154,8 +243,10 @@ function CleanPause.Enter()
         return false
     end
 
-    -- Do not let the custom Start action affect the front-end/main menu.
-    if player == nil then
+    -- StartPressed may also be emitted by our supplemental map while a menu is
+    -- active. Only take ownership when the vanilla pause action is currently
+    -- intercepted for active gameplay.
+    if player == nil or not filterEnabled(FILTER_BLOCK_VANILLA) then
         return false
     end
 
@@ -194,6 +285,7 @@ function CleanPause.Resume()
     end
 
     CleanPause.state = "running"
+    CleanPause.RefreshInterception()
     log("resumed from native clean pause")
     return true
 end
@@ -203,12 +295,15 @@ function CleanPause.OpenVanillaMenu()
         return false
     end
 
-    -- Keep FILTER_BLOCK_VANILLA enabled. We are not forwarding the current
-    -- physical Start event; we invoke KCD2's real MenuEvents subsystem directly.
-    -- The vanilla menu will install its own only_ui filter for navigation/B.
+    -- Release both custom input isolation and vanilla-pause interception before
+    -- handing control to KCD2. DisplayIngameMenu(true) then installs KCD2's own
+    -- only_ui filter. The lifecycle monitor will restore our interception after
+    -- that menu closes and only_ui becomes false again.
     setFilter(FILTER_CLEAN_ONLY, false)
+    setFilter(FILTER_BLOCK_VANILLA, false)
 
     if not pauseGame(false) then
+        setFilter(FILTER_BLOCK_VANILLA, true)
         setFilter(FILTER_CLEAN_ONLY, true)
         return false
     end
@@ -216,6 +311,7 @@ function CleanPause.OpenVanillaMenu()
     if not callVanillaMenu(true) then
         -- Roll back atomically to Clean Pause if the menu bridge is absent.
         pauseGame(true)
+        setFilter(FILTER_BLOCK_VANILLA, true)
         setFilter(FILTER_CLEAN_ONLY, true)
         log("vanilla menu handoff failed; clean pause restored")
         return false
@@ -227,6 +323,10 @@ function CleanPause.OpenVanillaMenu()
 end
 
 function CleanPause.StartPressed()
+    if not CleanPause.initialized then
+        return false
+    end
+
     if CleanPause.state == "clean_paused" then
         return CleanPause.OpenVanillaMenu()
     end
@@ -251,6 +351,7 @@ function CleanPause.Disable()
 
     CleanPause.state = "running"
     CleanPause.initialized = false
+    CleanPause.monitorScheduled = false
     log("disabled; vanilla pause action restored")
     return true
 end
@@ -300,32 +401,36 @@ function CleanPause.Initialize()
         return false
     end
 
-    -- Prove both custom filters exist before blocking the vanilla pause action.
+    -- Prove both filters exist without leaving either one enabled. Static build
+    -- validation separately verifies the custom action-map schema and bindings.
     setFilter(FILTER_CLEAN_ONLY, true)
     local cleanOnlyExists = filterEnabled(FILTER_CLEAN_ONLY)
     setFilter(FILTER_CLEAN_ONLY, false)
 
-    if not cleanOnlyExists then
-        pcall(function()
-            ActionMapManager.EnableActionMap(MAP_CONTROLS, false)
-        end)
-        log("clean-pause pass filter not loaded; vanilla controls unchanged")
-        return false
-    end
+    setFilter(FILTER_BLOCK_VANILLA, true)
+    local blockVanillaExists = filterEnabled(FILTER_BLOCK_VANILLA)
+    setFilter(FILTER_BLOCK_VANILLA, false)
 
-    if not setFilter(FILTER_BLOCK_VANILLA, true) or not filterEnabled(FILTER_BLOCK_VANILLA) then
-        setFilter(FILTER_BLOCK_VANILLA, false)
+    if not cleanOnlyExists or not blockVanillaExists then
         pcall(function()
             ActionMapManager.EnableActionMap(MAP_CONTROLS, false)
         end)
-        log("vanilla-pause filter not loaded; vanilla controls unchanged")
+        log("supplemental filters not loaded; vanilla controls unchanged")
         return false
     end
 
     CleanPause.initialized = true
+
+    -- Interception is deliberately lifecycle-scoped. If this script loads in
+    -- the front-end, RefreshInterception leaves vanilla Start completely alone.
+    if not CleanPause.RefreshInterception() or not CleanPause.ScheduleMonitor() then
+        CleanPause.Disable()
+        return false
+    end
+
     log(
         "initialized safely; profile version=" .. tostring(version)
-        .. "; Start=clean pause, B=resume, Start again=vanilla menu"
+        .. "; gameplay Start=clean pause, B=resume, Start again=vanilla menu"
     )
     return true
 end
