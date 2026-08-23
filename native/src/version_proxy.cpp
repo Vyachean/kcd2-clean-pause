@@ -60,6 +60,14 @@ extern "C" BOOL WINAPI Proxy_GetFileVersionInfoA(
     return fn ? fn(filename, handle, length, data) : Missing(FALSE);
 }
 
+extern "C" BOOL WINAPI Proxy_GetFileVersionInfoByHandle(
+    DWORD flags, HANDLE file, LPVOID* data, PDWORD length)
+{
+    using Fn = BOOL(WINAPI*)(DWORD, HANDLE, LPVOID*, PDWORD);
+    const auto fn = Resolve<Fn>("GetFileVersionInfoByHandle");
+    return fn ? fn(flags, file, data, length) : Missing(FALSE);
+}
+
 extern "C" BOOL WINAPI Proxy_GetFileVersionInfoW(
     LPCWSTR filename, DWORD handle, DWORD length, LPVOID data)
 {
