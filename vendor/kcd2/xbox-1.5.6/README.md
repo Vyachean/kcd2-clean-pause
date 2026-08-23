@@ -2,13 +2,13 @@
 
 This directory contains the target-specific patched `defaultProfile.xml` used to build Clean Pause releases for KCD2 1.5.6 on PC Xbox Store / Xbox app / Game Pass.
 
-The profile is stored gzip-compressed as:
+The profile is stored as deterministic gzip+base64 text:
 
 ```text
-defaultProfile.clean-pause.xml.gz
+defaultProfile.clean-pause.xml.gz.b64
 ```
 
-It is versioned target source, not a generated installable artifact. GitHub Actions decompresses it and packages it into the mod PAK.
+It is versioned target source, not a generated installable artifact. `tools/build_release.py` base64-decodes and decompresses it before packaging it into the mod PAK.
 
 Verified original retail profile SHA-256:
 
@@ -16,7 +16,7 @@ Verified original retail profile SHA-256:
 69ad9fd618cd31961fef8eb061f3f2723997df5e0fb257ec74d0d5f555592565
 ```
 
-Patched Clean Pause profile SHA-256:
+Decoded patched Clean Pause profile SHA-256:
 
 ```text
 28e210454d749869b1fa26d4414ba3c055157e731856f9610d6ffce5ddfbc373
