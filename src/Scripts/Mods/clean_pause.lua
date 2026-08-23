@@ -1,10 +1,13 @@
 -- KCD2 Clean Pause
--- Deterministic action-filter prototype.
+-- Deterministic action-filter prototype with a safe controller-input handshake.
 --
--- Runtime UX:
---   Menu / Start -> Clean Pause (no menu overlay)
---   B            -> resume from Clean Pause
---   Menu / Start -> vanilla KCD2 pause menu when already clean-paused
+-- Development UX:
+--   First gameplay Menu / Start after loading a save -> vanilla pause once.
+--     This proves that the supplemental clean_pause_start action really fired.
+--   After the vanilla menu is closed:
+--     Menu / Start -> Clean Pause (no menu overlay)
+--     B            -> resume from Clean Pause
+--     Menu / Start -> vanilla KCD2 pause menu when already clean-paused
 --
 -- Safety invariants:
 --   * never calls ActionMapManager.InitActionMaps()
@@ -12,13 +15,16 @@
 --   * reads the effective vanilla defaultProfile.xml version before loading
 --     the supplemental action map
 --   * unsupported/unknown profile versions fail closed to vanilla controls
---   * ui_start_pause is blocked only during active gameplay, never globally
+--   * ui_start_pause is never blocked until the physical Start mapping has
+--     successfully invoked clean_pause_start at least once in active gameplay
 
 CleanPause = CleanPause or {
     state = "running",
     initialized = false,
     profileVersion = nil,
     monitorScheduled = false,
+    inputHandshakeSeen = false,
+    handshakeGraceTicks = 0,
 }
 
 local VANILLA_PROFILE = "Libs/Config/defaultProfile.xml"
@@ -33,6 +39,7 @@ local FILTER_ONLY_UI = "only_ui"
 local MENU_EVENT_SYSTEM = "MenuEvents"
 local DISPLAY_INGAME_MENU = "DisplayIngameMenu"
 local MONITOR_INTERVAL_MS = 100
+local HANDSHAKE_GRACE_TICKS = 10
 
 local function log(message)
     if System and System.LogAlways then
@@ -76,8 +83,6 @@ local function readProfileVersion()
         return nil
     end
 
-    -- Match the first normal XML element carrying an integer version. This
-    -- deliberately does not match the <?xml version=\"1.0\"?> declaration.
     local value = string.match(
         text,
         "<[%a_][%w_:%-%.]*[^>]-version%s*=%s*[\"'](%d+)[\"']"
@@ -141,8 +146,6 @@ local function callVanillaMenu(display)
         return false
     end
 
-    -- Event-system calls return a Lua table. ScriptBind_UIAction returns false
-    -- when the event system/event cannot be resolved.
     if result == false or result == nil then
         log("MenuEvents.DisplayIngameMenu unavailable")
         return false
@@ -160,9 +163,20 @@ local function shouldInterceptVanillaPause()
         return true
     end
 
-    -- Main/front-end menus have no player. In-game UI such as the real pause
-    -- menu enables only_ui. In both cases the vanilla Start action must remain
-    -- untouched.
+    -- Never take Start away from KCD2 until our own xi_start action has proved
+    -- itself by firing once in active gameplay.
+    if not CleanPause.inputHandshakeSeen then
+        return false
+    end
+
+    -- Give the first (deliberately vanilla) Start press time to finish opening
+    -- the real pause menu before interception can become eligible.
+    if CleanPause.handshakeGraceTicks > 0 then
+        return false
+    end
+
+    -- Main/front-end menus have no player. KCD2's real pause/menu UI uses the
+    -- existing only_ui pass filter; while it is active Start remains vanilla.
     return player ~= nil and not filterEnabled(FILTER_ONLY_UI)
 end
 
@@ -171,13 +185,15 @@ function CleanPause.RefreshInterception()
         return false
     end
 
-    -- If the gameplay actor disappears while we own native pause (load/main
-    -- menu transition), release our pause before dropping interception.
     if CleanPause.state == "clean_paused" and player == nil then
         setFilter(FILTER_CLEAN_ONLY, false)
         pauseGame(false)
         CleanPause.state = "running"
         log("player disappeared; clean pause recovered")
+    end
+
+    if CleanPause.handshakeGraceTicks > 0 then
+        CleanPause.handshakeGraceTicks = CleanPause.handshakeGraceTicks - 1
     end
 
     local desired = shouldInterceptVanillaPause()
@@ -192,6 +208,8 @@ function CleanPause.RefreshInterception()
             log("vanilla pause interception state could not be verified")
             return false
         end
+
+        log("vanilla pause interception=" .. tostring(desired))
     end
 
     return true
@@ -243,16 +261,10 @@ function CleanPause.Enter()
         return false
     end
 
-    -- StartPressed may also be emitted by our supplemental map while a menu is
-    -- active. Only take ownership when the vanilla pause action is currently
-    -- intercepted for active gameplay.
     if player == nil or not filterEnabled(FILTER_BLOCK_VANILLA) then
         return false
     end
 
-    -- Isolate input before freezing. The current Start event has already been
-    -- accepted, so enabling the pass filter here cannot retroactively dispatch
-    -- another vanilla action from this physical press.
     if not setFilter(FILTER_CLEAN_ONLY, true) or not filterEnabled(FILTER_CLEAN_ONLY) then
         setFilter(FILTER_CLEAN_ONLY, false)
         log("clean-pause input isolation failed; pause not entered")
@@ -274,8 +286,6 @@ function CleanPause.Resume()
         return false
     end
 
-    -- The B event is already in the accepted-event list, so removing the pass
-    -- filter here does not cause the same physical press to trigger gameplay.
     setFilter(FILTER_CLEAN_ONLY, false)
 
     if not pauseGame(false) then
@@ -295,10 +305,6 @@ function CleanPause.OpenVanillaMenu()
         return false
     end
 
-    -- Release both custom input isolation and vanilla-pause interception before
-    -- handing control to KCD2. DisplayIngameMenu(true) then installs KCD2's own
-    -- only_ui filter. The lifecycle monitor will restore our interception after
-    -- that menu closes and only_ui becomes false again.
     setFilter(FILTER_CLEAN_ONLY, false)
     setFilter(FILTER_BLOCK_VANILLA, false)
 
@@ -309,7 +315,6 @@ function CleanPause.OpenVanillaMenu()
     end
 
     if not callVanillaMenu(true) then
-        -- Roll back atomically to Clean Pause if the menu bridge is absent.
         pauseGame(true)
         setFilter(FILTER_BLOCK_VANILLA, true)
         setFilter(FILTER_CLEAN_ONLY, true)
@@ -318,6 +323,7 @@ function CleanPause.OpenVanillaMenu()
     end
 
     CleanPause.state = "running"
+    CleanPause.handshakeGraceTicks = HANDSHAKE_GRACE_TICKS
     log("handed pause ownership to vanilla menu")
     return true
 end
@@ -329,6 +335,22 @@ function CleanPause.StartPressed()
 
     if CleanPause.state == "clean_paused" then
         return CleanPause.OpenVanillaMenu()
+    end
+
+    if player == nil then
+        return false
+    end
+
+    if not CleanPause.inputHandshakeSeen then
+        -- Critical development handshake: the custom action has now proved that
+        -- LoadFromXML + xi_start + consoleCmd actually works on this retail build.
+        -- Keep the vanilla ui_start_pause unfiltered for THIS press, so a broken
+        -- prototype can never strand the user without the normal pause menu.
+        CleanPause.inputHandshakeSeen = true
+        CleanPause.handshakeGraceTicks = HANDSHAKE_GRACE_TICKS
+        setFilter(FILTER_BLOCK_VANILLA, false)
+        log("controller Start handshake observed; first pause intentionally left vanilla")
+        return false
     end
 
     return CleanPause.Enter()
@@ -352,7 +374,21 @@ function CleanPause.Disable()
     CleanPause.state = "running"
     CleanPause.initialized = false
     CleanPause.monitorScheduled = false
+    CleanPause.inputHandshakeSeen = false
+    CleanPause.handshakeGraceTicks = 0
     log("disabled; vanilla pause action restored")
+    return true
+end
+
+function CleanPause.Status()
+    log(
+        "status initialized=" .. tostring(CleanPause.initialized)
+        .. " profileVersion=" .. tostring(CleanPause.profileVersion)
+        .. " handshake=" .. tostring(CleanPause.inputHandshakeSeen)
+        .. " blockVanilla=" .. tostring(filterEnabled(FILTER_BLOCK_VANILLA))
+        .. " onlyUi=" .. tostring(filterEnabled(FILTER_ONLY_UI))
+        .. " state=" .. tostring(CleanPause.state)
+    )
     return true
 end
 
@@ -378,8 +414,6 @@ function CleanPause.Initialize()
         return false
     end
 
-    -- Confirm our packaged XML can be read before asking the C++ loader to open
-    -- it. The script binding does not return LoadFromXML success/failure.
     local customText = loadText(CUSTOM_PROFILE)
     if not customText then
         log("custom input profile missing; vanilla controls unchanged")
@@ -401,8 +435,9 @@ function CleanPause.Initialize()
         return false
     end
 
-    -- Prove both filters exist without leaving either one enabled. Static build
-    -- validation separately verifies the custom action-map schema and bindings.
+    -- Prove the supplemental filters were created, then leave BOTH disabled.
+    -- The vanilla pause filter is not allowed to turn on before the real
+    -- controller-action handshake in StartPressed().
     setFilter(FILTER_CLEAN_ONLY, true)
     local cleanOnlyExists = filterEnabled(FILTER_CLEAN_ONLY)
     setFilter(FILTER_CLEAN_ONLY, false)
@@ -420,23 +455,21 @@ function CleanPause.Initialize()
     end
 
     CleanPause.initialized = true
+    CleanPause.inputHandshakeSeen = false
+    CleanPause.handshakeGraceTicks = 0
 
-    -- Interception is deliberately lifecycle-scoped. If this script loads in
-    -- the front-end, RefreshInterception leaves vanilla Start completely alone.
-    if not CleanPause.RefreshInterception() or not CleanPause.ScheduleMonitor() then
+    if not CleanPause.ScheduleMonitor() then
         CleanPause.Disable()
         return false
     end
 
     log(
         "initialized safely; profile version=" .. tostring(version)
-        .. "; gameplay Start=clean pause, B=resume, Start again=vanilla menu"
+        .. "; waiting for first gameplay Start handshake"
     )
     return true
 end
 
--- Console-command action IDs in cleanPauseProfile_v22.xml resolve to these
--- commands. They intentionally exist before the action map is initialized.
 if System and System.AddCCommand then
     System.AddCCommand(
         "clean_pause_start",
@@ -448,6 +481,12 @@ if System and System.AddCCommand then
         "clean_pause_resume",
         "CleanPause.Resume()",
         "Clean Pause: resume action."
+    )
+
+    System.AddCCommand(
+        "clean_pause_status",
+        "CleanPause.Status()",
+        "Clean Pause: log current diagnostic state."
     )
 
     System.AddCCommand(
