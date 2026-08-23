@@ -14,15 +14,15 @@ Generated `.pak` and install ZIP files are never committed to Git.
 
 ## Self-contained release source
 
-A release tag must be reproducible from that tag alone. Release builds therefore do not depend on GitHub Secrets, a developer workstation, or files copied from a user's game installation.
+A release tag must be reproducible from that tag alone. Release builds therefore do not depend on GitHub Secrets, a developer workstation, or files copied from a user's game installation at release time.
 
-For the fixed Xbox Store / Xbox app / Game Pass **KCD2 1.5.6** target, the repository vendors the already patched profile source at:
+For the fixed Xbox Store / Xbox app / Game Pass **KCD2 1.5.6** target, the repository versions the already patched target profile at:
 
 ```text
 vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz
 ```
 
-This is source input, not a generated release artifact. It decompresses to the patched `Libs/Config/defaultProfile.xml` that the official KCD2 mod package needs.
+This is target-specific source input, not a generated release artifact. It decompresses to the patched `Libs/Config/defaultProfile.xml` that the official KCD2 mod package requires.
 
 Verified original retail profile SHA-256:
 
@@ -102,7 +102,7 @@ For a new target version:
 
 1. extract that version's exact retail `defaultProfile.xml`;
 2. run the repository patcher and review the result;
-3. vendor the new patched profile under a version-specific directory;
+3. version the new patched target profile under a game-version-specific directory;
 4. update the expected hash/target metadata;
 5. pass PR CI;
 6. tag a new release.
