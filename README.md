@@ -29,9 +29,9 @@ Primary acceptance target:
 
 The current implementation uses only KCD2's normal `.pak`/Lua mod path. It does **not** require `version.dll`, ASI, KCSE, an external process, or an overlay.
 
-KCD2 uses last-mod-wins for `defaultProfile.xml`, so this implementation is intentionally version-specific. The repository contains the patched Xbox 1.5.6 profile as release source and GitHub Actions packages it into the installable mod. No user's game file or GitHub Actions secret is required to reproduce a release.
+KCD2 uses last-mod-wins for `defaultProfile.xml`, so this implementation is intentionally version-specific. The repository contains the patched Xbox 1.5.6 profile as target-specific release source and GitHub Actions packages it into the installable mod. No user's game file or GitHub Actions secret is required to reproduce a release.
 
-The original Xbox Store 1.5.6 profile used to prepare that source is documented in [docs/RETAIL_TEST1.md](docs/RETAIL_TEST1.md).
+The original Xbox Store 1.5.6 profile used to prepare that target source is documented in [docs/RETAIL_TEST1.md](docs/RETAIL_TEST1.md).
 
 ## Downloads
 
