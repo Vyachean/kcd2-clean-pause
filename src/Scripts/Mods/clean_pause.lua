@@ -1,21 +1,23 @@
 -- KCD2 Clean Pause
--- Runtime for the pure-profile implementation.
+-- Official-mod runtime for the exact-profile build.
 --
--- The build tool patches KCD2's existing pause action in defaultProfile.xml
--- into a console-command action and replaces __CLEAN_PAUSE_COMMAND__ below
--- with that exact retail action name. This avoids supplemental runtime action
--- maps for Start/Menu and preserves the game's existing pause permissions.
+-- The build tool patches the target installation's existing open_menu and
+-- open_pause_menu actions into console-command actions while preserving their
+-- original action ids and physical bindings. KCD2 therefore still decides when
+-- those actions are valid through its normal action maps and filters.
 
 CleanPause = CleanPause or {
     state = "running",
 }
 
-local PAUSE_COMMAND = "__CLEAN_PAUSE_COMMAND__"
+local GAMEPLAY_COMMAND = "__CLEAN_PAUSE_GAMEPLAY_COMMAND__"
+local PAUSE_COMMAND = "__CLEAN_PAUSE_PAUSE_COMMAND__"
 local RESUME_COMMAND = "clean_pause_resume"
+local MENU_COMMAND = "clean_pause_open_menu"
 local CONTROLS_MAP = "clean_pause_controls"
-local INPUT_FILTER = "clean_pause_only"
 local MENU_EVENT_SYSTEM = "MenuEvents"
 local DISPLAY_INGAME_MENU = "DisplayIngameMenu"
+local FILTER_ONLY_UI = "only_ui"
 
 local function log(message)
     if System and System.LogAlways then
@@ -40,60 +42,32 @@ local function pauseGame(paused)
     return true
 end
 
-local function enableActionMap(name, enabled)
+local function setControlsEnabled(enabled)
     if not ActionMapManager or not ActionMapManager.EnableActionMap then
         log("ActionMapManager.EnableActionMap unavailable")
         return false
     end
 
     local ok, err = pcall(function()
-        ActionMapManager.EnableActionMap(name, enabled)
+        ActionMapManager.EnableActionMap(CONTROLS_MAP, enabled)
     end)
     if not ok then
-        log("action map " .. tostring(name) .. " change failed: " .. tostring(err))
+        log("controls map change failed: " .. tostring(err))
         return false
     end
 
     return true
 end
 
-local function enableActionFilter(name, enabled)
-    if not ActionMapManager or not ActionMapManager.EnableActionFilter then
-        log("ActionMapManager.EnableActionFilter unavailable")
+local function isVanillaUiOnly()
+    if not ActionMapManager or not ActionMapManager.IsFilterEnabled then
         return false
     end
 
-    local ok, err = pcall(function()
-        ActionMapManager.EnableActionFilter(name, enabled)
+    local ok, result = pcall(function()
+        return ActionMapManager.IsFilterEnabled(FILTER_ONLY_UI)
     end)
-    if not ok then
-        log("action filter " .. tostring(name) .. " change failed: " .. tostring(err))
-        return false
-    end
-
-    return true
-end
-
-local function enableCleanInput()
-    -- The resume action must exist before the actionPass filter starts blocking
-    -- everything except the two Clean Pause commands.
-    if not enableActionMap(CONTROLS_MAP, true) then
-        return false
-    end
-
-    if not enableActionFilter(INPUT_FILTER, true) then
-        enableActionMap(CONTROLS_MAP, false)
-        return false
-    end
-
-    return true
-end
-
-local function disableCleanInput()
-    -- Remove the restrictive filter first, then the temporary B action map.
-    local filterOk = enableActionFilter(INPUT_FILTER, false)
-    local mapOk = enableActionMap(CONTROLS_MAP, false)
-    return filterOk and mapOk
+    return ok and result == true
 end
 
 local function callVanillaMenu()
@@ -110,15 +84,11 @@ local function callVanillaMenu()
             true
         )
     end)
-
     if not ok then
         log("MenuEvents.DisplayIngameMenu threw: " .. tostring(result))
         return false
     end
 
-    -- ScriptBind_UIAction returns false when neither the element/event-system
-    -- nor the requested function exists. A successful event-system call returns
-    -- a Lua table, including when the event has no return arguments.
     if result == false or result == nil then
         log("MenuEvents.DisplayIngameMenu(true) unavailable")
         return false
@@ -131,30 +101,31 @@ function CleanPause.IsPaused()
     return CleanPause.state == "clean_paused"
 end
 
-function CleanPause.Enter()
+function CleanPause.Enter(sourceAction)
     if CleanPause.state ~= "running" then
         return false
     end
 
-    -- The retail pause action is only active in contexts where KCD2 allows
-    -- pausing. The player guard additionally prevents front-end ownership.
     if player == nil then
         log("pause ignored outside active gameplay")
         return false
     end
-
-    if not pauseGame(true) then
+    if isVanillaUiOnly() then
+        log("pause ignored while vanilla only_ui filter is active")
         return false
     end
 
-    if not enableCleanInput() then
-        pauseGame(false)
-        log("clean input isolation failed; pause rolled back")
+    if not setControlsEnabled(true) then
+        return false
+    end
+
+    if not pauseGame(true) then
+        setControlsEnabled(false)
         return false
     end
 
     CleanPause.state = "clean_paused"
-    log("entered clean pause")
+    log("entered clean pause from " .. tostring(sourceAction))
     return true
 end
 
@@ -163,15 +134,13 @@ function CleanPause.Resume()
         return false
     end
 
-    if not disableCleanInput() then
-        -- Best effort: re-establish isolation before leaving the game paused.
-        enableCleanInput()
-        log("resume aborted because clean input could not be released")
+    if not setControlsEnabled(false) then
+        log("resume aborted because controls map could not be disabled")
         return false
     end
 
     if not pauseGame(false) then
-        enableCleanInput()
+        setControlsEnabled(true)
         log("resume failed; clean pause retained")
         return false
     end
@@ -186,18 +155,14 @@ function CleanPause.OpenVanillaMenu()
         return false
     end
 
-    -- Keep the game paused while handing ownership to the real menu. Our
-    -- Game.PauseGame(true) is non-forced; the vanilla menu upgrades it to its
-    -- normal forced pause and owns the eventual resume lifecycle.
-    if not disableCleanInput() then
-        enableCleanInput()
-        log("vanilla menu handoff aborted because clean input could not be released")
+    if not setControlsEnabled(false) then
+        log("vanilla-menu handoff aborted because controls map could not be disabled")
         return false
     end
 
     if not callVanillaMenu() then
-        enableCleanInput()
-        log("vanilla menu handoff failed; clean pause retained")
+        setControlsEnabled(true)
+        log("vanilla-menu handoff failed; clean pause retained")
         return false
     end
 
@@ -206,23 +171,19 @@ function CleanPause.OpenVanillaMenu()
     return true
 end
 
-function CleanPause.OnPauseAction()
+function CleanPause.OnPauseAction(sourceAction)
     if CleanPause.state == "clean_paused" then
         return CleanPause.OpenVanillaMenu()
     end
 
-    return CleanPause.Enter()
+    return CleanPause.Enter(sourceAction)
 end
 
 function CleanPause.Cleanup()
+    setControlsEnabled(false)
     if CleanPause.state == "clean_paused" then
-        disableCleanInput()
         pauseGame(false)
-    else
-        -- Ensure stale state from a script reload cannot leave our additions on.
-        disableCleanInput()
     end
-
     CleanPause.state = "running"
     return true
 end
@@ -244,12 +205,24 @@ local function addCommand(name, luaCode, description)
     return true
 end
 
--- The generated profile invokes these names directly through consoleCmd="1".
-addCommand(PAUSE_COMMAND, "CleanPause.OnPauseAction()", "Clean Pause: pause or open the vanilla pause menu.")
+addCommand(
+    GAMEPLAY_COMMAND,
+    'CleanPause.OnPauseAction("' .. GAMEPLAY_COMMAND .. '")',
+    "Clean Pause: route KCD2 gameplay pause action."
+)
+addCommand(
+    PAUSE_COMMAND,
+    'CleanPause.OnPauseAction("' .. PAUSE_COMMAND .. '")',
+    "Clean Pause: route KCD2 contextual pause action."
+)
+addCommand(MENU_COMMAND, "CleanPause.OpenVanillaMenu()", "Clean Pause: open vanilla pause menu.")
 addCommand(RESUME_COMMAND, "CleanPause.Resume()", "Clean Pause: resume gameplay.")
 
--- The custom map/filter are loaded as part of the retail profile, but must never
--- own input outside Clean Pause.
-disableCleanInput()
+setControlsEnabled(false)
 
-log("pure-profile runtime loaded; pause command=" .. tostring(PAUSE_COMMAND))
+log(
+    "official runtime loaded; routed actions="
+        .. tostring(GAMEPLAY_COMMAND)
+        .. ","
+        .. tostring(PAUSE_COMMAND)
+)

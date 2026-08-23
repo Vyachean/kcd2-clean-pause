@@ -48,6 +48,7 @@ jobs:
           forbidden_runtime_calls = (
               "ActionMapManager.InitActionMaps(",
               "ActionMapManager.LoadFromXML(",
+              "ActionMapManager.EnableActionFilter(",
               "Player.OnAction =",
               "System.ExecuteCommand(\"bind ",
               "System.ExecuteCommand('bind ",
@@ -56,8 +57,10 @@ jobs:
               if needle in executable:
                   raise SystemExit(f"Forbidden runtime input mutation found: {needle}")
 
-          if source.count("__CLEAN_PAUSE_COMMAND__") != 2:
-              raise SystemExit("Pause-command build placeholder contract changed")
+          if source.count("__CLEAN_PAUSE_GAMEPLAY_COMMAND__") != 1:
+              raise SystemExit("Gameplay routed-command placeholder contract changed")
+          if source.count("__CLEAN_PAUSE_PAUSE_COMMAND__") != 1:
+              raise SystemExit("Pause routed-command placeholder contract changed")
 
           print("Input safety checks passed")
 
@@ -82,9 +85,9 @@ jobs:
           from pathlib import Path
           import zipfile
 
-          outer = Path("release/kcd2-clean-pause-dev.zip")
+          outer = Path("release/kcd2-clean-pause-xbox-1.5.6-test.zip")
           if not outer.is_file():
-              raise SystemExit("Builder did not create the development archive")
+              raise SystemExit("Builder did not create the test archive")
 
           pak_path = Path("release/clean_pause/Data/clean_pause.pak")
           with zipfile.ZipFile(pak_path) as pak:
@@ -94,26 +97,34 @@ jobs:
               }
               if set(pak.namelist()) != expected:
                   raise SystemExit(f"Unexpected PAK members: {pak.namelist()}")
+              if any(pak.getinfo(name).compress_type != zipfile.ZIP_STORED for name in expected):
+                  raise SystemExit("Game PAK entries must be stored")
               profile = pak.read("Libs/Config/defaultProfile.xml").decode("utf-8")
               lua = pak.read("Scripts/Mods/clean_pause.lua").decode("utf-8")
 
           required_profile_fragments = (
+              'name="open_menu"',
               'name="open_pause_menu"',
               'consoleCmd="1"',
-              'name="clean_pause_controls"',
-              'name="clean_pause_only" type="actionPass"',
+              'name="clean_pause_controls" priority="overlays" exclusivity="1"',
+              'name="clean_pause_open_menu"',
+              'name="clean_pause_block_b_press"',
+              'name="clean_pause_resume"',
               'xboxpad="xi_b"',
           )
           for fragment in required_profile_fragments:
               if fragment not in profile:
                   raise SystemExit(f"Generated profile missing: {fragment}")
-          if "__CLEAN_PAUSE_COMMAND__" in lua:
-              raise SystemExit("Generated Lua still contains placeholder")
+
+          if "__CLEAN_PAUSE_GAMEPLAY_COMMAND__" in lua or "__CLEAN_PAUSE_PAUSE_COMMAND__" in lua:
+              raise SystemExit("Generated Lua still contains routed-command placeholder")
+          if 'local GAMEPLAY_COMMAND = "open_menu"' not in lua:
+              raise SystemExit("Generated Lua gameplay command does not match profile")
           if 'local PAUSE_COMMAND = "open_pause_menu"' not in lua:
-              raise SystemExit("Generated Lua command does not match profile")
+              raise SystemExit("Generated Lua pause command does not match profile")
 
           print("Synthetic exact-profile build validated")
 
-      # Do not upload this artifact: it is built from a synthetic fixture and is
+      # Never upload this artifact. It is built from a synthetic fixture and is
       # intentionally not installable. A retail test ZIP must be generated from
-      # the target game's own Data/IPL_GameData.pak.
+      # the exact Data/IPL_GameData.pak of the installation being tested.

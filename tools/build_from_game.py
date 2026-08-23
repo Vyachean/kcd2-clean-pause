@@ -16,9 +16,10 @@ LUA_SOURCE = ROOT / "src" / "Scripts" / "Mods" / "clean_pause.lua"
 RELEASE_ROOT = ROOT / "release"
 MOD_DIR = RELEASE_ROOT / "clean_pause"
 PAK_OUTPUT = MOD_DIR / "Data" / "clean_pause.pak"
-ZIP_OUTPUT = RELEASE_ROOT / "kcd2-clean-pause-dev.zip"
+ZIP_OUTPUT = RELEASE_ROOT / "kcd2-clean-pause-xbox-1.5.6-test.zip"
 VANILLA_PROFILE = "Libs/Config/defaultProfile.xml"
-PAUSE_TOKEN = "__CLEAN_PAUSE_COMMAND__"
+GAMEPLAY_TOKEN = "__CLEAN_PAUSE_GAMEPLAY_COMMAND__"
+PAUSE_TOKEN = "__CLEAN_PAUSE_PAUSE_COMMAND__"
 
 
 def locate_game_pak(game_root: Path) -> Path:
@@ -54,15 +55,19 @@ def decode_profile(data: bytes) -> str:
     raise ProfilePatchError("defaultProfile.xml is not UTF-8; refusing to rewrite unknown encoding")
 
 
-def render_lua(pause_action: str) -> str:
-    if not pause_action or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for ch in pause_action):
-        raise ProfilePatchError(f"unsafe pause command name: {pause_action!r}")
+def _safe_command(name: str) -> str:
+    if not name or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for ch in name):
+        raise ProfilePatchError(f"unsafe routed command name: {name!r}")
+    return name
 
+
+def render_lua(gameplay_action: str, pause_action: str) -> str:
+    gameplay_action = _safe_command(gameplay_action)
+    pause_action = _safe_command(pause_action)
     source = LUA_SOURCE.read_text(encoding="utf-8")
-    if source.count(PAUSE_TOKEN) != 2:
-        # One occurrence is in the explanatory comment and one in the string.
-        raise ProfilePatchError("runtime pause-command placeholder contract changed")
-    return source.replace(PAUSE_TOKEN, pause_action)
+    if source.count(GAMEPLAY_TOKEN) != 1 or source.count(PAUSE_TOKEN) != 1:
+        raise ProfilePatchError("runtime routed-command placeholder contract changed")
+    return source.replace(GAMEPLAY_TOKEN, gameplay_action).replace(PAUSE_TOKEN, pause_action)
 
 
 def inspect_game(game_root: Path) -> tuple[Path, str, object]:
@@ -75,7 +80,7 @@ def inspect_game(game_root: Path) -> tuple[Path, str, object]:
 
 def build(game_root: Path) -> Path:
     pak_path, patched_profile, info = inspect_game(game_root)
-    rendered_lua = render_lua(info.pause_action)
+    rendered_lua = render_lua(info.gameplay.action_name, info.pause.action_name)
 
     if MOD_DIR.exists():
         shutil.rmtree(MOD_DIR)
@@ -83,12 +88,11 @@ def build(game_root: Path) -> Path:
     (MOD_DIR / "Data").mkdir(parents=True, exist_ok=True)
     shutil.copy2(MANIFEST, MOD_DIR / "mod.manifest")
 
-    # Stored ZIP entries are the most conservative CryEngine PAK representation.
     with zipfile.ZipFile(PAK_OUTPUT, "w", compression=zipfile.ZIP_STORED) as pak:
         pak.writestr(VANILLA_PROFILE, patched_profile.encode("utf-8"))
         pak.writestr("Scripts/Mods/clean_pause.lua", rendered_lua.encode("utf-8"))
 
-    validate_build(info.pause_action)
+    validate_build(info.gameplay.action_name, info.pause.action_name)
 
     if ZIP_OUTPUT.exists():
         ZIP_OUTPUT.unlink()
@@ -100,15 +104,17 @@ def build(game_root: Path) -> Path:
     digest = hashlib.sha256(ZIP_OUTPUT.read_bytes()).hexdigest()
     print(f"Game data: {pak_path}")
     print(f"Profile version: {info.profile_version}")
-    print(f"Pause map/action: {info.pause_map}/{info.pause_action}")
-    print(f"Xbox input: {info.xbox_input}")
-    print(f"PS input: {info.ps_input}")
+    print(
+        "Routed Start actions: "
+        f"{info.gameplay.map_name}/{info.gameplay.action_name}, "
+        f"{info.pause.map_name}/{info.pause.action_name}"
+    )
     print(f"Built: {ZIP_OUTPUT}")
     print(f"SHA-256: {digest}")
     return ZIP_OUTPUT
 
 
-def validate_build(pause_action: str) -> None:
+def validate_build(gameplay_action: str, pause_action: str) -> None:
     if not PAK_OUTPUT.is_file():
         raise ProfilePatchError(f"missing generated PAK: {PAK_OUTPUT}")
 
@@ -121,7 +127,6 @@ def validate_build(pause_action: str) -> None:
             raise ProfilePatchError("generated game PAK must use stored entries")
 
         profile = decode_profile(pak.read(VANILLA_PROFILE))
-        # Running patch_profile again must identify the file as already patched.
         try:
             patch_profile(profile)
         except ProfilePatchError as exc:
@@ -131,13 +136,21 @@ def validate_build(pause_action: str) -> None:
             raise ProfilePatchError("generated profile did not retain Clean Pause markers")
 
         lua = pak.read("Scripts/Mods/clean_pause.lua").decode("utf-8")
-        if PAUSE_TOKEN in lua:
-            raise ProfilePatchError("generated Lua still contains the pause-command placeholder")
+        if GAMEPLAY_TOKEN in lua or PAUSE_TOKEN in lua:
+            raise ProfilePatchError("generated Lua still contains a routed-command placeholder")
+        if f'local GAMEPLAY_COMMAND = "{gameplay_action}"' not in lua:
+            raise ProfilePatchError("generated Lua gameplay command does not match patched profile")
         if f'local PAUSE_COMMAND = "{pause_action}"' not in lua:
             raise ProfilePatchError("generated Lua pause command does not match patched profile")
-        for forbidden in ("ActionMapManager.InitActionMaps(", "Player.OnAction ="):
-            if forbidden in lua:
-                raise ProfilePatchError(f"forbidden runtime hook found in generated Lua: {forbidden}")
+        forbidden = (
+            "ActionMapManager.InitActionMaps(",
+            "ActionMapManager.LoadFromXML(",
+            "ActionMapManager.EnableActionFilter(",
+            "Player.OnAction =",
+        )
+        for needle in forbidden:
+            if needle in lua:
+                raise ProfilePatchError(f"forbidden runtime input mutation found: {needle}")
 
 
 def main() -> None:
@@ -152,7 +165,7 @@ def main() -> None:
     parser.add_argument(
         "--inspect-only",
         action="store_true",
-        help="validate/detect the retail pause binding without writing a mod",
+        help="validate the known Xbox 1.5.6 Start routes without writing a mod",
     )
     args = parser.parse_args()
 
@@ -161,9 +174,11 @@ def main() -> None:
             pak_path, _patched, info = inspect_game(args.game_root)
             print(f"Game data: {pak_path}")
             print(f"Profile version: {info.profile_version}")
-            print(f"Pause map/action: {info.pause_map}/{info.pause_action}")
-            print(f"Xbox input: {info.xbox_input}")
-            print(f"PS input: {info.ps_input}")
+            print(
+                "Routed Start actions: "
+                f"{info.gameplay.map_name}/{info.gameplay.action_name}, "
+                f"{info.pause.map_name}/{info.pause.action_name}"
+            )
         else:
             build(args.game_root)
     except (FileNotFoundError, zipfile.BadZipFile, ProfilePatchError) as exc:

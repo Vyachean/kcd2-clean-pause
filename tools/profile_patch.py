@@ -7,8 +7,14 @@ import re
 import xml.etree.ElementTree as ET
 
 CONTROLS_MAP = "clean_pause_controls"
+CONTROLS_PRIORITY = "overlays"
+MENU_ACTION = "clean_pause_open_menu"
+B_PRESS_ACTION = "clean_pause_block_b_press"
 RESUME_ACTION = "clean_pause_resume"
-INPUT_FILTER = "clean_pause_only"
+GAMEPLAY_MAP = "open_menu"
+GAMEPLAY_ACTION = "open_menu"
+PAUSE_MAP = "open_pause_menu"
+PAUSE_ACTION = "open_pause_menu"
 
 
 class ProfilePatchError(RuntimeError):
@@ -16,12 +22,18 @@ class ProfilePatchError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class RoutedAction:
+    map_name: str
+    action_name: str
+    xbox_input: str
+    ps_input: str | None
+
+
+@dataclass(frozen=True)
 class PatchInfo:
     profile_version: str | None
-    pause_map: str
-    pause_action: str
-    xbox_input: str | None
-    ps_input: str | None
+    gameplay: RoutedAction
+    pause: RoutedAction
 
 
 def _device_inputs(action: ET.Element, device: str) -> list[str]:
@@ -39,7 +51,34 @@ def _device_inputs(action: ET.Element, device: str) -> list[str]:
     return values
 
 
-def detect_pause_binding(xml_text: str) -> PatchInfo:
+def _find_exact_action(root: ET.Element, map_name: str, action_name: str) -> RoutedAction:
+    maps = [m for m in root.findall("actionmap") if m.get("name") == map_name]
+    if len(maps) != 1:
+        raise ProfilePatchError(
+            f'expected exactly one <actionmap name="{map_name}">, found {len(maps)}'
+        )
+
+    actions = [a for a in maps[0].findall("action") if a.get("name") == action_name]
+    if len(actions) != 1:
+        raise ProfilePatchError(
+            f"expected exactly one {map_name}/{action_name} action, found {len(actions)}"
+        )
+
+    xbox_inputs = _device_inputs(actions[0], "xboxpad")
+    if "xi_start" not in xbox_inputs:
+        raise ProfilePatchError(
+            f"{map_name}/{action_name} is not bound to xboxpad=xi_start; refusing to guess"
+        )
+    ps_inputs = _device_inputs(actions[0], "pspad")
+    return RoutedAction(
+        map_name=map_name,
+        action_name=action_name,
+        xbox_input="xi_start",
+        ps_input=ps_inputs[0] if ps_inputs else None,
+    )
+
+
+def detect_pause_bindings(xml_text: str) -> PatchInfo:
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as exc:
@@ -48,54 +87,18 @@ def detect_pause_binding(xml_text: str) -> PatchInfo:
     if root.tag != "profile":
         raise ProfilePatchError(f"expected <profile> root, got <{root.tag}>")
 
-    candidates: list[tuple[int, str, str, ET.Element]] = []
-    for action_map in root.findall("actionmap"):
-        map_name = action_map.get("name") or ""
-        for action in action_map.findall("action"):
-            action_name = action.get("name") or ""
-            xbox_inputs = _device_inputs(action, "xboxpad")
-            if "xi_start" not in xbox_inputs:
-                continue
-
-            score = 0
-            if map_name == "open_pause_menu":
-                score += 100
-            if action_name == "open_pause_menu":
-                score += 100
-            if map_name == "ui_start_pause":
-                score += 90
-            if action_name == "ui_start_pause":
-                score += 90
-            if "pause" in map_name.lower():
-                score += 20
-            if "pause" in action_name.lower():
-                score += 20
-
-            # xi_start is also used by non-pause actions. Require pause semantics.
-            if score > 0:
-                candidates.append((score, map_name, action_name, action))
-
-    if not candidates:
+    priority_names = {
+        p.get("name") for priorities in root.findall("priorities") for p in priorities.findall("priority")
+    }
+    if CONTROLS_PRIORITY not in priority_names:
         raise ProfilePatchError(
-            "could not find a pause action bound to xboxpad=xi_start; refusing to guess"
+            f'profile does not define required priority "{CONTROLS_PRIORITY}"; refusing to invent ordering'
         )
 
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    best_score = candidates[0][0]
-    best = [item for item in candidates if item[0] == best_score]
-    if len(best) != 1:
-        names = ", ".join(f"{m}/{a}" for _, m, a, _ in best)
-        raise ProfilePatchError(f"ambiguous pause binding candidates: {names}")
-
-    _, map_name, action_name, action = best[0]
-    xbox_inputs = _device_inputs(action, "xboxpad")
-    ps_inputs = _device_inputs(action, "pspad")
     return PatchInfo(
         profile_version=root.get("version"),
-        pause_map=map_name,
-        pause_action=action_name,
-        xbox_input=xbox_inputs[0] if xbox_inputs else None,
-        ps_input=ps_inputs[0] if ps_inputs else None,
+        gameplay=_find_exact_action(root, GAMEPLAY_MAP, GAMEPLAY_ACTION),
+        pause=_find_exact_action(root, PAUSE_MAP, PAUSE_ACTION),
     )
 
 
@@ -136,7 +139,7 @@ def _find_named_block(text: str, tag: str, name: str) -> tuple[int, int]:
     )
     match = open_pattern.search(text)
     if not match:
-        raise ProfilePatchError(f"could not locate <{tag} name=\"{name}\"> in source text")
+        raise ProfilePatchError(f'could not locate <{tag} name="{name}"> in source text')
     close = re.search(rf"</{tag}\s*>", text[match.end() :], re.IGNORECASE)
     if not close:
         raise ProfilePatchError(f"missing closing </{tag}> for {name}")
@@ -144,32 +147,22 @@ def _find_named_block(text: str, tag: str, name: str) -> tuple[int, int]:
     return match.start(), end
 
 
-def patch_profile(xml_text: str) -> tuple[str, PatchInfo]:
-    info = detect_pause_binding(xml_text)
-
-    if CONTROLS_MAP in xml_text or INPUT_FILTER in xml_text:
-        raise ProfilePatchError("profile already contains Clean Pause additions")
-
-    map_start, map_end = _find_named_block(xml_text, "actionmap", info.pause_map)
-    map_text = xml_text[map_start:map_end]
-
+def _patch_existing_action(text: str, routed: RoutedAction) -> str:
+    map_start, map_end = _find_named_block(text, "actionmap", routed.map_name)
+    map_text = text[map_start:map_end]
     action_pattern = re.compile(
-        rf"<action\b(?=[^>]*\bname\s*=\s*([\"']){re.escape(info.pause_action)}\1)[^>]*>",
+        rf"<action\b(?=[^>]*\bname\s*=\s*([\"']){re.escape(routed.action_name)}\1)[^>]*>",
         re.IGNORECASE | re.DOTALL,
     )
     matches = list(action_pattern.finditer(map_text))
     if len(matches) != 1:
         raise ProfilePatchError(
-            f"expected exactly one {info.pause_map}/{info.pause_action} action tag, found {len(matches)}"
+            f"expected exactly one {routed.map_name}/{routed.action_name} action tag, found {len(matches)}"
         )
 
     action_match = matches[0]
     old_tag = action_match.group(0)
     new_tag = old_tag
-
-    # A console command has no activation-mode argument. The retail pause action
-    # commonly fires on both press and release, which would toggle Clean Pause
-    # twice from one physical button press. Make it deliberately single-fire.
     for attr in (
         "onRelease",
         "onHold",
@@ -184,15 +177,71 @@ def patch_profile(xml_text: str) -> tuple[str, PatchInfo]:
     new_tag = _set_attr(new_tag, "onPress", "1")
     new_tag = _set_attr(new_tag, "consoleCmd", "1")
 
-    # The physical bindings and keybind reference must remain untouched.
-    for attr in ("xboxpad", "pspad", "keyboard", "noModifiers"):
+    for attr in ("name", "xboxpad", "pspad", "keyboard", "noModifiers"):
         before = _attr_pattern(attr).search(old_tag)
         after = _attr_pattern(attr).search(new_tag)
         if (before.group(2) if before else None) != (after.group(2) if after else None):
-            raise ProfilePatchError(f"patch unexpectedly changed {attr} on the pause action")
+            raise ProfilePatchError(
+                f"patch unexpectedly changed {attr} on {routed.map_name}/{routed.action_name}"
+            )
 
     patched_map = map_text[: action_match.start()] + new_tag + map_text[action_match.end() :]
-    patched = xml_text[:map_start] + patched_map + xml_text[map_end:]
+    return text[:map_start] + patched_map + text[map_end:]
+
+
+def _extend_relevant_action_pass_filters(text: str, routed_names: set[str]) -> str:
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as exc:
+        raise ProfilePatchError(f"profile became invalid before filter extension: {exc}") from exc
+
+    filter_names: list[str] = []
+    for action_filter in root.findall("actionfilter"):
+        if (action_filter.get("type") or "").lower() != "actionpass":
+            continue
+        allowed = {a.get("name") for a in action_filter.findall("action")}
+        if allowed & routed_names:
+            name = action_filter.get("name")
+            if not name:
+                raise ProfilePatchError("relevant actionPass filter has no name")
+            filter_names.append(name)
+
+    if not filter_names:
+        return text
+
+    newline = "\r\n" if "\r\n" in text else "\n"
+    indent = "\t" if "\t<actionmap" in text else "  "
+    inner = indent * 2
+    additions = (MENU_ACTION, B_PRESS_ACTION, RESUME_ACTION)
+
+    patched = text
+    for filter_name in filter_names:
+        start, end = _find_named_block(patched, "actionfilter", filter_name)
+        block = patched[start:end]
+        close_match = re.search(r"</actionfilter\s*>", block, re.IGNORECASE)
+        if not close_match:
+            raise ProfilePatchError(f"missing closing actionfilter for {filter_name}")
+        existing = ET.fromstring(block)
+        existing_names = {a.get("name") for a in existing.findall("action")}
+        lines = "".join(
+            inner + f'<action name="{name}" />' + newline
+            for name in additions
+            if name not in existing_names
+        )
+        block = block[: close_match.start()] + lines + block[close_match.start() :]
+        patched = patched[:start] + block + patched[end:]
+
+    return patched
+
+
+def patch_profile(xml_text: str) -> tuple[str, PatchInfo]:
+    info = detect_pause_bindings(xml_text)
+    markers = (CONTROLS_MAP, MENU_ACTION, B_PRESS_ACTION, RESUME_ACTION)
+    if any(marker in xml_text for marker in markers):
+        raise ProfilePatchError("profile already contains Clean Pause additions")
+
+    patched = _patch_existing_action(xml_text, info.gameplay)
+    patched = _patch_existing_action(patched, info.pause)
 
     newline = "\r\n" if "\r\n" in xml_text else "\n"
     indent = "\t" if "\t<actionmap" in xml_text else "  "
@@ -201,11 +250,15 @@ def patch_profile(xml_text: str) -> tuple[str, PatchInfo]:
     controls_block = (
         newline
         + indent
-        + f'<actionmap name="{CONTROLS_MAP}" priority="pure_include" exclusivity="0">'
+        + f'<actionmap name="{CONTROLS_MAP}" priority="{CONTROLS_PRIORITY}" exclusivity="1">'
         + newline
         + inner
-        # Resume on release keeps the entire B press/release cycle behind the
-        # actionPass filter, so gameplay never receives an orphaned B release.
+        + f'<action name="{MENU_ACTION}" onPress="1" xboxpad="xi_start" pspad="pad_start" noModifiers="1" consoleCmd="1" />'
+        + newline
+        + inner
+        + f'<action name="{B_PRESS_ACTION}" onPress="1" xboxpad="xi_b" pspad="pad_circle" />'
+        + newline
+        + inner
         + f'<action name="{RESUME_ACTION}" onRelease="1" xboxpad="xi_b" pspad="pad_circle" consoleCmd="1" />'
         + newline
         + indent
@@ -213,37 +266,38 @@ def patch_profile(xml_text: str) -> tuple[str, PatchInfo]:
         + newline
     )
 
-    # Keep the small custom map next to the source pause include map.
-    _, new_map_end = _find_named_block(patched, "actionmap", info.pause_map)
-    patched = patched[:new_map_end] + controls_block + patched[new_map_end:]
-
-    filter_block = (
-        indent
-        + f'<actionfilter name="{INPUT_FILTER}" type="actionPass">'
-        + newline
-        + inner
-        + f'<action name="{info.pause_action}" />'
-        + newline
-        + inner
-        + f'<action name="{RESUME_ACTION}" />'
-        + newline
-        + indent
-        + "</actionfilter>"
-        + newline
-        + newline
+    _, pause_map_end = _find_named_block(patched, "actionmap", info.pause.map_name)
+    patched = patched[:pause_map_end] + controls_block + patched[pause_map_end:]
+    patched = _extend_relevant_action_pass_filters(
+        patched, {info.gameplay.action_name, info.pause.action_name}
     )
-
-    first_filter = re.search(r"^[ \t]*<actionfilter\b", patched, re.IGNORECASE | re.MULTILINE)
-    if first_filter:
-        patched = patched[: first_filter.start()] + filter_block + patched[first_filter.start() :]
-    else:
-        closing = re.search(r"</profile\s*>", patched, re.IGNORECASE)
-        if not closing:
-            raise ProfilePatchError("missing closing </profile>")
-        patched = patched[: closing.start()] + filter_block + patched[closing.start() :]
 
     _validate_patch(patched, info)
     return patched, info
+
+
+def _validate_routed_action(root: ET.Element, routed: RoutedAction) -> None:
+    action_map = next(
+        (m for m in root.findall("actionmap") if m.get("name") == routed.map_name), None
+    )
+    if action_map is None:
+        raise ProfilePatchError(f"patched profile lost action map {routed.map_name}")
+    actions = [a for a in action_map.findall("action") if a.get("name") == routed.action_name]
+    if len(actions) != 1:
+        raise ProfilePatchError(
+            f"patched profile has unexpected {routed.map_name}/{routed.action_name} count"
+        )
+    action = actions[0]
+    if action.get("consoleCmd") != "1" or action.get("onPress") != "1":
+        raise ProfilePatchError(
+            f"{routed.map_name}/{routed.action_name} is not a single-fire console command"
+        )
+    if any(action.get(name) is not None for name in ("onRelease", "onHold", "always")):
+        raise ProfilePatchError(
+            f"{routed.map_name}/{routed.action_name} still has a second activation mode"
+        )
+    if "xi_start" not in _device_inputs(action, "xboxpad"):
+        raise ProfilePatchError(f"{routed.map_name}/{routed.action_name} lost xi_start")
 
 
 def _validate_patch(patched: str, info: PatchInfo) -> None:
@@ -255,39 +309,42 @@ def _validate_patch(patched: str, info: PatchInfo) -> None:
     if root.get("version") != info.profile_version:
         raise ProfilePatchError("patch changed the profile root version")
 
-    pause_map = next(
-        (m for m in root.findall("actionmap") if m.get("name") == info.pause_map),
-        None,
-    )
-    if pause_map is None:
-        raise ProfilePatchError("patched profile lost the retail pause map")
-    pause_actions = [a for a in pause_map.findall("action") if a.get("name") == info.pause_action]
-    if len(pause_actions) != 1:
-        raise ProfilePatchError("patched profile has an unexpected pause action count")
-    pause_action = pause_actions[0]
-    if pause_action.get("consoleCmd") != "1" or pause_action.get("onPress") != "1":
-        raise ProfilePatchError("pause action is not a single-fire console command")
-    if any(pause_action.get(name) is not None for name in ("onRelease", "onHold", "always")):
-        raise ProfilePatchError("pause action still has a second activation mode")
-    if "xi_start" not in _device_inputs(pause_action, "xboxpad"):
-        raise ProfilePatchError("patched pause action lost xi_start")
+    _validate_routed_action(root, info.gameplay)
+    _validate_routed_action(root, info.pause)
 
     controls = [m for m in root.findall("actionmap") if m.get("name") == CONTROLS_MAP]
     if len(controls) != 1:
         raise ProfilePatchError("expected exactly one Clean Pause controls map")
-    resume = [a for a in controls[0].findall("action") if a.get("name") == RESUME_ACTION]
-    if (
-        len(resume) != 1
-        or resume[0].get("onRelease") != "1"
-        or resume[0].get("onPress") is not None
-        or resume[0].get("xboxpad") != "xi_b"
-        or resume[0].get("consoleCmd") != "1"
-    ):
+    controls_map = controls[0]
+    if controls_map.get("priority") != CONTROLS_PRIORITY or controls_map.get("exclusivity") != "1":
+        raise ProfilePatchError("Clean Pause controls map must be exclusive at overlay priority")
+
+    def action(name: str) -> ET.Element:
+        found = [a for a in controls_map.findall("action") if a.get("name") == name]
+        if len(found) != 1:
+            raise ProfilePatchError(f"expected exactly one controls action {name}")
+        return found[0]
+
+    menu = action(MENU_ACTION)
+    if menu.get("onPress") != "1" or menu.get("xboxpad") != "xi_start" or menu.get("consoleCmd") != "1":
+        raise ProfilePatchError("Clean Pause menu-handoff action contract is invalid")
+
+    b_press = action(B_PRESS_ACTION)
+    if b_press.get("onPress") != "1" or b_press.get("xboxpad") != "xi_b" or b_press.get("consoleCmd") is not None:
+        raise ProfilePatchError("Clean Pause B press sink contract is invalid")
+
+    resume = action(RESUME_ACTION)
+    if resume.get("onRelease") != "1" or resume.get("onPress") is not None or resume.get("xboxpad") != "xi_b" or resume.get("consoleCmd") != "1":
         raise ProfilePatchError("Clean Pause resume action contract is invalid")
 
-    filters = [f for f in root.findall("actionfilter") if f.get("name") == INPUT_FILTER]
-    if len(filters) != 1 or filters[0].get("type") != "actionPass":
-        raise ProfilePatchError("Clean Pause actionPass filter contract is invalid")
-    allowed = {a.get("name") for a in filters[0].findall("action")}
-    if allowed != {info.pause_action, RESUME_ACTION}:
-        raise ProfilePatchError(f"unexpected Clean Pause filter allow-list: {sorted(allowed)}")
+    routed = {info.gameplay.action_name, info.pause.action_name}
+    for action_filter in root.findall("actionfilter"):
+        if (action_filter.get("type") or "").lower() != "actionpass":
+            continue
+        names = {a.get("name") for a in action_filter.findall("action")}
+        if names & routed:
+            missing = {MENU_ACTION, B_PRESS_ACTION, RESUME_ACTION} - names
+            if missing:
+                raise ProfilePatchError(
+                    f"actionPass filter {action_filter.get('name')} would block Clean Pause controls: {sorted(missing)}"
+                )
