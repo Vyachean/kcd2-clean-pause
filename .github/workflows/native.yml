@@ -29,12 +29,33 @@ jobs:
         run: |
           $dll = "build/native/Release/version.dll"
           if (-not (Test-Path $dll)) { throw "Missing $dll" }
-          $exports = & dumpbin /nologo /exports $dll | Out-String
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
+          $vsRoot = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          if (-not $vsRoot) { throw "Visual Studio C++ installation not found" }
+          $dumpbin = Get-ChildItem (Join-Path $vsRoot "VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe") |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $dumpbin) { throw "dumpbin.exe not found under $vsRoot" }
+
+          $exports = & $dumpbin.FullName /nologo /exports $dll | Out-String
           @(
             "GetFileVersionInfoA",
-            "GetFileVersionInfoW",
+            "GetFileVersionInfoByHandle",
+            "GetFileVersionInfoExA",
+            "GetFileVersionInfoExW",
             "GetFileVersionInfoSizeA",
+            "GetFileVersionInfoSizeExA",
+            "GetFileVersionInfoSizeExW",
             "GetFileVersionInfoSizeW",
+            "GetFileVersionInfoW",
+            "VerFindFileA",
+            "VerFindFileW",
+            "VerInstallFileA",
+            "VerInstallFileW",
+            "VerLanguageNameA",
+            "VerLanguageNameW",
             "VerQueryValueA",
             "VerQueryValueW"
           ) | ForEach-Object {
@@ -42,32 +63,56 @@ jobs:
               throw "Missing required version.dll export: $_"
             }
           }
-          Get-FileHash $dll -Algorithm SHA256
 
-      - name: Package Game Pass development build
+          $hash = (Get-FileHash $dll -Algorithm SHA256).Hash
+          "version.dll SHA-256: $hash"
+          $exports
+
+      - name: Package Xbox Store 1.5.6 test build
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifact | Out-Null
+          New-Item -ItemType Directory -Force artifact/THIRD_PARTY_LICENSES | Out-Null
           Copy-Item build/native/Release/version.dll artifact/version.dll
+          Copy-Item build/native/_deps/minhook-src/LICENSE.txt artifact/THIRD_PARTY_LICENSES/MinHook-LICENSE.txt
+
+          $hash = (Get-FileHash artifact/version.dll -Algorithm SHA256).Hash
           @"
-          KCD2 Clean Pause - native development prototype
+          KCD2 Clean Pause - Xbox Store / Game Pass 1.5.6 test build
+          Source commit: $env:GITHUB_SHA
+          version.dll SHA-256: $hash
 
-          TARGET: KCD2 1.5.6, Windows Xbox Store / Xbox app / Game Pass.
-
-          Install version.dll next to KingdomCome.exe and WHGame.dll.
-          Typical Game Pass path:
+          INSTALL
+          Copy version.dll next to KingdomCome.exe and WHGame.dll.
+          Xbox Store / Game Pass default-style location:
             C:\XboxGames\Kingdom Come- Deliverance II\Content\
 
-          IMPORTANT:
-          - Back up/remove any other version.dll from that directory first.
-          - This is not a release build.
-          - The DLL writes kcd2_clean_pause_native.log beside itself.
-          - Remove version.dll to uninstall.
+          IMPORTANT
+          - KCD2 must be version 1.5.6 for this build.
+          - Only one version.dll proxy can occupy this directory. If another mod already
+            uses version.dll, do not overwrite it; use only one proxy at a time.
+          - Uninstall by deleting this version.dll.
+          - The mod writes kcd2_clean_pause_native.log beside version.dll.
+          - This build does not edit controller mappings or defaultProfile.xml.
+
+          CONTROLS
+          Running gameplay/dialogue/in-engine cutscene:
+            Menu / Start -> Clean Pause
+
+          Clean Pause:
+            B            -> Resume
+            Menu / Start -> KCD2 vanilla pause menu
+
+          EXPECTED CLEAN PAUSE
+          The current rendered frame should remain visible with no pause-menu overlay.
+          Current subtitles should remain visible while paused if KCD2's native pause
+          primitive preserves them.
           "@ | Set-Content -Encoding UTF8 artifact/README.txt
-          Compress-Archive -Path artifact/* -DestinationPath kcd2-clean-pause-native-dev.zip
+
+          Compress-Archive -Path artifact/* -DestinationPath kcd2-clean-pause-xbox-1.5.6-test.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: kcd2-clean-pause-native-dev
-          path: kcd2-clean-pause-native-dev.zip
+          name: kcd2-clean-pause-xbox-1.5.6-test
+          path: kcd2-clean-pause-xbox-1.5.6-test.zip
           if-no-files-found: error
