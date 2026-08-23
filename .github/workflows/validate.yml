@@ -1,0 +1,74 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Lua 5.1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1
+
+      - name: Check Lua syntax
+        run: luac5.1 -p src/Scripts/Mods/clean_pause.lua
+
+      - name: Safety checks
+        shell: python
+        run: |
+          from pathlib import Path
+
+          source = Path("src/Scripts/Mods/clean_pause.lua").read_text(encoding="utf-8")
+
+          forbidden_runtime_calls = (
+              "ActionMapManager.InitActionMaps(",
+              "System.ExecuteCommand(\"bind ",
+              "System.ExecuteCommand('bind ",
+          )
+
+          executable_lines = []
+          for line in source.splitlines():
+              stripped = line.lstrip()
+              if stripped.startswith("--"):
+                  continue
+              executable_lines.append(line)
+
+          executable = "\n".join(executable_lines)
+          for needle in forbidden_runtime_calls:
+              if needle in executable:
+                  raise SystemExit(f"Forbidden runtime input mutation found: {needle}")
+
+          print("Input safety checks passed")
+
+      - name: Build development mod
+        run: python tools/build.py
+
+      - name: Validate generated PAK
+        run: python tools/build.py --check
+
+      - name: Package development artifact
+        run: |
+          cd release
+          zip -r ../kcd2-clean-pause-dev.zip clean_pause
+
+      - name: Upload development artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kcd2-clean-pause-dev
+          path: kcd2-clean-pause-dev.zip
+          if-no-files-found: error
