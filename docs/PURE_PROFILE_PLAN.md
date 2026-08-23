@@ -17,14 +17,14 @@ open_menu/open_menu             -> xi_start
 open_pause_menu/open_pause_menu -> xi_start
 ```
 
-The same routes and `overlays` priority 12 were confirmed in the actual extracted Xbox Store 1.5.6 profile selected for retail test candidate 1. See `docs/RETAIL_TEST1.md`.
+The same routes and `overlays` priority 12 were confirmed in the actual extracted Xbox Store 1.5.6 profile selected for retail testing. See `docs/RETAIL_TEST1.md`.
 
-### 2. Exact-profile builders — complete
+### 2. Exact-profile development builders — complete
 
-Two repository-owned source paths are supported:
+Two maintainer/development source paths are supported:
 
 - `tools/build_from_game.py` reads the target installation's `Data/IPL_GameData.pak`;
-- `tools/build_from_profile.py` accepts an already extracted exact `defaultProfile.xml` when the full game PAK is too large to transfer.
+- `tools/build_from_profile.py` accepts an already extracted exact `defaultProfile.xml`.
 
 Both fail closed unless the expected 1.5.6 structure exists and patch both retail Start actions while preserving action IDs and physical bindings.
 
@@ -59,23 +59,46 @@ Replacement:
            exclusivity="1">
 ```
 
-The map has a Start handoff action, a B-press sink and a B-release resume action. Relevant existing `actionPass` filters are extended; existing `actionFail` restrictions are preserved. The exact retail profile selected for test candidate 1 contains no `actionPass` filters.
+The map has a Start handoff action, a B-press sink and a B-release resume action. Relevant existing `actionPass` filters are extended; existing `actionFail` restrictions are preserved. The exact retail profile selected for the first candidate contains no `actionPass` filters.
 
-### 5. Static validation — complete
+### 5. Self-contained release source — complete
 
-CI covers Lua syntax, exact-profile patch unit tests, both routed Start actions, overlay-priority/exclusive controls, B press/release contract, actionPass extension, forbidden runtime mutation checks, extracted-profile preparation and a synthetic exact-profile build.
+KCD2 uses last-mod-wins for `defaultProfile.xml`, so the fixed 1.5.6 release needs the complete patched profile.
 
-Synthetic artifacts are never published as retail packages.
+The patched target profile is versioned as release source at:
 
-### 6. CI packaging / GitHub Releases — implemented
+```text
+vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz
+```
 
-`.github/workflows/release.yml` is the canonical public packaging path.
+`tools/build_release.py` verifies the decompressed SHA-256 and packages that source together with the repository Lua/runtime and manifest.
 
-The exact Xbox Store 1.5.6 source profile is not committed to Git. It is supplied to Actions as gzip+base64 through the protected repository secret `KCD2_XBOX_156_DEFAULT_PROFILE_GZIP_B64`. The workflow verifies its SHA-256 before building, runs the repository builder, validates the outer ZIP and inner PAK, creates checksums, uploads a CI artifact and publishes a GitHub Release asset.
+This removes the previous GitHub Actions Secret/manual retail-file dependency. A release is reproducible from its Git tag alone.
+
+### 6. Static validation — complete
+
+CI covers Lua syntax, exact-profile patch unit tests, both routed Start actions, overlay-priority/exclusive controls, B press/release contract, actionPass extension, forbidden runtime mutation checks, synthetic exact-profile generation, and the real self-contained release build.
+
+PR validation never publishes its generated package.
+
+### 7. Tag-based GitHub Releases — implemented
+
+`.github/workflows/release.yml` follows the normal release flow:
+
+```text
+version tag (v*)
+  -> checkout tag
+  -> validate
+  -> tools/build_release.py
+  -> ZIP + SHA256SUMS.txt
+  -> GitHub Release assets
+```
+
+A tag with a suffix such as `v0.1.0-rc.1` is published as a prerelease. A stable tag such as `v0.1.0` is a normal release.
 
 See `docs/RELEASE.md`.
 
-### 7. Xbox Store 1.5.6 retail acceptance — next
+### 8. Xbox Store 1.5.6 retail acceptance — next
 
 Must prove:
 
@@ -92,7 +115,9 @@ See `docs/TESTING.md`.
 
 ## Compatibility policy
 
-`defaultProfile.xml` is a whole-file conflict point. Never commit a copied retail profile or generated install package. Build from the exact verified source profile; test without another mod replacing `defaultProfile.xml`; document manual merging if this becomes the release implementation.
+`defaultProfile.xml` is a whole-file conflict point. The 1.5.6 release source is deliberately pinned to that game version. Test without another mod replacing `defaultProfile.xml`; supporting another KCD2 version requires regenerating/reviewing the vendored target profile and publishing a new tagged release.
+
+Generated `.pak` and install `.zip` files are never tracked in Git.
 
 ## Native fallback criteria
 
