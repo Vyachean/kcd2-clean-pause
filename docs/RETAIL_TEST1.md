@@ -2,13 +2,11 @@
 
 This note records the provenance and release contract for the first installable Clean Pause candidate intended for retail testing.
 
-## Source
+## Original retail source
 
-The candidate is built from the implementation in PR #4 (`prototype/pure-profile`) and an extracted `Libs/Config/defaultProfile.xml` from the target Xbox Store / Xbox app KCD2 installation.
+The target profile was extracted from the Xbox Store / Xbox app KCD2 1.5.6 installation.
 
-The retail game file itself is intentionally **not committed** to this public repository. `defaultProfile.xml` is Warhorse game data and the official mod mechanism requires a whole-file override, so the repository stores the patch/build logic rather than the game file.
-
-Source-profile SHA-256 for test candidate 1:
+Original retail profile SHA-256:
 
 ```text
 69ad9fd618cd31961fef8eb061f3f2723997df5e0fb257ec74d0d5f555592565
@@ -23,20 +21,38 @@ open_pause_menu/open_pause_menu -> xboxpad="xi_start"
 overlays priority               -> 12
 ```
 
-The profile contains no `actionPass` filters, so this exact candidate does not need any actionPass allow-list extension. Existing `actionFail` filters remain untouched.
+The profile contains no `actionPass` filters, so this exact target does not need any actionPass allow-list extension. Existing `actionFail` filters remain untouched.
 
-## Reproducible repository path
+## Repository release source
 
-Two supported builders produce the same mod architecture:
+For releases, `tools/profile_patch.py` was applied to that verified retail profile and the resulting **patched** target profile is versioned with the mod source at:
 
-- `tools/build_from_game.py` — extracts the profile from `Data/IPL_GameData.pak`;
-- `tools/build_from_profile.py` — accepts an already extracted exact `defaultProfile.xml`.
+```text
+vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz
+```
 
-Both use the same `tools/profile_patch.py`, runtime `src/Scripts/Mods/clean_pause.lua`, manifest and build validator.
+Decompressed patched-profile SHA-256:
 
-Public distribution is generated only by `.github/workflows/release.yml`. The exact retail profile is supplied to GitHub Actions through the protected repository secret `KCD2_XBOX_156_DEFAULT_PROFILE_GZIP_B64`; the workflow verifies that the decoded input has the SHA-256 above before it can build anything.
+```text
+28e210454d749869b1fa26d4414ba3c055157e731856f9610d6ffce5ddfbc373
+```
 
-The workflow runs repository tests, builds through `tools/build_from_profile.py`, validates the install ZIP and inner PAK, creates `SHA256SUMS.txt`, uploads a CI artifact, and publishes the install ZIP as a GitHub Release asset. Generated ZIP/PAK files are not tracked in Git.
+This makes a release self-contained and reproducible from its Git tag. GitHub Actions does not need a user's game installation or a repository secret.
+
+The compressed profile is release source, not a generated install package. Generated `.pak` and install `.zip` files remain excluded from Git.
+
+## Build paths
+
+Development helpers:
+
+- `tools/build_from_game.py` — extracts and patches `Data/IPL_GameData.pak` from an installation;
+- `tools/build_from_profile.py` — patches an already extracted exact retail `defaultProfile.xml`.
+
+Canonical release builder:
+
+- `tools/build_release.py` — verifies and packages the vendored patched Xbox 1.5.6 source.
+
+`.github/workflows/validate.yml` exercises the release builder on PRs. `.github/workflows/release.yml` runs from version tags and attaches the resulting package to GitHub Releases.
 
 ## Candidate contents
 
@@ -60,7 +76,7 @@ The patched profile routes both retail Start actions to Clean Pause and adds the
 
 ## Runtime acceptance still required
 
-This candidate is a prerelease test build, not a stable release. Retail testing must still prove:
+The first tagged build should be published as a prerelease (for example `v0.1.0-rc.1`), not as a stable release. Retail testing must still prove:
 
 1. title/front-end controller input is unaffected;
 2. first Start enters Clean Pause with zero visible pause-menu frame;
@@ -70,4 +86,4 @@ This candidate is a prerelease test build, not a stable release. Retail testing 
 6. second Start opens the real vanilla pause menu;
 7. dialogue/cutscene audio and progression pause and resume coherently.
 
-Record runtime results in the PR before changing the candidate architecture.
+Record runtime results in the PR before promoting the candidate to a stable release.
