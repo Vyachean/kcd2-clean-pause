@@ -41,7 +41,7 @@ The implementation uses only KCD2's normal `.pak`/Lua mod path. It does **not** 
 
 **GitHub Releases are the canonical distribution channel.** Generated `.pak`/`.zip` files are not committed to the repository.
 
-Do not use `v0.1.0-rc.1`. The next retail candidate will be `v0.1.0-rc.2` after the fail-safe fix passes CI.
+Do not use `v0.1.0-rc.1`. The next retail candidate is `v0.1.0-rc.2` after the fail-safe fix passes CI and is published.
 
 Release flow:
 
@@ -121,10 +121,13 @@ That path remains a retail acceptance item; the current fix is specifically desi
 
 ## Release source
 
-KCD2 uses last-mod-wins for `defaultProfile.xml`, so this implementation is intentionally version-specific. The repository contains the patched Xbox 1.5.6 profile as deterministic gzip+base64 release source:
+KCD2 uses last-mod-wins for `defaultProfile.xml`, so this implementation is intentionally version-specific. The patched Xbox 1.5.6 profile is stored as deterministic gzip+base64 source split into integrity-checked text chunks:
 
 ```text
-vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz.b64
+vendor/kcd2/xbox-1.5.6/profile.b64.parts/
+  00.txt
+  ...
+  07.txt
 ```
 
 Original retail profile SHA-256:
@@ -133,13 +136,19 @@ Original retail profile SHA-256:
 69ad9fd618cd31961fef8eb061f3f2723997df5e0fb257ec74d0d5f555592565
 ```
 
+Assembled encoded-source SHA-256:
+
+```text
+01b70dab6d8cfbdb502bfd683d4341ef9121c9a22b0440c06653e946413c9880
+```
+
 Current fail-safe patched profile SHA-256:
 
 ```text
 9838db3747f7f36e0c9c281b8770bc7300998515407515b65493b8e9a9bcd14e
 ```
 
-`tools/build_release.py` decodes it, verifies this digest and validates the complete fallback/console-command contract before packaging.
+`tools/build_release.py` verifies every chunk, the assembled source, the decompressed profile digest and the complete fallback/console-command contract before packaging.
 
 ## Safety constraints
 
