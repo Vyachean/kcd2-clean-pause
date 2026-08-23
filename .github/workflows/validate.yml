@@ -28,47 +28,131 @@ jobs:
       - name: Check Lua syntax
         run: luac5.1 -p src/Scripts/Mods/clean_pause.lua
 
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
       - name: Safety checks
         shell: python
         run: |
           from pathlib import Path
 
           source = Path("src/Scripts/Mods/clean_pause.lua").read_text(encoding="utf-8")
-
-          forbidden_runtime_calls = (
-              "ActionMapManager.InitActionMaps(",
-              "System.ExecuteCommand(\"bind ",
-              "System.ExecuteCommand('bind ",
-          )
-
           executable_lines = []
           for line in source.splitlines():
               stripped = line.lstrip()
               if stripped.startswith("--"):
                   continue
               executable_lines.append(line)
-
           executable = "\n".join(executable_lines)
+
+          forbidden_runtime_calls = (
+              "ActionMapManager.InitActionMaps(",
+              "ActionMapManager.LoadFromXML(",
+              "ActionMapManager.EnableActionFilter(",
+              "Player.OnAction =",
+              "System.ExecuteCommand(\"bind ",
+              "System.ExecuteCommand('bind ",
+          )
           for needle in forbidden_runtime_calls:
               if needle in executable:
                   raise SystemExit(f"Forbidden runtime input mutation found: {needle}")
 
+          if source.count("__CLEAN_PAUSE_GAMEPLAY_COMMAND__") != 1:
+              raise SystemExit("Gameplay routed-command placeholder contract changed")
+          if source.count("__CLEAN_PAUSE_PAUSE_COMMAND__") != 1:
+              raise SystemExit("Pause routed-command placeholder contract changed")
+
           print("Input safety checks passed")
 
-      - name: Build development mod
-        run: python tools/build.py
-
-      - name: Validate generated PAK
-        run: python tools/build.py --check
-
-      - name: Package development artifact
+      - name: Create synthetic IPL_GameData.pak
+        shell: python
         run: |
-          cd release
-          zip -r ../kcd2-clean-pause-dev.zip clean_pause
+          from pathlib import Path
+          import zipfile
 
-      - name: Upload development artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: kcd2-clean-pause-dev
-          path: kcd2-clean-pause-dev.zip
-          if-no-files-found: error
+          root = Path("ci-game/Data")
+          root.mkdir(parents=True, exist_ok=True)
+          fixture = Path("tests/fixtures/defaultProfile_minimal.xml").read_bytes()
+          with zipfile.ZipFile(root / "IPL_GameData.pak", "w", compression=zipfile.ZIP_STORED) as pak:
+              pak.writestr("Libs/Config/defaultProfile.xml", fixture)
+
+      - name: Exercise exact-profile development builder
+        run: python tools/build_from_game.py ci-game
+
+      - name: Validate generated fixture artifact
+        shell: python
+        run: |
+          from pathlib import Path
+          import zipfile
+
+          pak_path = Path("release/clean_pause/Data/clean_pause.pak")
+          with zipfile.ZipFile(pak_path) as pak:
+              expected = {
+                  "Libs/Config/defaultProfile.xml",
+                  "Scripts/Mods/clean_pause.lua",
+              }
+              if set(pak.namelist()) != expected:
+                  raise SystemExit(f"Unexpected PAK members: {pak.namelist()}")
+              if any(pak.getinfo(name).compress_type != zipfile.ZIP_STORED for name in expected):
+                  raise SystemExit("Game PAK entries must be stored")
+              profile = pak.read("Libs/Config/defaultProfile.xml").decode("utf-8")
+              lua = pak.read("Scripts/Mods/clean_pause.lua").decode("utf-8")
+
+          required_profile_fragments = (
+              'name="open_menu"',
+              'name="open_pause_menu"',
+              'consoleCmd="1"',
+              'name="clean_pause_controls" priority="overlays" exclusivity="1"',
+              'name="clean_pause_open_menu"',
+              'name="clean_pause_block_b_press"',
+              'name="clean_pause_resume"',
+              'xboxpad="xi_b"',
+          )
+          for fragment in required_profile_fragments:
+              if fragment not in profile:
+                  raise SystemExit(f"Generated profile missing: {fragment}")
+
+          if "__CLEAN_PAUSE_GAMEPLAY_COMMAND__" in lua or "__CLEAN_PAUSE_PAUSE_COMMAND__" in lua:
+              raise SystemExit("Generated Lua still contains routed-command placeholder")
+          if 'local GAMEPLAY_COMMAND = "open_menu"' not in lua:
+              raise SystemExit("Generated Lua gameplay command does not match profile")
+          if 'local PAUSE_COMMAND = "open_pause_menu"' not in lua:
+              raise SystemExit("Generated Lua pause command does not match profile")
+
+          print("Synthetic exact-profile build validated")
+
+      - name: Exercise self-contained release builder
+        run: python tools/build_release.py
+
+      - name: Validate release ZIP
+        shell: python
+        run: |
+          from io import BytesIO
+          from pathlib import Path
+          import zipfile
+
+          outer_path = Path("release/kcd2-clean-pause-xbox-1.5.6-test.zip")
+          with zipfile.ZipFile(outer_path) as outer:
+              expected_outer = {
+                  "clean_pause/mod.manifest",
+                  "clean_pause/Data/clean_pause.pak",
+              }
+              if set(outer.namelist()) != expected_outer:
+                  raise SystemExit(f"Unexpected release members: {outer.namelist()}")
+              pak_bytes = outer.read("clean_pause/Data/clean_pause.pak")
+
+          with zipfile.ZipFile(BytesIO(pak_bytes)) as pak:
+              expected_pak = {
+                  "Libs/Config/defaultProfile.xml",
+                  "Scripts/Mods/clean_pause.lua",
+              }
+              if set(pak.namelist()) != expected_pak:
+                  raise SystemExit(f"Unexpected release PAK members: {pak.namelist()}")
+              if any(pak.getinfo(name).compress_type != zipfile.ZIP_STORED for name in expected_pak):
+                  raise SystemExit("Release PAK entries must be stored")
+
+          print("Self-contained release package validated")
+
+      # CI builds both synthetic proof and the real target package, but does not
+      # publish either from PR validation. GitHub Releases are created only from
+      # version tags by .github/workflows/release.yml.

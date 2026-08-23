@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Lua 5.1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1
+
+      - name: Validate source
+        run: |
+          luac5.1 -p src/Scripts/Mods/clean_pause.lua
+          python -m unittest discover -s tests -v
+
+      - name: Build release package
+        run: python tools/build_release.py
+
+      - name: Name and validate release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          asset="kcd2-clean-pause-${tag}.zip"
+          mv release/kcd2-clean-pause-xbox-1.5.6-test.zip "release/$asset"
+          unzip -t "release/$asset"
+          (cd release && sha256sum "$asset" > SHA256SUMS.txt)
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.ref_name }}
+          path: |
+            release/${{ env.ASSET }}
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            "${GITHUB_REF_NAME}"
+            "release/$ASSET"
+            "release/SHA256SUMS.txt"
+            --verify-tag
+            --generate-notes
+            --title "KCD2 Clean Pause ${GITHUB_REF_NAME}"
+          )
+
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            args+=(--prerelease)
+          fi
+
+          gh release create "${args[@]}"
