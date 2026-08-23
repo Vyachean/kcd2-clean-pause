@@ -83,6 +83,7 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import xml.etree.ElementTree as ET
           import zipfile
 
           pak_path = Path("release/clean_pause/Data/clean_pause.pak")
@@ -98,30 +99,43 @@ jobs:
               profile = pak.read("Libs/Config/defaultProfile.xml").decode("utf-8")
               lua = pak.read("Scripts/Mods/clean_pause.lua").decode("utf-8")
 
-          required_profile_fragments = (
-              'name="open_menu"',
-              'name="open_pause_menu"',
-              'consoleCMD="1"',
-              'name="clean_pause_controls" priority="overlays" exclusivity="1"',
-              'name="clean_pause_open_menu"',
-              'name="clean_pause_block_b_press"',
-              'name="clean_pause_resume"',
-              'xboxpad="xi_b"',
-          )
-          for fragment in required_profile_fragments:
-              if fragment not in profile:
-                  raise SystemExit(f"Generated profile missing: {fragment}")
+          root = ET.fromstring(profile)
+          def action(map_name, action_name):
+              action_map = next(m for m in root.findall("actionmap") if m.get("name") == map_name)
+              return next(a for a in action_map.findall("action") if a.get("name") == action_name)
+
+          for map_name, original, entry in (
+              ("open_menu", "open_menu", "clean_pause_enter_gameplay"),
+              ("open_pause_menu", "open_pause_menu", "clean_pause_enter_pause_context"),
+          ):
+              fallback = action(map_name, original)
+              if fallback.get("onRelease") != "1" or fallback.get("onPress") is not None:
+                  raise SystemExit(f"{map_name}/{original} is not release-only fallback")
+              if fallback.get("consoleCMD") is not None or fallback.get("consoleCmd") is not None:
+                  raise SystemExit(f"{map_name}/{original} fallback became a console command")
+              custom = action(map_name, entry)
+              if custom.get("onPress") != "1" or custom.get("consoleCMD") != "1":
+                  raise SystemExit(f"{map_name}/{entry} is not a KCD2 press console command")
+              if custom.get("keyboard") != "escape" or custom.get("xboxpad") != "xi_start":
+                  raise SystemExit(f"{map_name}/{entry} lost Escape/Start bindings")
+
+          controls = next(m for m in root.findall("actionmap") if m.get("name") == "clean_pause_controls")
+          names = {a.get("name"): a for a in controls.findall("action")}
+          if names["clean_pause_block_start_release"].get("onRelease") != "1":
+              raise SystemExit("Clean Pause is missing the Start/Escape release sink")
+          if profile.count('consoleCMD="1"') != 4:
+              raise SystemExit("Generated profile must contain exactly four KCD2 consoleCMD actions")
           if 'consoleCmd="1"' in profile:
               raise SystemExit("Generated profile contains wrong-case consoleCmd attribute")
 
+          if 'local GAMEPLAY_COMMAND = "clean_pause_enter_gameplay"' not in lua:
+              raise SystemExit("Generated Lua gameplay command does not match fail-safe entry")
+          if 'local PAUSE_COMMAND = "clean_pause_enter_pause_context"' not in lua:
+              raise SystemExit("Generated Lua pause command does not match fail-safe entry")
           if "__CLEAN_PAUSE_GAMEPLAY_COMMAND__" in lua or "__CLEAN_PAUSE_PAUSE_COMMAND__" in lua:
               raise SystemExit("Generated Lua still contains routed-command placeholder")
-          if 'local GAMEPLAY_COMMAND = "open_menu"' not in lua:
-              raise SystemExit("Generated Lua gameplay command does not match profile")
-          if 'local PAUSE_COMMAND = "open_pause_menu"' not in lua:
-              raise SystemExit("Generated Lua pause command does not match profile")
 
-          print("Synthetic exact-profile build validated")
+          print("Synthetic fail-safe exact-profile build validated")
 
       - name: Exercise self-contained release builder
         run: python tools/build_release.py
@@ -131,6 +145,7 @@ jobs:
         run: |
           from io import BytesIO
           from pathlib import Path
+          import xml.etree.ElementTree as ET
           import zipfile
 
           outer_path = Path("release/kcd2-clean-pause-xbox-1.5.6-test.zip")
@@ -153,13 +168,26 @@ jobs:
               if any(pak.getinfo(name).compress_type != zipfile.ZIP_STORED for name in expected_pak):
                   raise SystemExit("Release PAK entries must be stored")
               profile = pak.read("Libs/Config/defaultProfile.xml").decode("utf-8")
-              if profile.count('consoleCMD="1"') != 4:
-                  raise SystemExit("Release profile must contain exactly four KCD2 consoleCMD actions")
-              if 'consoleCmd="1"' in profile:
-                  raise SystemExit("Release profile contains wrong-case consoleCmd attribute")
 
-          print("Self-contained release package validated")
+          root = ET.fromstring(profile)
+          for map_name, original, entry in (
+              ("open_menu", "open_menu", "clean_pause_enter_gameplay"),
+              ("open_pause_menu", "open_pause_menu", "clean_pause_enter_pause_context"),
+          ):
+              action_map = next(m for m in root.findall("actionmap") if m.get("name") == map_name)
+              actions = {a.get("name"): a for a in action_map.findall("action")}
+              if actions[original].get("onRelease") != "1" or actions[original].get("onPress") is not None:
+                  raise SystemExit(f"Release lost vanilla fallback {map_name}/{original}")
+              if actions[entry].get("onPress") != "1" or actions[entry].get("consoleCMD") != "1":
+                  raise SystemExit(f"Release lost custom entry {map_name}/{entry}")
 
-      # CI builds both synthetic proof and the real target package, but does not
-      # publish either from PR validation. GitHub Releases are created by
-      # .github/workflows/release.yml after VERSION changes reach main.
+          if profile.count('consoleCMD="1"') != 4:
+              raise SystemExit("Release profile must contain exactly four KCD2 consoleCMD actions")
+          if 'consoleCmd="1"' in profile:
+              raise SystemExit("Release profile contains wrong-case consoleCmd attribute")
+
+          print("Self-contained fail-safe release package validated")
+
+      # PR validation builds both synthetic proof and the real target package,
+      # but publishes neither. The release workflow publishes only after a
+      # VERSION change reaches main.
