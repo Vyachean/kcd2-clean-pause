@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<profile version="22">
+  <actionmap name="clean_pause_controls" version="22" priority="pure_include" exclusivity="0">
+    <action
+      name="clean_pause_start"
+      consoleCmd="1"
+      onPress="1"
+      onRelease="0"
+      onHold="0"
+      xboxpad="xi_start" />
+    <action
+      name="clean_pause_resume"
+      consoleCmd="1"
+      onPress="1"
+      onRelease="0"
+      onHold="0"
+      xboxpad="xi_b" />
+  </actionmap>
+
+  <actionfilter name="clean_pause_block_vanilla_pause" type="actionFail">
+    <filter name="ui_start_pause" />
+  </actionfilter>
+
+  <actionfilter name="clean_pause_only" type="actionPass">
+    <filter name="clean_pause_start" />
+    <filter name="clean_pause_resume" />
+  </actionfilter>
+</profile>
