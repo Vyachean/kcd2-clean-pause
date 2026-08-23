@@ -28,7 +28,7 @@ jobs:
       - name: Check Lua syntax
         run: luac5.1 -p src/Scripts/Mods/clean_pause.lua
 
-      - name: Run profile patch tests
+      - name: Run tests
         run: python -m unittest discover -s tests -v
 
       - name: Safety checks
@@ -76,7 +76,7 @@ jobs:
           with zipfile.ZipFile(root / "IPL_GameData.pak", "w", compression=zipfile.ZIP_STORED) as pak:
               pak.writestr("Libs/Config/defaultProfile.xml", fixture)
 
-      - name: Exercise exact-profile builder
+      - name: Exercise exact-profile development builder
         run: python tools/build_from_game.py ci-game
 
       - name: Validate generated fixture artifact
@@ -84,10 +84,6 @@ jobs:
         run: |
           from pathlib import Path
           import zipfile
-
-          outer = Path("release/kcd2-clean-pause-xbox-1.5.6-test.zip")
-          if not outer.is_file():
-              raise SystemExit("Builder did not create the test archive")
 
           pak_path = Path("release/clean_pause/Data/clean_pause.pak")
           with zipfile.ZipFile(pak_path) as pak:
@@ -125,6 +121,38 @@ jobs:
 
           print("Synthetic exact-profile build validated")
 
-      # Never upload this artifact. It is built from a synthetic fixture and is
-      # intentionally not installable. A retail test ZIP must be generated from
-      # the exact Data/IPL_GameData.pak of the installation being tested.
+      - name: Exercise self-contained release builder
+        run: python tools/build_release.py
+
+      - name: Validate release ZIP
+        shell: python
+        run: |
+          from io import BytesIO
+          from pathlib import Path
+          import zipfile
+
+          outer_path = Path("release/kcd2-clean-pause-xbox-1.5.6-test.zip")
+          with zipfile.ZipFile(outer_path) as outer:
+              expected_outer = {
+                  "clean_pause/mod.manifest",
+                  "clean_pause/Data/clean_pause.pak",
+              }
+              if set(outer.namelist()) != expected_outer:
+                  raise SystemExit(f"Unexpected release members: {outer.namelist()}")
+              pak_bytes = outer.read("clean_pause/Data/clean_pause.pak")
+
+          with zipfile.ZipFile(BytesIO(pak_bytes)) as pak:
+              expected_pak = {
+                  "Libs/Config/defaultProfile.xml",
+                  "Scripts/Mods/clean_pause.lua",
+              }
+              if set(pak.namelist()) != expected_pak:
+                  raise SystemExit(f"Unexpected release PAK members: {pak.namelist()}")
+              if any(pak.getinfo(name).compress_type != zipfile.ZIP_STORED for name in expected_pak):
+                  raise SystemExit("Release PAK entries must be stored")
+
+          print("Self-contained release package validated")
+
+      # CI builds both synthetic proof and the real target package, but does not
+      # publish either from PR validation. GitHub Releases are created only from
+      # version tags by .github/workflows/release.yml.
