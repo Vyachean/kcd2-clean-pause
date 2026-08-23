@@ -1,110 +1,143 @@
 # Testing
 
-A build is not releasable until the clean-pause behaviour is tested in the retail game. The Xbox Store / Xbox app PC build is the primary acceptance target.
+A build is not releasable until Clean Pause is tested in the retail game. The Windows Xbox Store / Xbox app build with an Xbox controller is the primary acceptance target.
 
-## Current prototype under test
+## Prototype under test
 
-The current source does **not** install controller mappings.
+The `prototype/action-filter` branch uses a supplemental action map plus narrowly scoped action filters.
 
-It wraps KCD2's existing `Player.OnAction` and watches:
+It does **not** replace the game's profile/controller layout and does not call `InitActionMaps`.
 
-```text
-ui_start_pause
-ui_back
-```
-
-The intended first-press flow is:
+Expected gameplay routing:
 
 ```text
 Menu / Start
-  -> vanilla ui_start_pause path
-  -> close vanilla ingame menu via MenuEvents.DisplayIngameMenu(false)
-  -> Game.PauseGame(true)
-  -> enable existing only_ui filter
-  -> CleanPaused with no visible menu
+  physical xi_start
+      |
+      +-- vanilla ui_start_pause -> blocked before UI dispatch
+      |
+      +-- clean_pause_start      -> Game.PauseGame(true)
+                                    -> no menu UI
 ```
 
 While clean-paused:
 
 ```text
-B / ui_back  -> Resume
-Menu / Start -> Vanilla pause menu
+B            -> clean_pause_resume -> Game.PauseGame(false)
+Menu / Start -> clean_pause_start  -> real MenuEvents.DisplayIngameMenu(true)
 ```
 
-This test is specifically intended to determine whether the vanilla menu can be cancelled before it is rendered.
+Outside active gameplay, or while KCD2's `only_ui` filter is active, the mod drops its `ui_start_pause` block so ordinary UI/menu behavior remains vanilla.
 
 ## Safety gate
 
-Run this **before** evaluating pause behaviour:
+Do this before evaluating subtitle behavior.
 
-1. Start KCD2 with an Xbox controller connected.
-2. Verify controller navigation works in the initial menu.
-3. Load a save.
-4. Verify movement, camera, face buttons, triggers, shoulders, sticks, D-pad, View and Menu operate normally.
-5. Return to the initial menu and verify navigation again if practical.
+### Initial/front-end menu
 
-**Any build that disables or globally changes unrelated controller input fails immediately.**
+1. Start KCD2 with the controller connected.
+2. Navigate the initial menu with sticks/D-pad/A/B.
+3. Press Menu / Start where it normally has meaning.
+4. Confirm no controller input has globally disappeared.
 
-The current prototype contains no `InitActionMaps`, custom action map, controller-layout replacement or persistent remapping. A main-menu controller regression would therefore be unexpected and must be treated as a stop condition.
+Expected log if initialization succeeds:
 
-## First diagnostic test
+```text
+[Clean Pause] initialized safely; profile version=...
+```
 
-Do this in ordinary exploration before a dialogue/cutscene.
+If the retail `defaultProfile.xml` version is unsupported, expected behavior is instead:
 
-### 1. First Menu / Start press
+```text
+[Clean Pause] unsupported defaultProfile.xml version ...; vanilla controls unchanged
+```
 
-Press Menu / Start once.
+That is a safe compatibility failure, not a controller failure.
 
-Record exactly one of these outcomes:
+**Stop immediately** if ordinary controller input disappears. Remove the mod and preserve `kcd.log`.
 
-#### A — ideal
+### Loaded gameplay
 
-- world freezes;
-- **no vanilla pause-menu frame is visible at all**;
-- current HUD/frame remains visible.
+After loading a save, verify before pressing Start:
 
-This validates the same-cycle cancellation approach.
+- movement;
+- camera;
+- A/B/X/Y;
+- LB/RB/LT/RT;
+- both stick clicks;
+- D-pad;
+- View;
+- Menu / Start has not caused any unrelated mapping regression.
 
-#### B — menu flashes briefly, then disappears
+## First Clean Pause test
 
-The bridge works, but ordering requires a deferred finalizer and the current implementation does not yet meet the zero-overlay requirement.
+Use ordinary exploration.
 
-#### C — vanilla menu remains open
+1. Press Menu / Start once.
+2. The world should stop immediately.
+3. The vanilla pause menu must **not appear at all**.
+4. There must be no darkening/fade/replacement screen.
+5. The current HUD/frame should remain exactly where it was.
 
-Check `kcd.log` for `[Clean Pause]` lines. Important distinctions:
+Expected log:
 
-- no `observed ui_start_pause` -> Player hook is not seeing the action in this retail route;
-- action observed + `MenuEvents... unavailable` -> event-system name/API differs on KCD2;
-- action observed + `entered native clean pause` but menu remains -> Player hook ran before the vanilla UI handler, so the menu opened after our synchronous cancellation.
+```text
+[Clean Pause] entered native clean pause
+```
 
-Do not treat C as a release failure only; it tells us which next hook is needed.
+A single visible pause-menu frame is a failure of the product requirement.
 
-### 2. Resume with B
+Unlike the discarded `Player.OnAction` prototype, the action-filter design should not rely on same-frame cancellation: `ui_start_pause` should be removed before the UI listener receives it.
 
-If clean pause was reached, press B once.
+## Resume test
 
-Expected:
+While clean-paused:
 
-- `[Clean Pause] observed ui_back while clean-paused` in the log;
-- world resumes immediately;
-- normal controls return.
+1. press B once;
+2. world simulation should resume immediately;
+3. normal gameplay input should be restored.
 
-If B does nothing but Start still works, do not force-close the game immediately: press Start and check whether the normal pause menu is reachable. Then exit and send the log.
+Expected log:
 
-### 3. Vanilla-menu handoff
+```text
+[Clean Pause] resumed from native clean pause
+```
 
-Enter clean pause again, then press Menu / Start.
+If B does not work, do not repeatedly mash controller buttons. Try Menu / Start once to test the vanilla-menu recovery path, then exit and preserve the log.
 
-Expected:
+## Vanilla-menu handoff
 
-- KCD2's normal pause menu appears;
-- Clean Pause logs `handed pause ownership to vanilla menu`;
-- closing the normal menu returns to ordinary gameplay;
-- Clean Pause does not silently reactivate.
+1. Enter Clean Pause again.
+2. Press Menu / Start again.
+3. The real KCD2 pause menu should open.
+4. Navigate it normally.
+5. Verify both B and the normal Menu/Start behavior inside the menu.
+6. Close the menu.
+7. Wait a fraction of a second for lifecycle refresh.
+8. Press Menu / Start again from gameplay; it should enter Clean Pause again.
+
+Expected handoff log:
+
+```text
+[Clean Pause] handed pause ownership to vanilla menu
+```
+
+The prototype removes its vanilla-pause block before invoking `MenuEvents.DisplayIngameMenu(true)`. KCD2's own `only_ui` filter then owns menu input. After the menu closes, the lifecycle monitor restores gameplay interception.
+
+## Main-menu return / lifecycle test
+
+This specifically guards against the earlier global-action-map failure class.
+
+1. Use Clean Pause several times.
+2. Open the vanilla pause menu.
+3. Return to the game's main/front-end menu.
+4. Confirm controller navigation remains completely normal.
+5. Load a save again.
+6. Confirm Clean Pause becomes available again without restarting the game if the mod scripts remain loaded.
+
+No `ui_start_pause` interception is allowed while `player == nil`.
 
 ## Core acceptance matrix
-
-Only after the diagnostic flow works:
 
 | Scenario | Enter clean pause | Zero visible overlay | Frame remains visible | Subtitle remains visible | Resume works | Vanilla menu reachable |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -118,53 +151,62 @@ Prerendered video is a separate capability test and may be engine-limited.
 
 ## Subtitle test
 
-The critical product test:
+This is the critical product test.
 
 1. Start a normal dialogue with subtitles enabled.
 2. Wait until a subtitle line is clearly visible.
 3. Press Menu / Start.
-4. Leave the game paused longer than the subtitle would normally remain on screen.
+4. Leave the game paused longer than that line would normally remain visible.
 5. Confirm the **same subtitle remains visible**.
-6. Press B to resume.
-7. Confirm dialogue continues normally without skipped/duplicated lines or audio desync.
+6. Press B.
+7. Confirm dialogue continues without a skipped/duplicated line or desynchronization.
 
 Repeat in an in-engine cutscene.
 
-## Audio/cutscene test
+If Start works in exploration but not in dialogue/cutscene, capture the log. That likely means a KCD2 context-specific `actionPass` filter is excluding the custom action IDs; it is an input-filter compatibility problem, not a native-pause problem.
 
-Because the prototype now uses native `Game.PauseGame(true)` rather than `t_scale 0`, verify:
+## Native pause/audio test
 
-- speech audio stops rather than continuing underneath the frozen image;
+The prototype uses:
+
+```lua
+Game.PauseGame(true)
+```
+
+instead of `t_scale 0`.
+
+Verify independently:
+
+- speech audio stops;
 - animation/camera progression stops;
+- dialogue timing stops;
 - scripted events do not advance;
+- current subtitle stays visible;
 - resume continues coherently.
 
-If native pause preserves the subtitle but audio continues, record that separately; it may identify a Warhorse-specific subsystem that needs a narrow additional pause mechanism.
+If the frame/subtitle remain but audio continues, record that separately. It would indicate a Warhorse audio subsystem outside native pause rather than an input-routing failure.
 
-## Visual-flash test
+## UI-context regression test
 
-A menu that appears for even one rendered frame violates the final goal.
+Open ordinary game UIs where practical:
 
-For the first prototype, inspect carefully for:
+- inventory;
+- map;
+- journal/quest UI;
+- vanilla pause menu.
 
-- darkening/fade;
-- menu background;
-- cursor/focus change;
-- HUD disappearing then returning;
-- subtitle disappearing/reappearing.
+Verify that B, Start and navigation retain normal behavior. The lifecycle logic specifically drops `ui_start_pause` interception whenever the game's existing `only_ui` filter is active.
 
-If uncertain, record a 60 fps or higher screen capture and inspect frame-by-frame.
-
-A single visible flash means the synchronous Player hook is too late/early for the final implementation even if the game ends up clean-paused.
+If some UI does not use `only_ui` and Start behaves like Clean Pause there, record which UI. The interceptor may need a broader menu-context predicate before release.
 
 ## Transition robustness
 
-After basic behaviour works, test:
+After the basic flow works, test:
 
 - repeated pause/resume cycles;
-- pause near a dialogue line transition;
+- pause near a subtitle transition;
 - pause near a cutscene transition;
-- clean pause -> vanilla menu -> load a save;
+- Clean Pause -> vanilla menu -> load a save;
 - death/game-over transition;
 - mounted gameplay;
 - hard-lock combat;
@@ -172,7 +214,7 @@ After basic behaviour works, test:
 - Alt-Tab while clean-paused;
 - return to main menu after several cycles.
 
-No transition may leave the game paused after Clean Pause no longer owns the pause state.
+No transition may leave the game natively paused after Clean Pause no longer owns the pause state.
 
 ## Logging
 
@@ -182,42 +224,54 @@ Search `kcd.log` for:
 [Clean Pause]
 ```
 
-Expected useful lines include:
+Useful success lines:
 
 ```text
-Player.OnAction hook installed
-prototype loaded; no controller mappings modified
-observed ui_start_pause; state=running
+initialized safely; profile version=...
 entered native clean pause
-observed ui_back while clean-paused
 resumed from native clean pause
 handed pause ownership to vanilla menu
+player disappeared; clean pause recovered
+disabled; vanilla pause action restored
 ```
 
-Failure diagnostics include:
+Compatibility/safety failures include:
 
 ```text
-MenuEvents bridge unavailable
-MenuEvents.DisplayIngameMenu(...) unavailable
-clean-pause entry aborted; vanilla pause remains authoritative
-clean-pause entry rolled back to vanilla menu
+cannot read Libs/Config/defaultProfile.xml; input hook not installed
+cannot determine defaultProfile.xml version; input hook not installed
+unsupported defaultProfile.xml version ...; vanilla controls unchanged
+custom input profile missing; vanilla controls unchanged
+supplemental filters not loaded; vanilla controls unchanged
+lifecycle monitor could not be scheduled; disabling interception
 ```
 
-Do not enable per-frame logging.
+## Emergency session recovery
+
+If the console is available, development builds expose:
+
+```text
+clean_pause_disable
+```
+
+It disables the supplemental action map/filters and restores vanilla pause routing for the current session.
+
+A restart after removing the mod must always return to completely vanilla input without editing user configuration.
 
 ## Release gate
 
-A release candidate requires:
+A release candidate requires all of the following:
 
 - no controller regression in initial/front-end menu;
-- no replacement of unrelated keybindings;
-- first Menu/Start produces **zero visible pause-menu overlay**;
-- clean pause works in ordinary gameplay;
-- clean pause works in normal dialogue;
+- no persistent keybind/profile modification;
+- first gameplay Menu/Start produces **zero visible pause-menu overlay**;
+- normal gameplay pause works;
+- dialogue pause works;
+- in-engine cutscene pause works;
 - current subtitle remains visible indefinitely while paused;
-- clean pause works in at least one in-engine cutscene;
-- audio/cutscene progression pauses coherently;
+- native pause stops audio/cutscene progression coherently;
 - B resumes reliably;
-- second Menu/Start opens the untouched vanilla pause menu;
-- vanilla menu closes normally;
-- uninstalling the mod returns completely vanilla behaviour without repairing controller configuration.
+- second Start opens the untouched vanilla pause menu;
+- vanilla menu controls/closing remain normal;
+- returning to front-end menu leaves controls vanilla;
+- uninstall requires no controller/config repair.
