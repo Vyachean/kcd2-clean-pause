@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 
 from tools.profile_patch import (
     B_PRESS_ACTION,
+    CONSOLE_COMMAND_ATTR,
     CONTROLS_MAP,
     CONTROLS_PRIORITY,
     MENU_ACTION,
@@ -39,12 +40,18 @@ class ProfilePatchTests(unittest.TestCase):
             action_map = next(m for m in root.findall("actionmap") if m.get("name") == routed.map_name)
             action = next(a for a in action_map.findall("action") if a.get("name") == routed.action_name)
             self.assertEqual(action.get("onPress"), "1")
-            self.assertEqual(action.get("consoleCmd"), "1")
+            self.assertEqual(action.get(CONSOLE_COMMAND_ATTR), "1")
+            self.assertIsNone(action.get("consoleCmd"))
             self.assertIsNone(action.get("onRelease"))
             self.assertEqual(action.get("keyboard"), "_keybinds_ref_")
             self.assertEqual(action.get("noModifiers"), "1")
             self.assertEqual(action.get("xboxpad"), "xi_start")
             self.assertEqual(action.get("pspad"), "pad_start")
+
+    def test_patch_uses_exact_kcd2_console_command_attribute_spelling(self) -> None:
+        patched, _ = patch_profile(self.source)
+        self.assertIn('consoleCMD="1"', patched)
+        self.assertNotIn('consoleCmd="1"', patched)
 
     def test_patch_adds_exclusive_overlay_controls_map(self) -> None:
         patched, _ = patch_profile(self.source)
@@ -58,13 +65,15 @@ class ProfilePatchTests(unittest.TestCase):
         actions = {a.get("name"): a for a in controls.findall("action")}
         self.assertEqual(actions[MENU_ACTION].get("onPress"), "1")
         self.assertEqual(actions[MENU_ACTION].get("xboxpad"), "xi_start")
-        self.assertEqual(actions[MENU_ACTION].get("consoleCmd"), "1")
+        self.assertEqual(actions[MENU_ACTION].get(CONSOLE_COMMAND_ATTR), "1")
+        self.assertIsNone(actions[MENU_ACTION].get("consoleCmd"))
         self.assertEqual(actions[B_PRESS_ACTION].get("onPress"), "1")
         self.assertEqual(actions[B_PRESS_ACTION].get("xboxpad"), "xi_b")
-        self.assertIsNone(actions[B_PRESS_ACTION].get("consoleCmd"))
+        self.assertIsNone(actions[B_PRESS_ACTION].get(CONSOLE_COMMAND_ATTR))
         self.assertEqual(actions[RESUME_ACTION].get("onRelease"), "1")
         self.assertEqual(actions[RESUME_ACTION].get("xboxpad"), "xi_b")
-        self.assertEqual(actions[RESUME_ACTION].get("consoleCmd"), "1")
+        self.assertEqual(actions[RESUME_ACTION].get(CONSOLE_COMMAND_ATTR), "1")
+        self.assertIsNone(actions[RESUME_ACTION].get("consoleCmd"))
 
     def test_extends_relevant_action_pass_filters_but_not_action_fail(self) -> None:
         patched, _ = patch_profile(self.source)
