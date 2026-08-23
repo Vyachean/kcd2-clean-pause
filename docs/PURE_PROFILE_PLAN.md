@@ -65,13 +65,13 @@ The map has a Start handoff action, a B-press sink and a B-release resume action
 
 KCD2 uses last-mod-wins for `defaultProfile.xml`, so the fixed 1.5.6 release needs the complete patched profile.
 
-The patched target profile is versioned at:
+The patched target profile is versioned as deterministic gzip+base64 text at:
 
 ```text
-vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz
+vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz.b64
 ```
 
-`tools/build_release.py` verifies the decompressed SHA-256 and packages that source together with the repository Lua/runtime and manifest.
+`tools/build_release.py` decodes it, verifies the decompressed SHA-256 and packages that source together with the repository Lua/runtime and manifest.
 
 This removes the previous GitHub Actions Secret/manual retail-file dependency. A release is reproducible from its Git tag alone.
 
