@@ -30,11 +30,36 @@ Normal player gameplay includes `open_menu`. Dialogue, cutscene and standard min
 
 This supersedes the earlier assumption that one `ui_start_pause` action was the retail controller route for every context.
 
-## Confirmed: packaged console-command actions are supported
+## Confirmed: KCD2 console-command action attribute is `consoleCMD`
 
-KCD2 profiles support `consoleCmd="1"` on an action input. Existing KCD2 mods use this for hotkeys, including controller bindings.
+KCD2 keybind/superaction examples use the exact XML attribute:
 
-The official-only implementation therefore patches the already-existing retail Start actions rather than adding a competing Start action at runtime.
+```xml
+<action consoleCMD="1" ... />
+```
+
+The attribute name is case-sensitive in XML. `v0.1.0-rc.1` incorrectly emitted `consoleCmd="1"`, following generic CryEngine documentation instead of KCD2's actual keybind convention.
+
+Retail result on Xbox Store 1.5.6 was decisive: Esc and Xbox Start no longer opened the vanilla pause menu, but Clean Pause did not run either. That is exactly consistent with replacing the original `open_menu` / `open_pause_menu` actions while failing to mark them as KCD2 console-command actions.
+
+The patcher, release source, unit tests and CI now require exact `consoleCMD="1"` and explicitly reject the wrong-case `consoleCmd="1"` spelling.
+
+KCD2 references:
+
+- `muyuanjin/kcd2-mod-docs` modding experience notes: `defaultProfile.xml` hotkeys use `consoleCMD` actions;
+- community KCD2 keybind/superaction examples likewise use `consoleCMD="1"`.
+
+## Confirmed: `System.AddCCommand`
+
+KCD2 exposes:
+
+```lua
+System.AddCCommand(name, luaCode, description)
+```
+
+and `Scripts/Mods/<modid>.lua` is a supported mod bootstrap path. The Clean Pause runtime registers the routed commands there.
+
+The next retail candidate still has to prove that these commands execute successfully through the corrected profile action route.
 
 ## Confirmed: `Game.PauseGame(bool)`
 
@@ -45,9 +70,7 @@ Game.PauseGame(true)
 Game.PauseGame(false)
 ```
 
-and retail scripts use `Game.PauseGame(true)`. This is the preferred pause primitive.
-
-Reference: `script_bind_2025_01_14/CScriptBind_Game__PauseGame...` in `muyuanjin/kcd2-mod-docs`.
+and retail Lua API dumps include `Game.PauseGame`. This remains the preferred pause primitive.
 
 Whether it preserves the currently rendered subtitle is a product-level runtime question, not an API-existence question.
 
@@ -62,7 +85,7 @@ The Warhorse retail ScriptBind method list exposes, among others:
 - `LoadFromXML`;
 - `SetActionListener`.
 
-It does **not** list `EnableActionFilter`. The previous PR #4 implementation that called `ActionMapManager.EnableActionFilter(...)` was therefore not acceptable for the retail target and has been removed.
+It does **not** list `EnableActionFilter`. The earlier design that called `ActionMapManager.EnableActionFilter(...)` was therefore not acceptable for the retail target and has been removed.
 
 Reference: `script_bind_2025_01_14/!!MEMBERTYPE_Methods_CScriptBind_ActionMapManager.html`.
 
@@ -96,6 +119,16 @@ Reference:
 
 This is strong evidence for the handoff, but the exact `MenuEvents` name has not yet been confirmed by an Xbox Store 1.5.6 runtime test.
 
+## Confirmed failure: `v0.1.0-rc.1`
+
+Observed on the target Xbox Store 1.5.6 build:
+
+- Esc no longer pauses;
+- Xbox Start no longer pauses;
+- Clean Pause does not activate.
+
+Root cause: the release profile replaced both vanilla pause routes but emitted wrong-case `consoleCmd="1"`. The candidate is invalid and must not be used for further runtime acceptance.
+
 ## Confirmed failure: `InitActionMaps()`
 
 An earlier prototype called `ActionMapManager.InitActionMaps()` with a partial profile. Observed on the target game: Xbox-controller input stopped working globally, including the initial menu.
@@ -110,20 +143,23 @@ Two Xbox Store 1.5.6 tests produced the same result: controller stayed operation
 
 Conclusion: do not return to a competing supplemental Start binding.
 
-## Why the current builder uses the installed profile
+## Versioned release source
 
 Warhorse's official mod system replaces files by path. There is no official patch/merge format for `defaultProfile.xml`; if two mods supply it, load order decides which whole file wins.
 
-Therefore the repository does not bundle a copied retail profile. `tools/build_from_game.py` reads the installed `Data/IPL_GameData.pak`, verifies the expected 1.5.6 routes, patches only those entries, and emits the test mod.
+For the fixed Xbox Store 1.5.6 target, the repository therefore versions the **patched target profile** as deterministic gzip+base64 release source under `vendor/kcd2/xbox-1.5.6/`. `tools/build_release.py` verifies its SHA-256 and exact KCD2 `consoleCMD` action contract before packaging it.
 
-## Current runtime questions
+Development builders can still regenerate the target source from an exact installed `defaultProfile.xml` when a new game version must be supported.
 
-1. Does first Start produce zero menu flash?
-2. Does `Game.PauseGame(true)` leave the current subtitle visible indefinitely?
-3. Does the active overlay-priority exclusive map suppress lower gameplay/dialogue/cutscene actions while still delivering its own Start/B actions?
-4. Does B release resume without a dialogue/cutscene skip side effect?
-5. Does `UIAction.CallFunction("MenuEvents", -1, "DisplayIngameMenu", true)` open the real retail pause menu?
-6. Does closing that menu resume normally rather than restoring Clean Pause?
-7. Are speech audio, camera, animation and scripted progression stopped coherently?
+## Current runtime questions for the next candidate
 
-These are the next retail tests; they are not reasons to add native code pre-emptively.
+1. Does corrected `consoleCMD` routing execute the registered Clean Pause command for both Esc and Xbox Start?
+2. Does first Start produce zero menu flash?
+3. Does `Game.PauseGame(true)` leave the current subtitle visible indefinitely?
+4. Does the active overlay-priority exclusive map suppress lower gameplay/dialogue/cutscene actions while still delivering its own Start/B actions?
+5. Does B release resume without a dialogue/cutscene skip side effect?
+6. Does `UIAction.CallFunction("MenuEvents", -1, "DisplayIngameMenu", true)` open the real retail pause menu?
+7. Does closing that menu resume normally rather than restoring Clean Pause?
+8. Are speech audio, camera, animation and scripted progression stopped coherently?
+
+These are retail tests; they are not reasons to add native code pre-emptively.
