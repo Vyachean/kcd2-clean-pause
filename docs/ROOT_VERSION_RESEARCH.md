@@ -1,57 +1,73 @@
 # KCD2 keybind profile version research
 
-## What is confirmed
+## Why the version matters
 
-KCD2 keybind tooling reads the retail `Libs/Config/defaultProfile.xml` directly from the game's PAK and preserves that document when merging mod actions.
+CryEngine `CActionMapManager::LoadFromXML` requires a `version` attribute on the XML root and assigns that value to the manager's current in-memory action-map version before loading maps and filters.
 
-The open-source KCD2 Keybinder parses action maps as direct children of the document root and, when it must create a new map, uses:
+It does **not** first compare the supplemental profile version with the already loaded vanilla profile version.
 
-```xml
-<actionmap name="..." priority="pure_include" exclusivity="0">
-```
-
-It also emits console-command actions using the same attributes used by working KCD2 keybind mods.
-
-Source:
-
-- https://github.com/Destuur/KCD2Keybinder/blob/main/KCD2Keybinder.Core/Services/KeybindService.cs
-
-Working KCD2 controller mods demonstrate actions such as:
-
-```xml
-<action
-  name="MagusQuickSaveController"
-  onHold="1"
-  holdTriggerDelay="0.3"
-  holdRepeatDelay="-1"
-  xboxpad="xi_start"
-  pspad="pad_start"
-  consoleCmd="1" />
-```
-
-and other current mods package custom controller actions under `Libs/Config/defaultProfile.xml` / custom profile files.
+Therefore blindly loading a guessed `version="22"` would be unsafe even if the XML happened to parse.
 
 ## Version 22 evidence
 
-CryEngine/KCD profiles use action-map version `22`; public modding examples also show:
+KCD/CryEngine action-map profiles and current KCD2 mod examples use version `22`. KCD2 Keybinder also reads the retail `Libs/Config/defaultProfile.xml` and preserves its action-map structure when merging bindings.
 
-```xml
-<actionmap name="default" version="22">
+This is enough to provide a version-22 supplemental profile, but not enough to assume every future retail build remains version 22.
+
+## Implemented solution: runtime detection
+
+The mod does not require the user to locate or extract the profile manually.
+
+Current KCD2 exposes:
+
+```lua
+System.LoadTextFile(path)
 ```
 
-This is strong evidence but not yet a direct extraction of the current KCD2 retail root document.
+The prototype uses it to read the effective virtual-filesystem file:
 
-## Why the root version matters for `LoadFromXML`
+```text
+Libs/Config/defaultProfile.xml
+```
 
-`CActionMapManager::LoadFromXML` requires a `version` attribute on the root XML node and assigns it to the manager's current version before loading action maps/filters.
+before calling `ActionMapManager.LoadFromXML()`.
 
-Therefore an incorrect root version is not something to silently guess in a release.
+Bootstrap policy:
 
-## Prototype policy
+```text
+cannot read vanilla profile
+    -> do not load supplemental input profile
+    -> vanilla controls unchanged
 
-For an experimental runtime-loaded profile, `22` may be used only with explicit logging and a retail safety test. It must not be called proven until one of the following is obtained:
+cannot parse vanilla profile version
+    -> do not load supplemental input profile
+    -> vanilla controls unchanged
 
-1. a direct current KCD2 `defaultProfile.xml` extraction showing the root version; or
-2. a known-working current KCD2 mod whose standalone profile is loaded by `ActionMapManager.LoadFromXML` and whose root version is inspectable.
+vanilla version != 22
+    -> do not load v22 supplemental profile
+    -> vanilla controls unchanged
 
-If the profile fails to load/enable in retail, the prototype must fail back to vanilla controls rather than attempting `InitActionMaps` or replacing the complete vanilla profile.
+vanilla version == 22
+    -> validate/read packaged v22 profile
+    -> LoadFromXML(v22 profile)
+    -> verify custom filters
+    -> enable gameplay-scoped interception
+```
+
+This turns an external installation detail into a fail-closed compatibility gate.
+
+## Why the old probe remains useful
+
+`tools/probe_profile_version.py` is retained as a diagnostic/development utility. It can inspect game PAKs directly if runtime `System.LoadTextFile` unexpectedly cannot resolve the effective profile on a particular storefront.
+
+It is **not required** for normal installation or bootstrap.
+
+## Remaining limitation
+
+The project currently packages only:
+
+```text
+cleanPauseProfile_v22.xml
+```
+
+If a future KCD2 build reports another profile version, Clean Pause deliberately disables its interception rather than assuming the XML schema is compatible. Supporting a new version requires checking that version's retail profile/action schema and adding a corresponding validated supplemental profile.
