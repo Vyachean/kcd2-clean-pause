@@ -1,16 +1,28 @@
 # Retail testing — Xbox Store / Game Pass 1.5.6
 
-This branch is a **test candidate**, not a release. Test only a ZIP generated from the same installed KCD2 copy that will run it.
+This branch is a **test candidate**, not a release. Test only a ZIP generated from the same retail `defaultProfile.xml` that belongs to the KCD2 installation being tested.
 
-## 1. Build from the installed game
+The provenance of the first real Xbox retail candidate is recorded in `docs/RETAIL_TEST1.md`.
 
-Close KCD2 first.
+## 1. Build from exact retail data
+
+Close KCD2 first. The repository supports two equivalent source paths.
+
+### A. Full installed game available
 
 From branch `prototype/pure-profile`:
 
 ```powershell
 python tools/build_from_game.py "C:\XboxGames\Kingdom Come- Deliverance II\Content"
 ```
+
+### B. Only extracted `defaultProfile.xml` available
+
+```powershell
+python tools/build_from_profile.py "C:\path\to\defaultProfile.xml"
+```
+
+This second path is the supported workflow when `IPL_GameData.pak` is too large to transfer. It must use the exact `Libs/Config/defaultProfile.xml` extracted from the target installation; do not substitute a profile downloaded from another build.
 
 Expected output includes:
 
@@ -20,7 +32,9 @@ Routed Start actions: open_menu/open_menu, open_pause_menu/open_pause_menu
 Built: ...\release\kcd2-clean-pause-xbox-1.5.6-test.zip
 ```
 
-If the builder refuses the profile, stop. Do not bypass the check or substitute another `defaultProfile.xml`.
+The extracted-profile builder also prints the source profile SHA-256 so a test candidate can be tied to the exact retail input without committing that game file to the public repository.
+
+If either builder refuses the profile, stop. Do not bypass the check.
 
 ## 2. Install
 
