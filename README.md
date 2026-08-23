@@ -25,13 +25,21 @@ Primary acceptance target:
 
 ## Current status
 
-**Retail test candidate; not a released mod yet.**
+**Retail test candidate; not a stable release yet.**
 
 The current implementation uses only KCD2's normal `.pak`/Lua mod path. It does **not** require `version.dll`, ASI, KCSE, an external process, or an overlay.
 
-The test build is generated from the target installation's exact `Libs/Config/defaultProfile.xml`, either extracted automatically from `Data/IPL_GameData.pak` or supplied as an already extracted file. This is deliberate: `defaultProfile.xml` is a whole-file override, so shipping a copied profile from another game build would be unsafe and the original retail profile is not committed to this repository.
+The installable build must be generated from the target installation's exact `Libs/Config/defaultProfile.xml`, either extracted automatically from `Data/IPL_GameData.pak` or supplied as an already extracted file. `defaultProfile.xml` is a whole-file override, so the repository never tracks the retail profile or generated install ZIPs.
 
-The first Xbox Store 1.5.6 retail candidate has now been assembled from an actual target profile. Its provenance is recorded in [docs/RETAIL_TEST1.md](docs/RETAIL_TEST1.md).
+The first Xbox Store 1.5.6 source profile has been validated. Its provenance is recorded in [docs/RETAIL_TEST1.md](docs/RETAIL_TEST1.md).
+
+## Downloads
+
+**GitHub Releases are the canonical distribution channel.** Generated `.pak`/`.zip` files are not committed to this repository.
+
+Retail candidates are produced by `.github/workflows/release.yml`. The workflow validates the repository, materializes the exact retail profile from a protected GitHub Actions secret, verifies its SHA-256, builds through `tools/build_from_profile.py`, validates the resulting ZIP/PAK, uploads a CI artifact, and publishes the same ZIP as a GitHub Release asset.
+
+Release pipeline details are in [docs/RELEASE.md](docs/RELEASE.md).
 
 ## Architecture
 
@@ -92,9 +100,9 @@ The implementation intentionally does **not**:
 
 A previous experiment using `InitActionMaps()` disabled controller input globally. That API is permanently forbidden here.
 
-## Build a retail test ZIP
+## Local build paths
 
-Requires Python 3. There are two repository-supported inputs.
+The repository also keeps two fail-closed builders for development/reproduction.
 
 ### From the installed game PAK
 
@@ -108,15 +116,11 @@ python tools/build_from_game.py "C:\XboxGames\Kingdom Come- Deliverance II\Conte
 python tools/build_from_profile.py "C:\path\to\defaultProfile.xml"
 ```
 
-The extracted-profile path is intended for cases where the full `IPL_GameData.pak` is too large to transfer. Both builders use the same profile patcher, Lua runtime and build validator and fail closed unless the profile has the expected 1.5.6 structure and both Start routes are bound to `xi_start`.
+Both use the same profile patcher/runtime/build validator. Public test distribution must still go through the CI release workflow rather than committing their output.
 
-Output:
+## Installation
 
-```text
-release/kcd2-clean-pause-xbox-1.5.6-test.zip
-```
-
-For Xbox Store / Game Pass, extract `clean_pause` into:
+Download the candidate ZIP from GitHub Releases. Extract its `clean_pause` directory into:
 
 ```text
 %USERPROFILE%\Documents\kingdomcome_mods\
@@ -134,7 +138,7 @@ Do not install this `.pak` beside `KingdomCome.exe`.
 
 Because the official mod path requires overriding the complete `defaultProfile.xml`, this test build conflicts with another mod that also supplies that file. Do not test Clean Pause together with another keybind/profile mod until their changes are merged intentionally.
 
-The builders minimize version risk by patching the exact profile from the game being tested rather than bundling one in the repository.
+The release workflow minimizes version risk by accepting only the exact verified retail profile rather than bundling one in Git.
 
 ## What retail testing still has to prove
 
@@ -153,5 +157,6 @@ See [docs/TESTING.md](docs/TESTING.md) for the exact test sequence.
 - [docs/RESEARCH.md](docs/RESEARCH.md) — confirmed retail/API findings and remaining hypotheses;
 - [docs/TESTING.md](docs/TESTING.md) — Xbox Store 1.5.6 acceptance procedure;
 - [docs/RETAIL_TEST1.md](docs/RETAIL_TEST1.md) — provenance of the first real Xbox retail test candidate;
+- [docs/RELEASE.md](docs/RELEASE.md) — CI artifact / GitHub Release pipeline;
 - [docs/PURE_PROFILE_PLAN.md](docs/PURE_PROFILE_PLAN.md) — implementation-stage status;
 - [docs/PURE_MOD_REFERENCES.md](docs/PURE_MOD_REFERENCES.md) — source/reference evidence.
