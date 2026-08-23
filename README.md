@@ -96,10 +96,10 @@ Relevant retail `actionPass` filters that already allow a vanilla pause action a
 
 ## Release source
 
-The target-specific patched profile used by releases is stored at:
+The target-specific patched profile used by releases is stored as deterministic gzip+base64 text at:
 
 ```text
-vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz
+vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz.b64
 ```
 
 Its decompressed SHA-256 is:
@@ -108,7 +108,7 @@ Its decompressed SHA-256 is:
 28e210454d749869b1fa26d4414ba3c055157e731856f9610d6ffce5ddfbc373
 ```
 
-`tools/build_release.py` verifies this digest and builds the same package that the tag workflow publishes.
+`tools/build_release.py` decodes it, verifies this digest, and builds the same package that the tag workflow publishes.
 
 ## Safety constraints
 
