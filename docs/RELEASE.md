@@ -17,18 +17,27 @@ A pre-existing matching `v*` tag is also supported. Generated `.pak` and install
 
 A release must be reproducible from its source commit. Release builds therefore do not depend on GitHub Secrets, a developer workstation, or files copied from a user's game installation at release time.
 
-For the fixed Xbox Store / Xbox app / Game Pass **KCD2 1.5.6** target, the repository versions the patched target profile at:
+For the fixed Xbox Store / Xbox app / Game Pass **KCD2 1.5.6** target, the patched profile is stored as deterministic gzip+base64 source split into small text chunks:
 
 ```text
-vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz.b64
+vendor/kcd2/xbox-1.5.6/profile.b64.parts/
+  00.txt
+  ...
+  07.txt
 ```
 
-This is deterministic gzip+base64 target source, not a generated installable artifact. `tools/build_release.py` decodes it, verifies the patched-profile SHA-256 and validates the fail-safe input contract before packaging it into the KCD2 mod.
+`tools/build_release.py` verifies the SHA-256 of every chunk, the concatenated encoded source, the decompressed patched profile and the fail-safe XML contract before packaging.
 
 Verified original retail profile SHA-256:
 
 ```text
 69ad9fd618cd31961fef8eb061f3f2723997df5e0fb257ec74d0d5f555592565
+```
+
+Assembled encoded-source SHA-256:
+
+```text
+01b70dab6d8cfbdb502bfd683d4341ef9121c9a22b0440c06653e946413c9880
 ```
 
 Current fail-safe patched profile SHA-256:
@@ -109,8 +118,8 @@ For a new target version:
 
 1. extract that version's exact retail `defaultProfile.xml`;
 2. run the repository patcher and review the result;
-3. version the new patched target profile under a game-version-specific directory;
-4. update the expected hash/target metadata;
+3. regenerate the deterministic chunks and expected hashes for the new target;
+4. update the expected target metadata;
 5. pass PR CI;
 6. bump `VERSION` in the release PR and merge it.
 
