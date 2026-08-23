@@ -204,7 +204,9 @@ def patch_profile(xml_text: str) -> tuple[str, PatchInfo]:
         + f'<actionmap name="{CONTROLS_MAP}" priority="pure_include" exclusivity="0">'
         + newline
         + inner
-        + f'<action name="{RESUME_ACTION}" onPress="1" xboxpad="xi_b" pspad="pad_circle" consoleCmd="1" />'
+        # Resume on release keeps the entire B press/release cycle behind the
+        # actionPass filter, so gameplay never receives an orphaned B release.
+        + f'<action name="{RESUME_ACTION}" onRelease="1" xboxpad="xi_b" pspad="pad_circle" consoleCmd="1" />'
         + newline
         + indent
         + "</actionmap>"
@@ -274,7 +276,13 @@ def _validate_patch(patched: str, info: PatchInfo) -> None:
     if len(controls) != 1:
         raise ProfilePatchError("expected exactly one Clean Pause controls map")
     resume = [a for a in controls[0].findall("action") if a.get("name") == RESUME_ACTION]
-    if len(resume) != 1 or resume[0].get("xboxpad") != "xi_b" or resume[0].get("consoleCmd") != "1":
+    if (
+        len(resume) != 1
+        or resume[0].get("onRelease") != "1"
+        or resume[0].get("onPress") is not None
+        or resume[0].get("xboxpad") != "xi_b"
+        or resume[0].get("consoleCmd") != "1"
+    ):
         raise ProfilePatchError("Clean Pause resume action contract is invalid")
 
     filters = [f for f in root.findall("actionfilter") if f.get("name") == INPUT_FILTER]
