@@ -41,6 +41,8 @@ enum class KeyId : std::uint32_t {
     XiB,
     XiX,
     XiY,
+
+    None = 0xffffffffu,
 };
 
 struct InputEvent {
