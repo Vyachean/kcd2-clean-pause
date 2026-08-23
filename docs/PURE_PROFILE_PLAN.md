@@ -17,9 +17,16 @@ open_menu/open_menu             -> xi_start
 open_pause_menu/open_pause_menu -> xi_start
 ```
 
-### 2. Exact-profile builder — complete
+The same routes and `overlays` priority 12 were confirmed in the actual extracted Xbox Store 1.5.6 profile selected for retail test candidate 1. See `docs/RETAIL_TEST1.md`.
 
-`tools/build_from_game.py` reads the target installation's own `Data/IPL_GameData.pak`, fails closed unless the expected 1.5.6 structure exists, and patches both retail Start actions while preserving action IDs and physical bindings.
+### 2. Exact-profile builders — complete
+
+Two repository-owned source paths are supported:
+
+- `tools/build_from_game.py` reads the target installation's `Data/IPL_GameData.pak`;
+- `tools/build_from_profile.py` accepts an already extracted exact `defaultProfile.xml` when the full game PAK is too large to transfer.
+
+Both fail closed unless the expected 1.5.6 structure exists and patch both retail Start actions while preserving action IDs and physical bindings.
 
 ### 3. Clean Pause state machine — complete for retail testing
 
@@ -52,15 +59,23 @@ Replacement:
            exclusivity="1">
 ```
 
-The map has a Start handoff action, a B-press sink and a B-release resume action. Relevant existing `actionPass` filters are extended; existing `actionFail` restrictions are preserved.
+The map has a Start handoff action, a B-press sink and a B-release resume action. Relevant existing `actionPass` filters are extended; existing `actionFail` restrictions are preserved. The exact retail profile selected for test candidate 1 contains no `actionPass` filters.
 
-### 5. Static validation/documentation — complete
+### 5. Static validation — complete
 
-CI covers Lua syntax, exact-profile patch unit tests, both routed Start actions, overlay-priority/exclusive controls, B press/release contract, actionPass extension, forbidden runtime mutation checks, and a synthetic exact-profile build.
+CI covers Lua syntax, exact-profile patch unit tests, both routed Start actions, overlay-priority/exclusive controls, B press/release contract, actionPass extension, forbidden runtime mutation checks, extracted-profile preparation and a synthetic exact-profile build.
 
-The synthetic artifact is never published as an installable mod.
+Synthetic artifacts are never published as retail packages.
 
-### 6. Xbox Store 1.5.6 retail acceptance — next
+### 6. CI packaging / GitHub Releases — implemented
+
+`.github/workflows/release.yml` is the canonical public packaging path.
+
+The exact Xbox Store 1.5.6 source profile is not committed to Git. It is supplied to Actions as gzip+base64 through the protected repository secret `KCD2_XBOX_156_DEFAULT_PROFILE_GZIP_B64`. The workflow verifies its SHA-256 before building, runs the repository builder, validates the outer ZIP and inner PAK, creates checksums, uploads a CI artifact and publishes a GitHub Release asset.
+
+See `docs/RELEASE.md`.
+
+### 7. Xbox Store 1.5.6 retail acceptance — next
 
 Must prove:
 
@@ -77,7 +92,7 @@ See `docs/TESTING.md`.
 
 ## Compatibility policy
 
-`defaultProfile.xml` is a whole-file conflict point. Never ship a stale copied retail profile; always build from the installation being tested; test without another mod replacing `defaultProfile.xml`; document manual merging if this becomes the release implementation.
+`defaultProfile.xml` is a whole-file conflict point. Never commit a copied retail profile or generated install package. Build from the exact verified source profile; test without another mod replacing `defaultProfile.xml`; document manual merging if this becomes the release implementation.
 
 ## Native fallback criteria
 
