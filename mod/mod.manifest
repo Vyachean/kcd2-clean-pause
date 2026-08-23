@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<kcd_mod>
+  <info>
+    <name>KCD2 Clean Pause</name>
+    <modid>clean_pause</modid>
+    <description>Pause Kingdom Come: Deliverance II without covering the current frame.</description>
+    <version>0.0.0</version>
+    <created_on>2026-08-23</created_on>
+    <modifies_level>false</modifies_level>
+  </info>
+</kcd_mod>
