@@ -28,7 +28,19 @@ Workflow:
 .github/workflows/release.yml
 ```
 
-It is manually dispatched with a release tag and title. For example:
+Two trigger modes are supported.
+
+### PR-branch release request
+
+While the workflow exists only on `prototype/pure-profile`, a push that changes a file under:
+
+```text
+release-requests/
+```
+
+triggers the first Xbox 1.5.6 candidate build. This lets the repository publish a prerelease before PR #4 is merged without committing any retail binary. The request itself is only small source-controlled metadata; the mod ZIP is created by Actions.
+
+For this branch-triggered path the release identity is:
 
 ```text
 tag:        xbox-1.5.6-test1
@@ -36,7 +48,13 @@ title:      KCD2 Clean Pause — Xbox 1.5.6 test1
 prerelease: true
 ```
 
-The workflow then:
+### Manual dispatch
+
+Once the workflow exists on the default branch, `workflow_dispatch` can be used from the Actions UI with an explicit tag/title/prerelease flag for later candidates.
+
+## Release job
+
+The workflow:
 
 1. checks Lua syntax and runs the unit tests;
 2. materializes the exact retail profile from the Actions secret;
@@ -71,6 +89,8 @@ KCD2_XBOX_156_DEFAULT_PROFILE_GZIP_B64
 ```
 
 The value is the gzip+base64 representation of the exact verified retail `defaultProfile.xml`. Do not use the patched profile produced by Clean Pause.
+
+After the secret is provisioned, creating the `release-requests/` metadata file is enough to trigger the PR-branch release; no console command is required.
 
 ## Repository policy
 
