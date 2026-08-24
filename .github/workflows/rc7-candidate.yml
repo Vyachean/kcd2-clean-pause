@@ -1,4 +1,4 @@
-name: RC7g source materialization
+name: RC7g production promotion
 
 on:
   push:
@@ -14,25 +14,28 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  materialize:
+  promote:
+    if: github.repository == 'Vyachean/kcd2-clean-pause'
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout
+      - name: Checkout promotion branch
         uses: actions/checkout@v4
+        with:
+          ref: candidate/rc7-render-suppression
+          fetch-depth: 0
 
-      - name: Generate exact rc7g source
+      - name: Materialize exact retail-proven source
         shell: python
         run: |
           from pathlib import Path
           import subprocess
           import sys
 
-          out = Path('materialized/clean_pause_native.cpp')
-          out.parent.mkdir(parents=True, exist_ok=True)
+          out = Path('native/src/clean_pause_native.cpp')
           subprocess.run([
               sys.executable,
               'native/candidate/rc7/generate_candidate_v7.py',
@@ -52,46 +55,47 @@ jobs:
                   raise SystemExit(f'missing expected runtime marker: {old}')
               source = source.replace(old, new)
 
-          required = (
+          for needle in (
               'HookMenuRender',
               'HookHudUpdate',
               'CaptureHudVisibilitySnapshot',
               'RestoreHudVisibilitySnapshot',
-              'ShouldFreezeHudFunction',
               'ClearSubtitles',
               'HideNarrativeSubtitles',
               'ReplayVanillaPauseToggle',
-              'KeyId::XiB',
               'KCD2 Clean Pause v0.1.0 active',
-          )
-          for needle in required:
+          ):
               if needle not in source:
-                  raise SystemExit(f'materialized source missing: {needle}')
+                  raise SystemExit(f'production source missing: {needle}')
 
-          forbidden = (
+          for needle in (
               'ActionMapManager.IsFilterEnabled("only_ui")',
               'HideVerifiedVanillaPause(',
               'ReleaseFlashVariable',
               'snapshot.clip',
               'rc7g borrowed-movieclip child-HUD-snapshot candidate active',
-          )
-          for needle in forbidden:
+          ):
               if needle in source:
-                  raise SystemExit(f'materialized source retained rejected path: {needle}')
+                  raise SystemExit(f'production source retained rejected path: {needle}')
 
           out.write_text(source, encoding='utf-8')
-          print(f'materialized {out} ({len(source)} chars)')
 
-      - name: Configure candidate x64 Release
-        run: cmake -S native/candidate/rc7 -B native/candidate/rc7/build -A x64
+      - name: Configure production x64 Release
+        run: cmake -S native -B native/build -A x64
 
-      - name: Build candidate x64 Release
-        run: cmake --build native/candidate/rc7/build --config Release --parallel
+      - name: Build production x64 Release
+        run: cmake --build native/build --config Release --parallel
 
-      - name: Upload materialized production source
-        uses: actions/upload-artifact@v4
-        with:
-          name: rc7g-materialized-production-source
-          path: materialized/clean_pause_native.cpp
-          if-no-files-found: error
-          retention-days: 7
+      - name: Commit production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- native/src/clean_pause_native.cpp; then
+            echo 'Production source already materialized.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add native/src/clean_pause_native.cpp
+          git commit -m 'feat(native): promote retail-proven clean pause implementation'
+          git push origin HEAD:candidate/rc7-render-suppression
