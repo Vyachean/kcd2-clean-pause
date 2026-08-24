@@ -1,4 +1,4 @@
-name: RC7 render-suppression candidate
+name: RC7c HUD-preserving candidate
 
 on:
   pull_request:
@@ -31,7 +31,7 @@ jobs:
           import subprocess
           import sys
 
-          generated = Path("native/candidate/rc7/clean_pause_candidate_v2.ci.cpp")
+          generated = Path("native/candidate/rc7/clean_pause_candidate_rc7c.ci.cpp")
           subprocess.run([
               sys.executable,
               "native/candidate/rc7/generate_candidate_v2.py",
@@ -54,7 +54,7 @@ jobs:
           )
           for needle in forbidden:
               if needle in source:
-                  raise SystemExit(f"Forbidden rc7 candidate path: {needle}")
+                  raise SystemExit(f"Forbidden rc7c candidate path: {needle}")
 
           required = (
               'getElement(g_flashUI, "Menu@0")',
@@ -64,24 +64,47 @@ jobs:
               "g_renderSuppressionObserved",
               "g_cleanHiddenSinceMs",
               "kRenderObservationGraceMs = 250",
-              "Render suppression was not observed within 250 ms; fail-open",
+              "kFlashUISetHudElementsVisibleSlot = 28",
+              "SetHudGateVisible(true)",
+              'getElement(g_flashUI, "hud@0")',
+              "kUIElementCallFunctionByNameSlot = 69",
+              "HookHudCallFunction",
+              'std::strcmp(name, "ClearSubtitles") == 0',
+              'std::strcmp(name, "HideNarrativeSubtitles") == 0',
+              "ReplayVanillaPauseToggle",
+              "g_pausePressTemplate",
+              "g_pauseReleaseTemplate",
+              "Clean Pause -> running via B using replayed vanilla pause toggle",
+              "B resume toggle was not verified; showing ordinary vanilla pause menu (fail-open)",
+              "second Escape/Start consumed; Render restored",
               "g_forwardDepth",
               "if (g_forwardDepth != 0)",
-              "Running -> Clean Pause candidate",
-              "Clean Pause -> running via vanilla B/back",
-              "second Escape/Start consumed; Render restored",
+              "rc7c HUD-preserving render-suppression candidate active",
           )
           for needle in required:
               if needle not in source:
-                  raise SystemExit(f"Missing rc7 candidate contract: {needle}")
+                  raise SystemExit(f"Missing rc7c candidate contract: {needle}")
 
-          hook = source[source.index("void __fastcall HookMenuRender"):source.index("bool EnsureMenuRenderHook")]
-          if "g_originalRender(element);" not in hook:
-              raise SystemExit("Render hook must forward non-Menu/non-hidden renders")
-          if "return;" not in hook:
-              raise SystemExit("Render hook does not contain suppression path")
+          menu_hook = source[source.index("void __fastcall HookMenuRender"):source.index("bool EnsureMenuRenderHook")]
+          if "g_originalRender(element);" not in menu_hook or "return;" not in menu_hook:
+              raise SystemExit("Menu Render hook must suppress only hidden Menu@0 and forward all other renders")
 
-          print("rc7b safety contract passed")
+          hud_hook = source[source.index("bool __fastcall HookHudCallFunction"):source.index("bool EnsureHudSubtitleHook")]
+          for allowed in ("ClearSubtitles", "HideNarrativeSubtitles"):
+              if allowed not in hud_hook:
+                  raise SystemExit(f"HUD hook must explicitly cover {allowed}")
+          if "g_originalHudCallFunction" not in hud_hook:
+              raise SystemExit("HUD hook must forward non-subtitle Flash calls")
+
+          b_start = source.index("if (key == KeyId::XiB) {", source.index("void HandleHiddenInput"))
+          b_end = source.index("// Once a real Menu@0 render", b_start)
+          b_block = source[b_start:b_end]
+          if "ReplayVanillaPauseToggle" not in b_block:
+              raise SystemExit("B must resume through the captured vanilla pause route")
+          if "Forward(input, event, force);" in b_block:
+              raise SystemExit("Physical B must not leak to dialog/cutscene/gameplay while Clean Pause owns input")
+
+          print("rc7c safety contract passed")
 
       - name: Configure x64 Release
         run: cmake -S native/candidate/rc7 -B native/candidate/rc7/build -A x64
@@ -121,7 +144,7 @@ jobs:
           Copy-Item $dll candidate/stage/version.dll
           Copy-Item docs/RC7_SINGLE_SESSION_TEST.md candidate/stage/TEST.md
 
-          $asset = "kcd2-clean-pause-rc7b-render-suppression-$env:GITHUB_SHA.zip"
+          $asset = "kcd2-clean-pause-rc7c-hud-preserving-$env:GITHUB_SHA.zip"
           Compress-Archive -Path candidate/stage/* -DestinationPath "candidate/$asset" -CompressionLevel Optimal
           $hash = (Get-FileHash "candidate/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $asset" | Set-Content candidate/SHA256SUMS.txt -Encoding ascii -NoNewline
@@ -129,9 +152,9 @@ jobs:
       - name: Upload candidate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rc7b-render-suppression-candidate
+          name: rc7c-hud-preserving-candidate
           path: |
-            candidate/kcd2-clean-pause-rc7b-render-suppression-*.zip
+            candidate/kcd2-clean-pause-rc7c-hud-preserving-*.zip
             candidate/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 7
