@@ -6,8 +6,9 @@
 namespace kcd2 {
 
 // Minimal ABI copied from verified KCD2 1.5.6 reverse-engineering facts.
-// Keep this deliberately small: Clean Pause only needs raw input, a read-only
-// Lua eligibility probe, and the retail IGameFramework pause vfunc.
+// The diagnostic native build only needs raw input plus the retail Lua
+// script-system bridge. It deliberately does not call an inferred
+// IGameFramework pause vfunc.
 
 enum class DeviceId : std::int32_t {
     Keyboard = 0,
@@ -26,6 +27,10 @@ enum InputState : std::int32_t {
 
 enum class KeyId : std::uint32_t {
     Escape = 0,
+
+    // KCD/CryEngine keyboard ids are sequential from Escape. Verified against
+    // the KCD2 SInputEvent reverse-engineering enum: F1=58 ... F10=67.
+    F10 = 67,
 
     XiDPadUp = 512,
     XiDPadDown,
@@ -95,26 +100,27 @@ struct ScriptAnyValue {
 
 static_assert(sizeof(ScriptAnyValue) == 0x18);
 
-// SSystemGlobalEnvironment offsets verified for KCD2 1.5.6. The pointer at
-// +0x98 is pGameFramework (CCryAction / IGameFramework), not the Lua Game table.
+// SSystemGlobalEnvironment offsets verified for KCD2 1.5.6.
+// IMPORTANT: +0x98 is IGame* (wh::game::C_Game), NOT IGameFramework*.
+// rc.4 incorrectly treated this field as IGameFramework and therefore called
+// IGame::GetName (slot 13) with a PauseGame-shaped signature.
 inline constexpr std::size_t kEnvScriptSystemOffset = 0x30;
 inline constexpr std::size_t kEnvInputOffset = 0x48;
-inline constexpr std::size_t kEnvGameFrameworkOffset = 0x98;
+inline constexpr std::size_t kEnvGameOffset = 0x98;
 inline constexpr std::size_t kEnvSystemOffset = 0xC8;
 inline constexpr std::size_t kEnvMainThreadIdOffset = 0x1B0;
 inline constexpr std::size_t kEnvSize = 0x1C0;
 
-// KCD2 1.5.6 vtable slots used by Clean Pause.
+// KCD2 1.5.6 vtable slots used by this diagnostic build.
 inline constexpr std::size_t kInputPostInputEventSlot = 13;
-inline constexpr std::size_t kGameFrameworkPauseGameSlot = 13;
+inline constexpr std::size_t kGameGetLongNameSlot = 12;
+inline constexpr std::size_t kGameGetNameSlot = 13;
 inline constexpr std::size_t kScriptExecuteBufferSlot = 6;
 inline constexpr std::size_t kScriptReleaseAnySlot = 29;
 inline constexpr std::size_t kScriptGetGlobalAnySlot = 32;
 inline constexpr std::size_t kScriptSetGlobalToNullSlot = 33;
 
 using PostInputEventFn = void(__fastcall*)(void*, const InputEvent*, bool);
-// IGameFramework::PauseGame(bool pause, bool force, unsigned int fadeOutInMs)
-using PauseGameFn = void(__fastcall*)(void*, bool, bool, std::uint32_t);
 using ExecuteBufferFn = bool(__fastcall*)(void*, const char*, std::size_t, const char*, void*);
 using ReleaseAnyFn = void(__fastcall*)(void*, const ScriptAnyValue*);
 using GetGlobalAnyFn = bool(__fastcall*)(void*, const char*, ScriptAnyValue*);
