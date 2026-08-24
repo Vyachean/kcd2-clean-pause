@@ -88,7 +88,8 @@ jobs:
             }
           }
 
-          New-Item -ItemType Directory -Force release/asi release/version-dll | Out-Null
+          New-Item -ItemType Directory -Force -Path release/asi | Out-Null
+          New-Item -ItemType Directory -Force -Path release/version-dll | Out-Null
           Copy-Item $asi release/asi/KCD2CleanPause.asi
           Copy-Item native/INSTALL_ASI.txt release/asi/INSTALL.txt
           Copy-Item $versionDll release/version-dll/version.dll
