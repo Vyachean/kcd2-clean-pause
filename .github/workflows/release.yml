@@ -9,6 +9,11 @@ on:
       - .github/workflows/release.yml
     tags:
       - "v*"
+  pull_request:
+    paths:
+      - VERSION
+      - .github/workflows/release.yml
+      - native/**
   workflow_dispatch:
 
 permissions:
@@ -144,6 +149,7 @@ jobs:
           retention-days: 30
 
   publish:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: build
