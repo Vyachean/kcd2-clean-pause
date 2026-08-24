@@ -1,112 +1,66 @@
 # KCD2 Clean Pause
 
-Experimental **Kingdom Come: Deliverance II** mod targeting:
+Clean Pause for **Kingdom Come: Deliverance II** on Windows.
+
+Tested target: **KCD2 1.5.6**, primarily the PC Xbox Store / Xbox app / Game Pass build with an Xbox controller.
+
+## Behavior
 
 ```text
 Running
-  Xbox Menu / Start -> Clean Pause
-  Escape           -> Clean Pause
+  Escape / Xbox Start -> Clean Pause
 
 Clean Pause
-  B                 -> Resume
-  Xbox Menu / Start -> visible vanilla KCD2 pause menu
-  Escape            -> visible vanilla KCD2 pause menu
+  Escape / Xbox Start -> visible vanilla pause menu
+  Xbox B               -> visible vanilla pause menu
+
+Vanilla pause menu
+  normal KCD2 controls -> resume / settings / save / quit
 ```
 
-The goal is to freeze gameplay, dialogue, in-engine cutscenes, audio and subtitle lifetime without covering the current rendered frame.
+Clean Pause uses KCD2's own pause lifecycle. World simulation and audio pause as they do in the normal game pause, while the pause-menu surface itself is not drawn. The mod restores the gameplay HUD child state so subtitles that were visible at pause entry remain visible.
 
-## Target
+The strong depth-of-field blur applied by the vanilla pause is intentionally left unchanged.
 
-- KCD2 **1.5.6**
-- PC Xbox Store / Xbox app / Game Pass
-- Xbox controller; Escape behaves analogously for pause/menu entry
+### Known v0.1.0 behavior
 
-Current prerelease: **v0.1.0-rc.6**. Retail acceptance of the hidden-vanilla-pause architecture is the current gate.
+Xbox **B does not resume directly from Clean Pause**. It reveals the ordinary KCD2 pause menu; use the normal menu controls to resume. This is an accepted v0.1.0 behavior, not a release blocker.
 
-For the authoritative current status, rejected approaches and next-step decision tree, see [docs/STATUS_AND_PLAN.md](docs/STATUS_AND_PLAN.md).
+## Install
 
-## Retail findings
+1. Close KCD2.
+2. Remove/disable any older Clean Pause PAK under `Documents\kingdomcome_mods\clean_pause`.
+3. Download `kcd2-clean-pause-v0.1.0.zip` from GitHub Releases.
+4. Place `version.dll` beside the KCD2 executable / `WHGame.dll`.
+5. Start the game normally.
 
-- `v0.1.0-rc.1` / `rc.2` broke normal Escape/Start routing and are obsolete.
-- `rc.3` proved the official PAK/Lua/bootstrap/`consoleCMD` route works, but `Game.PauseGame` is unavailable in the tested retail runtime.
-- `rc.4` used an invalid native ABI. KCD2 `gEnv+0x98` is `IGame*`, not `IGameFramework*`; rc.4 accidentally called `IGame::GetName()` as though it were PauseGame and then swallowed input.
-- `rc.5` safely proved that a retail Lua `PauseGame` binding exists and freezes world simulation, but **does not implement the full vanilla pause lifecycle**: audio/UI continue, subtitles expire, and UI state can still react to input.
+Do **not** overwrite another mod's unrelated `version.dll`. If another mod already owns that proxy DLL, the two need an explicit compatibility solution.
 
-Therefore the mod no longer calls any explicit `PauseGame` primitive.
+The mod writes `kcd2_clean_pause_native.log` beside `version.dll`.
 
-## Current architecture — vanilla pause, hidden Menu
+## Uninstall
 
-The current candidate lets KCD2 create its own real pause and changes presentation only:
+Close KCD2 and remove only this mod's `version.dll` and optional `kcd2_clean_pause_native.log`.
 
-1. Escape/Start is checked only for gameplay eligibility.
-2. The physical input is forwarded to KCD2 unchanged.
-3. The mod verifies that vanilla KCD2 enabled the `only_ui` filter.
-4. It resolves the retail `Menu@0` Flash element through verified KCD2 1.5.6 `IFlashUI`/`IUIElement` slots.
-5. It calls only `IUIElement::SetVisible(false)` on that Menu element.
+## Architecture
 
-KCD2 therefore remains the sole owner of pause counters, audio state, dialogue/cutscene suspension and action filters.
+The native implementation:
 
-While the verified vanilla pause is hidden:
+- forwards the real Escape/Start event to vanilla KCD2;
+- uses `Menu@0::IsVisible()` as the retail-proven pause lifecycle signal;
+- keeps `Menu@0` logically visible and suppresses only its `Render()` call during Clean Pause;
+- snapshots the visibility of KCD2's 28 HUD child movie clips before pause and restores that gameplay presentation while Clean Pause is active;
+- treats `IUIElement::GetMovieClip()` results as borrowed, call-local handles: never retained, never `Release()`d by the mod;
+- suppresses only the HUD Flash calls `ClearSubtitles` and `HideNarrativeSubtitles` while Clean Pause owns presentation;
+- fails open to the visible vanilla pause menu when an assumption cannot be verified.
 
-- unrelated input is consumed so invisible menu/gameplay actions cannot fire;
-- **B** temporarily reveals the Menu inside the same input dispatch and forwards B to vanilla Back; if KCD2 closes the pause, gameplay resumes;
-- a second **Escape/Start** reveals the already-open vanilla pause menu and consumes that physical input, avoiding an intermediate unpause tick.
+No custom/inferred `PauseGame`, action-map replacement, fixed storefront-specific WHGame RVA, or replacement overlay is used.
 
-### Fail-open behavior
+## Documentation
 
-If any runtime assumption fails:
-
-- if vanilla `only_ui` does not become active, nothing is hidden;
-- if `Menu@0` cannot be found or hidden, the ordinary visible vanilla pause menu remains;
-- hidden state is never entered merely because a function call did not crash.
-
-## Verified ABI facts used
-
-For KCD2 1.5.6:
-
-- `SSystemGlobalEnvironment + 0x98` = `IGame*`;
-- `SSystemGlobalEnvironment + 0x140` = `IFlashUI*`;
-- `IFlashUI::GetUIElementByInstanceStr` = slot 18;
-- `IUIElement::SetVisible` = slot 28;
-- `IUIElement::IsVisible` = slot 29;
-- input hook remains `IInput::PostInputEvent` before ActionMapManager.
-
-No inferred `IGameFramework::PauseGame` ABI is used.
-
-## Safety constraints
-
-Permanent rules:
-
-- never call `ActionMapManager.InitActionMaps()`;
-- never reload a partial action-map profile at runtime;
-- never persistently remap the controller;
-- never replace `Player.OnAction`;
-- never use `CryAction.PauseGame`, `Action.PauseGame`, `Game.PauseGame`, or an inferred native PauseGame ABI as the production pause mechanism;
-- fail open to vanilla pause/input whenever a runtime assumption cannot be verified.
-
-## Distribution
-
-GitHub Releases are the canonical channel. Generated DLL/ZIP files are not committed.
-
-```text
-implementation PR
-  -> Validate CI + Release build/package CI
-  -> merge to main
-  -> release PR changes VERSION
-  -> CI
-  -> merge to main
-  -> GitHub Actions builds version.dll
-  -> Linux job verifies the exact artifact
-  -> GitHub Release + ZIP + SHA256SUMS.txt
-```
-
-For native candidates, remove the old `Documents\kingdomcome_mods\clean_pause` PAK before testing so only one implementation is active.
-
-See:
-
-- [docs/STATUS_AND_PLAN.md](docs/STATUS_AND_PLAN.md) — canonical current status and plan
-- [docs/DESIGN.md](docs/DESIGN.md)
-- [docs/TESTING.md](docs/TESTING.md)
-- [docs/RESEARCH.md](docs/RESEARCH.md)
-- [docs/RELEASE.md](docs/RELEASE.md)
-- [docs/RC5_DIAGNOSTIC.md](docs/RC5_DIAGNOSTIC.md) — historical rc.5 gate/results
+- [Current status](docs/STATUS_AND_PLAN.md)
+- [Design](docs/DESIGN.md)
+- [Testing](docs/TESTING.md)
+- [Release process](docs/RELEASE.md)
+- [Rejected hypotheses and evidence](docs/REJECTED_HYPOTHESES.md)
+- [Latest retail evidence](docs/RETAIL_EVIDENCE_RC7G.md)

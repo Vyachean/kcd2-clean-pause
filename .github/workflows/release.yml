@@ -2,18 +2,21 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
       - VERSION
+      - native/**
+      - tools/validate_native_contract.py
+      - docs/RELEASE_NOTES.md
       - .github/workflows/release.yml
-    tags:
-      - "v*"
+    tags: ["v*"]
   pull_request:
     paths:
       - VERSION
-      - .github/workflows/release.yml
       - native/**
+      - tools/validate_native_contract.py
+      - docs/RELEASE_NOTES.md
+      - .github/workflows/release.yml
   workflow_dispatch:
 
 permissions:
@@ -27,109 +30,33 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       asset: ${{ steps.package.outputs.asset }}
-
     steps:
-      - name: Checkout release source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Resolve and validate release version
+      - name: Resolve release version
         id: meta
         shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
-          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$') {
-            throw "Invalid VERSION: $version"
-          }
-
+          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$') { throw "Invalid VERSION: $version" }
           $expectedTag = "v$version"
-          if ($env:GITHUB_REF_TYPE -eq "tag") {
-            if ($env:GITHUB_REF_NAME -ne $expectedTag) {
-              throw "Tag $env:GITHUB_REF_NAME does not match VERSION $version"
-            }
-            $tag = $env:GITHUB_REF_NAME
-          } else {
-            $tag = $expectedTag
-          }
-
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne $expectedTag) { throw "Tag $env:GITHUB_REF_NAME does not match VERSION $version" }
+          $tag = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME } else { $expectedTag }
           $prerelease = if ($version.Contains("-")) { "true" } else { "false" }
           "tag=$tag" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "prerelease=$prerelease" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "Release version: $version"
-          Write-Host "Release tag: $tag"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Run repository tests
         run: python -m unittest discover -s tests -v
-
-      - name: Validate source contracts
-        shell: python
-        run: |
-          from pathlib import Path
-
-          native = Path("native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
-          abi = Path("native/src/kcd2_abi.h").read_text(encoding="utf-8")
-
-          for needle in (
-              "ActionMapManager.InitActionMaps(",
-              "ActionMapManager.LoadFromXML(",
-              "Player.OnAction =",
-          ):
-              if needle in native:
-                  raise SystemExit(f"Forbidden native runtime dependency: {needle}")
-
-          # Retail rc.4 proved the inferred native PauseGame ABI wrong; rc.5 proved
-          # the Lua PauseGame route is only a partial simulation freeze. Releases
-          # must use KCD2's own pause lifecycle and alter visibility only.
-          for needle in (
-              "kGameFrameworkPauseGameSlot",
-              "PauseGameFn",
-              "g_gameFramework",
-              "SetNativePause(",
-              "CryAction.PauseGame(",
-              "Action.PauseGame(",
-              "Game.PauseGame(",
-          ):
-              if needle in native or needle in abi:
-                  raise SystemExit(f"Rejected non-vanilla pause primitive: {needle}")
-
-          for needle in (
-              "kEnvGameOffset = 0x98",
-              "kEnvFlashUIOffset = 0x140",
-              "kFlashUIGetElementByInstanceStrSlot = 18",
-              "kUIElementSetVisibleSlot = 28",
-              "kUIElementIsVisibleSlot = 29",
-          ):
-              if needle not in abi:
-                  raise SystemExit(f"Missing verified KCD2 ABI fact: {needle}")
-
-          for needle in (
-              "KeyId::XiStart",
-              "KeyId::Escape",
-              "ActionMapManager.IsFilterEnabled(\"only_ui\")",
-              "getElement(g_flashUI, \"Menu@0\")",
-              "HideVerifiedVanillaPause(",
-              "g_cleanHidden",
-          ):
-              if needle not in native:
-                  raise SystemExit(f"Missing hidden-vanilla-pause release contract: {needle}")
-
-          forward_pos = native.find("Forward(input, event, force);", native.find("const bool eligible"))
-          hide_pos = native.find('HideVerifiedVanillaPause("Escape/Start press")')
-          if forward_pos == -1 or hide_pos == -1 or forward_pos > hide_pos:
-              raise SystemExit("Release must forward vanilla pause input before hiding Menu")
-
+      - name: Validate stable native contract
+        run: python tools/validate_native_contract.py
       - name: Configure x64 Release
         run: cmake -S native -B native/build -A x64
-
       - name: Build x64 Release
         run: cmake --build native/build --config Release --parallel
-
       - name: Validate and package native DLL
         id: package
         shell: pwsh
@@ -137,41 +64,25 @@ jobs:
           $dll = "native/build/Release/version.dll"
           if (-not (Test-Path $dll)) { throw "Missing $dll" }
           if ((Get-Item $dll).Length -lt 10240) { throw "version.dll is unexpectedly small" }
-
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
           $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
-          $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1 -ExpandProperty FullName
+          $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
           if (-not $dumpbin) { throw "dumpbin.exe not found" }
-
           $exports = & $dumpbin /nologo /exports $dll | Out-String
           foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
-            if ($exports -notmatch [regex]::Escape($name)) {
-              throw "version.dll proxy export missing: $name"
-            }
+            if ($exports -notmatch [regex]::Escape($name)) { throw "version.dll proxy export missing: $name" }
           }
-
           $deps = & $dumpbin /nologo /dependents $dll | Out-String
-          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") {
-            throw "Release DLL unexpectedly depends on dynamic MSVC runtime"
-          }
-
+          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") { throw "Release DLL unexpectedly depends on dynamic MSVC runtime" }
           New-Item -ItemType Directory -Force release/stage | Out-Null
           Copy-Item $dll release/stage/version.dll
           Copy-Item native/INSTALL.txt release/stage/INSTALL.txt
-
           $asset = "kcd2-clean-pause-${{ steps.meta.outputs.tag }}.zip"
-          $assetPath = "release/$asset"
-          Compress-Archive -Path release/stage/* -DestinationPath $assetPath -CompressionLevel Optimal
-
-          $hash = (Get-FileHash $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Compress-Archive -Path release/stage/* -DestinationPath "release/$asset" -CompressionLevel Optimal
+          $hash = (Get-FileHash "release/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $asset" | Set-Content release/SHA256SUMS.txt -Encoding ascii -NoNewline
           "asset=$asset" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "Packaged $asset ($((Get-Item $assetPath).Length) bytes)"
-
-      - name: Upload verified release artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: release-${{ steps.meta.outputs.tag }}
           path: |
@@ -182,32 +93,24 @@ jobs:
 
   publish:
     if: github.event_name != 'pull_request'
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: build
-
     steps:
-      - name: Checkout release source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Download verified release artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: release-${{ needs.build.outputs.tag }}
           path: release
-
       - name: Verify downloaded release artifact
         shell: bash
         run: |
           set -euo pipefail
           cd release
-          test -f "${{ needs.build.outputs.asset }}"
-          test -f SHA256SUMS.txt
           sha256sum -c SHA256SUMS.txt
           unzip -t "${{ needs.build.outputs.asset }}"
-
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -217,33 +120,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists; leaving it unchanged."
             exit 0
           fi
-
           remote_tag_sha="$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')"
-          args=(
-            "$TAG"
-            "release/$ASSET"
-            "release/SHA256SUMS.txt"
-            --generate-notes
-            --title "KCD2 Clean Pause $TAG"
-          )
-
+          args=("$TAG" "release/$ASSET" "release/SHA256SUMS.txt" --title "KCD2 Clean Pause $TAG" --notes-file docs/RELEASE_NOTES.md)
           if [[ -n "$remote_tag_sha" ]]; then
-            if [[ "$remote_tag_sha" != "$GITHUB_SHA" ]]; then
-              echo "Existing tag $TAG points to $remote_tag_sha, expected $GITHUB_SHA" >&2
-              exit 1
-            fi
+            [[ "$remote_tag_sha" == "$GITHUB_SHA" ]] || { echo "Existing tag points elsewhere" >&2; exit 1; }
             args+=(--verify-tag)
           else
             args+=(--target "$GITHUB_SHA")
           fi
-
-          if [[ "$PRERELEASE" == "true" ]]; then
-            args+=(--prerelease)
-          fi
-
+          [[ "$PRERELEASE" == "true" ]] && args+=(--prerelease)
           gh release create "${args[@]}"

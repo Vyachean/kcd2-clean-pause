@@ -1,24 +1,10 @@
 # Release pipeline
 
-Clean Pause uses a source-controlled GitHub release flow:
+GitHub Releases are the canonical distribution channel. Generated DLL/ZIP files are not committed.
 
-```text
-implementation PR
-  -> Validate CI + Release build/package CI
-  -> merge to main
-  -> release PR changes VERSION
-  -> CI
-  -> merge to main
-  -> Windows build/validate/package job
-  -> Linux verify/publish job
-  -> GitHub Release + ZIP + SHA256SUMS.txt
-```
+## Production source
 
-Generated DLL/ZIP files are never committed.
-
-## Active release source
-
-The current distributable/diagnostic implementation is native Windows code under:
+The distributable implementation is built directly from:
 
 ```text
 native/
@@ -32,63 +18,40 @@ native/
     version.def
 ```
 
-The old profile/Lua source remains in the repository as documented prototype history, but the release workflow does not package it.
+Experimental Lua/profile material remains only as historical research and is not packaged.
 
-`v0.1.0-rc.4` is a failed retail candidate. Its direct native pause ABI is not a supported release contract: KCD2 1.5.6 `gEnv + 0x98` is `IGame*`, not `IGameFramework*`, so rc.4 invoked `IGame::GetName()` as if it were PauseGame and then incorrectly entered an input-swallow state.
+## Pull-request gates
 
-The next diagnostic candidate (`rc.5`) keeps the native input/script bridge but removes the inferred pause vfunc entirely. Escape/Start remain vanilla and F10 probes retail Lua pause bindings.
+For release-affecting PRs:
 
-## Validation
-
-PR CI has two independent jobs:
-
-1. Linux source/tests:
-   - repository unit tests;
-   - historical Lua syntax;
-   - permanent input-safety rules;
-   - rejection of the rc.4 `IGameFramework`/slot-13 pause contract;
-   - corrected `gEnv + 0x98 = IGame*` ABI fact;
-   - rc.5 F10-only probe contract;
-   - explicit proof that native hook source does not reference Escape/Xbox Start.
-2. Windows x64 native build:
-   - configure/build with MSVC;
-   - build `version.dll`;
-   - validate required version-proxy exports;
-   - reject dynamic MSVC runtime dependencies;
-   - upload the compiled DLL as a short-lived CI artifact.
-
-`.github/workflows/release.yml` also runs its real Windows build/package job on matching pull requests. The publish job is hard-disabled for `pull_request`, so the release workflow itself must parse and build successfully before merge.
-
-The native build statically links the MSVC runtime and pins MinHook to `v1.3.4` through CMake FetchContent.
+1. repository Python tests run;
+2. historical Lua syntax is checked;
+3. `tools/validate_native_contract.py` enforces the current native safety/architecture contract;
+4. Windows MSVC builds x64 Release;
+5. `version.dll` proxy exports are validated;
+6. dynamic MSVC runtime dependencies are rejected;
+7. `.github/workflows/release.yml` runs its real build/package job but does not publish on `pull_request`.
 
 ## Publication
 
-`.github/workflows/release.yml` runs when `VERSION` reaches `main`, on a matching `v*` tag, when the release workflow itself changes, or by explicit `workflow_dispatch` retry.
+When a release `VERSION` reaches `main`, `.github/workflows/release.yml`:
 
-Publication is split across two operating systems:
-
-1. **Windows build job** (15-minute hard timeout)
-   - resolves `VERSION` and `v<VERSION>`;
-   - runs repository tests and source contracts;
-   - builds native x64 Release with MSVC;
-   - validates `version.dll` exports/dependencies;
-   - creates a ZIP containing only:
+1. verifies `VERSION` and resolves `v<VERSION>`;
+2. reruns tests and native contract validation;
+3. builds x64 Release on Windows;
+4. packages exactly:
 
 ```text
 version.dll
 INSTALL.txt
 ```
 
-   - writes `SHA256SUMS.txt`;
-   - uploads those exact files as an Actions artifact.
-2. **Linux publish job** (5-minute hard timeout)
-   - downloads the Windows-produced artifact;
-   - verifies `SHA256SUMS.txt`;
-   - runs `unzip -t` on the exact ZIP;
-   - creates or verifies the tag on the workflow commit;
-   - publishes the GitHub Release with the verified ZIP and checksum file.
+5. writes `SHA256SUMS.txt`;
+6. uploads the exact package as an Actions artifact;
+7. downloads and re-verifies that artifact in the publish job;
+8. creates the matching GitHub Release and tag on the exact workflow commit.
 
-If a Release for the same tag already exists, a retry leaves it unchanged instead of overwriting assets. A version containing `-` is marked prerelease. A plain semantic version such as `0.1.0` is stable.
+Plain semantic versions such as `0.1.0` are stable. Versions containing `-` are prereleases.
 
 ## Release assets
 
@@ -97,10 +60,8 @@ kcd2-clean-pause-v<VERSION>.zip
 SHA256SUMS.txt
 ```
 
-There is no release-time GitHub Secret and no dependency on a developer machine or a user's game installation.
+The current release notes are sourced from `docs/RELEASE_NOTES.md`.
 
-## KCD2 version support
+## Version support
 
-The runtime locator remains intentionally pinned to verified KCD2 **1.5.6** `SSystemGlobalEnvironment`, ScriptSystem, Input and IGame layout facts. rc.5 does **not** infer or call an `IGameFramework` pause vfunc.
-
-Supporting a new KCD2 version requires a reviewed implementation PR that revalidates those ABI/input assumptions, followed by the normal `VERSION` release PR. Do not silently reuse 1.5.6 ABI facts after a game update.
+v0.1.0 is pinned to KCD2 **1.5.6** ABI facts verified during development. A future KCD2 update requires revalidation before claiming support; fixed offsets/semantics must not silently be assumed compatible.
