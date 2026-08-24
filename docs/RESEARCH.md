@@ -1,137 +1,120 @@
 # Research notes
 
-This file separates confirmed KCD2 facts from behaviours that still require retail testing.
+Confirmed facts are separated from runtime questions that still need Xbox Store 1.5.6 testing.
 
-## Confirmed retail 1.5.6 pause routes
+## Retail input/profile findings
 
-The exact Xbox Store 1.5.6 `defaultProfile.xml` contains two semantic pause routes:
+The exact Xbox Store 1.5.6 `defaultProfile.xml` uses:
 
 ```text
 ordinary gameplay        open_menu/open_menu
 dialogue/cutscene/etc.   open_pause_menu/open_pause_menu
 ```
 
-Both original actions have:
+with retail Escape/keybind and Xbox `xi_start` bindings.
+
+`rc.1` and `rc.2` proved that replacing/splitting these vanilla actions is unsafe. `rc.3` restored the originals completely and normal Escape/Start pause returned.
+
+Permanent rules:
+
+- do not call `ActionMapManager.InitActionMaps()`; a previous prototype disabled controller input globally;
+- do not rely on a supplemental runtime Start map; it failed to intercept Start in two retail tests;
+- do not require a full `defaultProfile.xml` replacement for the active native implementation.
+
+## rc3 proved the Lua command chain
+
+`v0.1.0-rc.3` used a separate keyboard-only F10 `consoleCMD` probe while leaving vanilla Escape/Start untouched.
+
+Retail log on Xbox Store 1.5.6 contains:
 
 ```text
-onPress="1"
-onRelease="1"
-keyboard="_keybinds_ref_"
-xboxpad="xi_start"
-pspad="pad_start"
+Loading lua init script for mod clean_pause ...
+[Clean Pause] official runtime loaded; routed actions=clean_pause_probe_gameplay,clean_pause_probe_pause_context
+...
+[Clean Pause] Game.PauseGame unavailable
 ```
 
-The profile override is definitely loaded by the mod package: both rc1 and rc2 changed the observed behaviour of Escape/Start on the target retail build.
+Therefore the following are confirmed on the target retail build:
 
-## Confirmed: `consoleCMD`
+1. the mod PAK loads;
+2. `Scripts/Mods/clean_pause.lua` executes;
+3. `System.AddCCommand` registration works;
+4. the F10 profile `consoleCMD` reaches the registered command;
+5. failure occurs specifically at the requested Lua pause primitive.
 
-KCD2 keybind/superaction examples use the exact attribute:
+F10 appearing to do nothing visually was **not** an input-routing failure.
 
-```xml
-consoleCMD="1"
+## Correction: `Game.PauseGame` is not a usable retail Lua API
+
+Earlier documentation treated generated ScriptBind method lists as proof that `Game.PauseGame` was callable in retail. The rc3 log falsifies that assumption.
+
+Independent export data strengthens the runtime result:
+
+- the retail Lua-closure dump contains no `PauseGame` closure;
+- the crossmatch lists `CryAction.PauseGame` as `kcdrewrite_only`, not retail.
+
+Accordingly, the project must not ship another pure-profile/Lua candidate that depends on `Game.PauseGame`.
+
+## Confirmed native pause primitive
+
+Reverse engineering for **WHGame.dll 1.5.6** identifies the KCD2 `IGameFramework` / `CCryAction` vtable and maps slot 13 to the game-framework pause method. The matching CryAction interface signature is:
+
+```cpp
+PauseGame(bool pause, bool force, unsigned int fadeOutInMs)
 ```
 
-`v0.1.0-rc.1` incorrectly used `consoleCmd="1"`. XML attribute names are case-sensitive.
-
-What is **not yet confirmed** is whether our packed `Scripts/Mods/clean_pause.lua` executes and whether a custom `consoleCMD` profile action successfully reaches a command registered through `System.AddCCommand` on the Xbox Store build.
-
-That is the purpose of the F10 diagnostic candidate.
-
-## Confirmed failure: `v0.1.0-rc.1`
-
-Observed on Xbox Store 1.5.6:
-
-- Escape did nothing;
-- Xbox Start did nothing;
-- Clean Pause did not activate.
-
-Problems:
-
-- wrong-case `consoleCmd`;
-- original vanilla pause actions had been replaced outright.
-
-## Confirmed failure: `v0.1.0-rc.2`
-
-Observed on the same target:
-
-- Escape still did nothing;
-- Xbox Start still did nothing.
-
-rc2 used exact `consoleCMD`, but changed the original vanilla actions to `onRelease`-only and added separate custom press actions.
-
-This disproves the assumption that an `onRelease`-only original action provides a usable independent vanilla fallback in KCD2. Presence of the XML route in the profile is not enough; the actual retail dispatch semantics do not give us the fallback behaviour we expected.
-
-Permanent consequence: **do not modify Start/Escape again until the Lua/console-command layer is independently proven.**
-
-## Diagnostic design after rc2
-
-The next candidate is derived from the already integrity-checked rc2 source at build time.
-
-It restores both vanilla actions to:
+The active native candidate therefore calls slot 13 directly as:
 
 ```text
-onPress="1" + onRelease="1"
-_keybinds_ref_
-xi_start
-non-console
+IGameFramework::PauseGame(paused, true, 0)
 ```
 
-The rc2 custom entry slots are converted into keyboard-only probes:
+The runtime does not use a fixed Xbox-Store address for `pGameFramework`: it locates `SSystemGlobalEnvironment`, validates its ScriptSystem/Input/System objects, and now additionally requires the slot-13 target to be executable before installing the input hook.
+
+If that validation fails, no hook is installed and KCD2 keeps vanilla input.
+
+## Native input architecture
+
+The existing narrow native prototype hooks `IInput::PostInputEvent` before `ActionMapManager`.
+
+Running:
 
 ```text
-clean_pause_probe_gameplay       -> F10, consoleCMD="1"
-clean_pause_probe_pause_context  -> F10, consoleCMD="1"
+Escape / Xbox Start press
+  -> read-only Lua eligibility check (player exists; only_ui is false)
+  -> direct native PauseGame(true, true, 0)
+  -> consume physical press before vanilla pause action
 ```
 
-The probes have no controller bindings. Filter references that previously pointed to the rc2 custom entry actions are renamed to the corresponding F10 probe names.
-
-This isolates the runtime chain:
+Clean Paused:
 
 ```text
-F10 profile action
-  -> consoleCMD
-  -> System.AddCCommand registration
-  -> Scripts/Mods/clean_pause.lua
-  -> CleanPause.Enter()
-  -> Game.PauseGame(true)
+B
+  -> native PauseGame(false, true, 0)
+  -> consume B press/release
+
+Escape / Start
+  -> call MenuEvents.DisplayIngameMenu(true)
+  -> verify only_ui became active
+  -> leave native pause active during handoff
 ```
 
-Possible retail outcomes:
+All other KCD2 input events are consumed while Clean Pause owns the pause state.
 
-- vanilla Esc/Start work + F10 works -> Lua/bootstrap/console route proven; only Start interception remains;
-- vanilla Esc/Start work + F10 does nothing + no `[Clean Pause]` bootstrap log -> investigate Lua bootstrap/package loading;
-- vanilla Esc/Start work + bootstrap log exists + F10 does nothing -> investigate command registration/action routing;
-- vanilla Esc/Start do not work -> diagnostic package violated its safety contract and must not be used further.
+Lua is no longer responsible for pausing. It is used only for read-only context checks and the UI handoff because those retail APIs were independently observed/available.
 
-## Confirmed APIs / constraints
+## Remaining retail questions
 
-Warhorse/KCD2 documentation exposes:
+The next native prerelease must establish:
 
-```lua
-System.AddCCommand(...)
-Game.PauseGame(true)
-Game.PauseGame(false)
-ActionMapManager.EnableActionMap(...)
-ActionMapManager.IsFilterEnabled(...)
-UIAction.CallFunction(...)
-```
+1. whether the `version.dll` proxy loads on this exact Microsoft Store installation;
+2. whether runtime environment / slot-13 validation succeeds;
+3. whether first Escape/Start freezes the game without a vanilla-menu frame;
+4. whether current HUD/subtitle remains visible;
+5. whether dialogue audio and in-engine cutscene progression stop coherently;
+6. whether B resumes without leaking an underlying action;
+7. whether unrelated input is inert while paused;
+8. whether `MenuEvents.DisplayIngameMenu(true)` successfully performs second-Start handoff without an intermediate unpause;
+9. whether repeated pause/resume, loading, death, Alt-Tab and controller reconnect leave no stuck state.
 
-The retail ActionMapManager surface does **not** expose `EnableActionFilter`.
-
-`ActionMapManager.InitActionMaps()` is permanently forbidden: an earlier retail prototype using it broke Xbox-controller input globally, including the initial menu.
-
-A supplemental runtime Start map through `LoadFromXML()` also failed twice: the custom Start action never fired while vanilla Start remained functional.
-
-## Remaining product questions
-
-Only after the F10 probe succeeds should the project return to these questions:
-
-1. how to intercept Xbox Start without breaking the vanilla route;
-2. whether first Clean Pause has zero menu flash;
-3. whether `Game.PauseGame(true)` keeps the current subtitle visible indefinitely;
-4. whether `clean_pause_controls` isolates lower gameplay/dialogue/cutscene input;
-5. whether B resumes without skip/cancel side effects;
-6. whether `MenuEvents.DisplayIngameMenu(true)` opens the real vanilla pause menu on the second Start;
-7. whether audio/camera/animation/scripted progression pause and resume coherently.
-
-Do not infer answers to these from static CI; they require retail observation.
+These cannot be established by CI; CI only proves compilation, packaging and static ABI/safety contracts.

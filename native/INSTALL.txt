@@ -1,0 +1,25 @@
+KCD2 Clean Pause — native retail candidate
+Target: Kingdom Come: Deliverance II 1.5.6, PC Xbox Store / Xbox app / Game Pass
+
+INSTALL
+1. Remove/disable the older Clean Pause folder from Documents\kingdomcome_mods before testing this native build.
+2. Close KCD2 completely.
+3. Place version.dll in the same directory as KingdomCome.exe / WHGame.dll.
+4. Start the game normally from Xbox / Microsoft Store.
+
+Do not replace, delete, or modify any game-owned DLL.
+If Windows does not allow writing to the game directory, do not change WindowsApps ownership or permissions just for this test.
+
+TEST
+- Confirm title-menu controller input is normal.
+- Load a save.
+- Press Escape or Xbox Start: first press should freeze the current frame without opening the vanilla pause overlay.
+- While Clean Paused, B should resume.
+- Enter Clean Pause again; a second Escape / Start should open the normal KCD2 pause menu without an intermediate unpause.
+
+LOG
+The native loader writes kcd2_clean_pause_native.log beside version.dll.
+On any failure, keep that log for diagnosis.
+
+UNINSTALL
+Close KCD2 and delete only this mod's version.dll and kcd2_clean_pause_native.log from the game directory.
