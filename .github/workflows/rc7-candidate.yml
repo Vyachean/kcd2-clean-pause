@@ -65,7 +65,7 @@ jobs:
           generated = Path("native/candidate/rc7/clean_pause_candidate_rc7f.ci.cpp")
           subprocess.run([
               sys.executable,
-              "native/candidate/rc7/generate_candidate_v5.py",
+              "native/candidate/rc7/generate_candidate_v6.py",
               "native/candidate/rc7/clean_pause_candidate.cpp",
               str(generated),
           ], check=True)
