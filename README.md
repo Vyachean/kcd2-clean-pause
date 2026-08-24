@@ -21,6 +21,10 @@ The goal is to freeze gameplay, dialogue, in-engine cutscenes, audio and subtitl
 - PC Xbox Store / Xbox app / Game Pass
 - Xbox controller; Escape behaves analogously for pause/menu entry
 
+Current prerelease: **v0.1.0-rc.6**. Retail acceptance of the hidden-vanilla-pause architecture is the current gate.
+
+For the authoritative current status, rejected approaches and next-step decision tree, see [docs/STATUS_AND_PLAN.md](docs/STATUS_AND_PLAN.md).
+
 ## Retail findings
 
 - `v0.1.0-rc.1` / `rc.2` broke normal Escape/Start routing and are obsolete.
@@ -32,7 +36,7 @@ Therefore the mod no longer calls any explicit `PauseGame` primitive.
 
 ## Current architecture — vanilla pause, hidden Menu
 
-The next candidate lets KCD2 create its own real pause and changes presentation only:
+The current candidate lets KCD2 create its own real pause and changes presentation only:
 
 1. Escape/Start is checked only for gameplay eligibility.
 2. The physical input is forwarded to KCD2 unchanged.
@@ -100,6 +104,8 @@ For native candidates, remove the old `Documents\kingdomcome_mods\clean_pause` P
 
 See:
 
+- [docs/STATUS_AND_PLAN.md](docs/STATUS_AND_PLAN.md) — canonical current status and plan
+- [docs/DESIGN.md](docs/DESIGN.md)
 - [docs/TESTING.md](docs/TESTING.md)
 - [docs/RESEARCH.md](docs/RESEARCH.md)
 - [docs/RELEASE.md](docs/RELEASE.md)
