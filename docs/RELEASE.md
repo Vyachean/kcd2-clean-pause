@@ -54,11 +54,11 @@ The native build statically links the MSVC runtime and pins MinHook to `v1.3.4` 
 
 ## Publication
 
-`.github/workflows/release.yml` runs when `VERSION` reaches `main`, on a matching `v*` tag, and when the release workflow itself changes. The workflow-file trigger makes publication-pipeline fixes able to retry an unpublished current `VERSION` without inventing a new version number.
+`.github/workflows/release.yml` runs when `VERSION` reaches `main`, on a matching `v*` tag, when the release workflow itself changes, or by an explicit `workflow_dispatch` retry. The workflow-file trigger lets publication-pipeline fixes retry an unpublished current `VERSION` without inventing a new version number.
 
-Publication is deliberately split across two operating systems:
+Publication is deliberately split across two operating systems and there is no repository-wide `main` concurrency lock between release attempts:
 
-1. **Windows build job**
+1. **Windows build job** (15-minute hard timeout)
    - resolves `VERSION` and `v<VERSION>`;
    - runs source contract/tests;
    - builds native x64 Release with MSVC;
@@ -72,14 +72,14 @@ INSTALL.txt
 
    - writes `SHA256SUMS.txt`;
    - uploads those exact files as an Actions artifact.
-2. **Linux publish job**
+2. **Linux publish job** (5-minute hard timeout)
    - downloads the Windows-produced artifact;
    - verifies `SHA256SUMS.txt`;
    - runs `unzip -t` on the exact ZIP that will be published;
    - creates or verifies the tag on the workflow commit;
    - publishes the GitHub Release with the verified ZIP and checksum file.
 
-If a Release for the same tag already exists, a workflow-only retry leaves it unchanged instead of overwriting assets. A version containing `-` is marked prerelease. A plain semantic version such as `0.1.0` is stable.
+If a Release for the same tag already exists, a retry leaves it unchanged instead of overwriting assets. A version containing `-` is marked prerelease. A plain semantic version such as `0.1.0` is stable.
 
 ## Release assets
 
