@@ -1,8 +1,10 @@
 # Design
 
+This document describes the **current production direction**. For the current stage, retail evidence, and decision tree, see [STATUS_AND_PLAN.md](STATUS_AND_PLAN.md).
+
 ## Product contract
 
-Clean Pause must stop gameplay/dialogue/in-engine-cutscene progression while leaving the current rendered frame unobscured.
+Clean Pause must stop gameplay, dialogue and in-engine-cutscene progression while leaving the current rendered frame unobscured.
 
 ```text
 Running
@@ -15,185 +17,154 @@ CleanPaused
 
 `VanillaMenu` is KCD2's real pause menu. Clean Pause never draws a replacement UI.
 
-## Retail routes
+## Design principle
 
-Xbox Store 1.5.6 uses two semantic pause actions:
+The current architecture does **not** create pause state itself.
 
-```text
-normal gameplay              open_menu/open_menu
-dialogue/cutscene/minigame   open_pause_menu/open_pause_menu
-```
+KCD2 already has a pause path that owns all of the difficult coupled state:
 
-Both use `keyboard="_keybinds_ref_"`, `xboxpad="xi_start"` and `pspad="pad_start"` in the retail profile.
+- world/simulation pause;
+- audio pause behavior;
+- dialogue/cutscene suspension;
+- pause counters/state;
+- `only_ui` action-filter state;
+- vanilla resume/menu behavior.
 
-## rc1 failure and design correction
+Clean Pause therefore reuses the vanilla pause lifecycle and changes only presentation:
 
-`v0.1.0-rc.1` changed the original pause actions into console actions and used the wrong attribute spelling `consoleCmd="1"`. KCD2 keybind actions require exact `consoleCMD="1"`.
+> let vanilla KCD2 pause normally, verify that pause ownership exists, then hide only the visible pause-menu surface.
 
-Retail result:
+This replaces the older profile/Lua and inferred native `PauseGame` designs.
 
-- Escape stopped pausing;
-- Xbox Start stopped pausing;
-- Clean Pause did not execute.
+## Running -> hidden vanilla pause
 
-The casing bug is fixed, but the more important correction is architectural: **Clean Pause no longer replaces the only vanilla pause route.**
+For Escape or Xbox Menu / Start in an eligible gameplay context:
 
-## Fail-safe press/release split
+1. Perform read-only context checks before taking ownership of anything.
+2. Forward the physical input event to KCD2 unchanged.
+3. Verify that vanilla processing enabled `ActionMapManager` filter `only_ui`.
+4. Resolve the retail pause-menu Flash element (`Menu@0`) through the verified KCD2 1.5.6 `IFlashUI` / `IUIElement` interfaces.
+5. Call `IUIElement::SetVisible(false)` on that Menu element.
+6. Verify the hidden state before the mod considers Clean Pause active.
 
-For each retail pause action, the patcher now creates two routes on the same physical control.
-
-### Press: custom Clean Pause
-
-```text
-open_menu map:
-  clean_pause_enter_gameplay
-    onPress=1
-    keyboard=escape
-    xboxpad=xi_start
-    consoleCMD=1
-
-open_pause_menu map:
-  clean_pause_enter_pause_context
-    onPress=1
-    keyboard=escape
-    xboxpad=xi_start
-    consoleCMD=1
-```
-
-These command names are registered by the mod Lua bootstrap and call `CleanPause.OnPauseAction()`.
-
-### Release: original vanilla fallback
-
-The original actions remain in place with their original semantic names and retail bindings:
+The order is intentional:
 
 ```text
-open_menu/open_menu
-open_pause_menu/open_pause_menu
+forward vanilla pause
+  -> prove vanilla owns pause
+  -> hide presentation
+  -> only then isolate unrelated input
 ```
 
-They are changed to `onRelease="1"` only and are **not** console commands.
+The mod must never reverse that ordering.
 
-This creates the safety invariant:
+## Fail-open entry
+
+Every runtime assumption is allowed to fail without breaking normal pause behavior.
+
+If:
+
+- context eligibility cannot be established;
+- `only_ui` does not become active;
+- `Menu@0` cannot be resolved;
+- visibility cannot be changed or verified;
+
+then Clean Pause does not acquire hidden-pause ownership. The already-forwarded vanilla event is left alone, so the user should receive the ordinary visible KCD2 pause menu.
+
+A visible vanilla menu is the correct fallback.
+
+## Input ownership while hidden
+
+Unrelated gameplay/dialogue input may be consumed **only** after both conditions are proven:
+
+1. vanilla `only_ui` pause is active;
+2. the pause Menu element is hidden.
+
+This prevents the rc.4 failure mode in which gameplay remained live while the mod swallowed input.
+
+## B resume
+
+B must use KCD2's own Back/Resume path.
+
+While hidden:
+
+1. reveal the vanilla Menu within the same input dispatch;
+2. forward B to KCD2;
+3. check `only_ui` again after vanilla handling;
+4. if `only_ui` is gone, return to Running;
+5. if vanilla remains paused, re-hide the Menu only after it is resolved and verified again.
+
+The mod does not call a custom unpause primitive.
+
+## Second Escape / Start
+
+The second pause key should expose the ordinary KCD2 menu without changing pause ownership.
+
+While hidden:
+
+1. reveal the already-open Menu;
+2. consume that second physical Escape/Start event;
+3. leave vanilla pause state intact;
+4. relinquish Clean Pause presentation ownership.
+
+This avoids an `unpause -> open menu -> pause` transition and therefore avoids an intermediate simulation/audio tick.
+
+## ABI boundary
+
+The active implementation deliberately uses a narrow KCD2 1.5.6 ABI surface.
+
+Currently relied upon facts:
 
 ```text
-custom press works
-  -> Clean Pause enables its exclusive controls map
-  -> same release is consumed by that map
-  -> vanilla menu stays hidden
-
-custom press fails
-  -> exclusive controls map never activates
-  -> same release reaches original retail pause action
-  -> vanilla pause menu opens
+SSystemGlobalEnvironment + 0x98   -> IGame*
+SSystemGlobalEnvironment + 0x140  -> IFlashUI*
+IFlashUI::GetUIElementByInstanceStr -> slot 18
+IUIElement::SetVisible              -> slot 28
+IUIElement::IsVisible               -> slot 29
+IInput::PostInputEvent              -> raw input hook before ActionMapManager
 ```
 
-A bug in the custom Lua/command path should therefore degrade to vanilla pause rather than remove pause entirely.
+The `IGame*` distinction is important. rc.4 incorrectly treated `gEnv+0x98` as `IGameFramework*` and accidentally invoked `IGame::GetName()` through a PauseGame-shaped function pointer.
 
-The explicit custom keyboard binding is `escape`; the original fallback keeps `_keybinds_ref_`. Xbox Start remains `xi_start` on both routes.
+## Rejected pause mechanisms
 
-## Temporary controls map
+### Full profile replacement / custom action-map ownership
 
-The patched profile adds:
+Rejected after rc.1/rc.2 retail failures. It can remove the only vanilla pause path when a custom route fails and creates last-mod-wins compatibility problems around `defaultProfile.xml`.
 
-```xml
-<actionmap name="clean_pause_controls"
-           priority="overlays"
-           exclusivity="1">
-```
+### `Game.PauseGame`
 
-It is disabled outside Clean Pause and contains exactly:
+rc.3 proved the Lua/console route worked but the tested Xbox Store runtime did not expose this binding.
 
-```text
-Escape / Start press   -> clean_pause_open_menu       (consoleCMD)
-Escape / Start release -> clean_pause_block_start_release
-B press                -> clean_pause_block_b_press
-B release              -> clean_pause_resume          (consoleCMD)
-```
+### `CryAction.PauseGame` / `Action.PauseGame`
 
-The Start/Escape release sink is essential to the fail-safe split: after successful Clean Pause entry, it prevents the original release-only vanilla action from firing.
+rc.5 retail testing showed a Lua pause route can freeze simulation but does not reproduce the complete vanilla pause lifecycle needed by Clean Pause. It is therefore diagnostic evidence, not the production mechanism.
 
-B resumes on release so the complete B press/release cycle stays inside the Clean Pause context and cannot become `dialog_skip`, `cutscene_skip`, etc.
+### inferred native `IGameFramework::PauseGame`
 
-## Enter Clean Pause
+Rejected after rc.4. The pointer source was wrong and the KCD2 slot/signature semantics were not proven. A call returning without an access violation is not evidence of pause acquisition.
 
-`clean_pause_enter_gameplay` or `clean_pause_enter_pause_context` calls `CleanPause.OnPauseAction()`.
+## Permanent forbidden paths
 
-Entry succeeds only when:
-
-- state is `running`;
-- an in-game player exists;
-- vanilla `only_ui` is not active;
-- `clean_pause_controls` can be enabled;
-- `Game.PauseGame(true)` succeeds.
-
-Then state becomes `clean_paused` before the physical pause button is released, so the exclusive release sink owns that release.
-
-## Resume
-
-`clean_pause_resume` fires on B release:
-
-1. disable `clean_pause_controls`;
-2. call `Game.PauseGame(false)`;
-3. return to `running`.
-
-If unpause fails, the controls map is re-enabled and Clean Pause keeps ownership.
-
-## Vanilla-menu handoff
-
-Second Escape/Start currently uses `clean_pause_open_menu`:
-
-1. disable `clean_pause_controls`;
-2. keep the game paused;
-3. call `UIAction.CallFunction("MenuEvents", -1, "DisplayIngameMenu", true)`;
-4. on success, relinquish Clean Pause ownership;
-5. on failure, re-enable the controls map and remain clean-paused.
-
-There is no intermediate `PauseGame(false)` tick. The exact `MenuEvents` exposure remains a retail acceptance item.
-
-## Filter preservation
-
-Custom entry actions must obey the same contextual restrictions as the original pause actions.
-
-For every `actionFail` filter containing `open_menu` or `open_pause_menu`, the patcher adds the corresponding custom entry action. This is important for the exact retail `no_menu` filter.
-
-For an `actionPass` filter containing a retail pause action, the patcher adds:
-
-- the corresponding custom entry action;
-- `clean_pause_open_menu`;
-- `clean_pause_block_start_release`;
-- `clean_pause_block_b_press`;
-- `clean_pause_resume`.
-
-The exact Xbox Store 1.5.6 source profile contains no `actionPass` filters, but the builder preserves the rule for compatible variants.
-
-## Whole-file compatibility
-
-KCD2 uses last-mod-wins for `defaultProfile.xml`. The release is therefore explicitly version-specific.
-
-The repository versions the reviewed Xbox 1.5.6 patched profile as release source. Development builders can regenerate it from an exact installation profile and fail closed when expected retail routes differ.
-
-Another mod that replaces `defaultProfile.xml` conflicts with Clean Pause unless the files are deliberately merged.
-
-## Forbidden paths
-
-- `ActionMapManager.InitActionMaps()` — previously destroyed controller/action-map state globally;
-- runtime supplemental Start map via `LoadFromXML()` — failed twice on the target build;
-- runtime `EnableActionFilter()` — absent from the target retail Lua surface;
+- `ActionMapManager.InitActionMaps()`;
+- runtime partial action-map reload as the primary Start interception mechanism;
+- persistent controller remapping;
 - `Player.OnAction` replacement;
-- native input hook unless the official path is proven insufficient;
-- `Menu.gfx` replacement;
-- external overlay/OCR.
+- custom overlay/OCR;
+- `Menu.gfx` replacement unless future retail evidence leaves no narrower presentation hook;
+- any custom pause/input-swallow state entered without a verified vanilla pause.
 
-## Remaining runtime gates
+## Current acceptance gates
 
-The next prerelease must prove:
+The hidden-vanilla-pause design is accepted only if retail testing proves:
 
-- exact `consoleCMD` press routing works for Escape and Xbox Start;
-- successful entry consumes the same button release;
-- failed custom entry would leave vanilla release fallback usable;
-- zero visible vanilla pause-menu frame on successful entry;
-- subtitle persistence under `Game.PauseGame(true)`;
-- input isolation from the exclusive overlay-priority map;
-- B resume without dialogue/cutscene side effects;
-- real vanilla-menu handoff through `MenuEvents`;
-- coherent audio/cutscene pause and resume.
+- first Escape and Start produce the full vanilla pause lifecycle;
+- the visible pause menu is hidden without an unacceptable flash;
+- current HUD/subtitle presentation remains usable;
+- the same subtitle remains for the duration of Clean Pause;
+- dialogue/cutscene audio and progression pause coherently;
+- B resumes through vanilla behavior without skip/cancel leakage;
+- second Escape/Start exposes the real vanilla menu without an intermediate unpause tick;
+- repeated transitions never leave gameplay live with input swallowed.
+
+See [TESTING.md](TESTING.md) for the current retail procedure.
