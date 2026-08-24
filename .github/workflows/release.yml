@@ -9,17 +9,15 @@ on:
       - .github/workflows/release.yml
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 15
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
@@ -147,6 +145,7 @@ jobs:
 
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: build
 
     steps:
