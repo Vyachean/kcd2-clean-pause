@@ -28,6 +28,8 @@ set(CLEAN_PAUSE_RUNTIME_SOURCES
   src/clean_pause_native.cpp
   src/clean_pause_native.h
   src/kcd2_abi.h
+  src/process_guard.cpp
+  src/process_guard.h
 )
 
 function(configure_clean_pause_target target)
