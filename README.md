@@ -1,123 +1,66 @@
 # KCD2 Clean Pause
 
-Experimental **Kingdom Come: Deliverance II** mod targeting:
+Clean Pause for **Kingdom Come: Deliverance II** on Windows.
+
+Tested target: **KCD2 1.5.6**, primarily the PC Xbox Store / Xbox app / Game Pass build with an Xbox controller.
+
+## Behavior
 
 ```text
 Running
-  Xbox Menu / Start -> Clean Pause
-  Escape            -> Clean Pause
+  Escape / Xbox Start -> Clean Pause
 
 Clean Pause
-  B                 -> Resume
-  Xbox Menu / Start -> visible vanilla KCD2 pause menu
-  Escape            -> visible vanilla KCD2 pause menu
+  Escape / Xbox Start -> visible vanilla pause menu
+  Xbox B               -> visible vanilla pause menu
+
+Vanilla pause menu
+  normal KCD2 controls -> resume / settings / save / quit
 ```
 
-Target: KCD2 **1.5.6**, Windows retail, primarily PC Xbox Store / Xbox app / Game Pass, Xbox controller first.
+Clean Pause uses KCD2's own pause lifecycle. World simulation and audio pause as they do in the normal game pause, while the pause-menu surface itself is not drawn. The mod restores the gameplay HUD child state so subtitles that were visible at pause entry remain visible.
 
-Current prerelease candidate: **v0.1.0-rc.7g**.
+The strong depth-of-field blur applied by the vanilla pause is intentionally left unchanged.
 
-Authoritative state:
+### Known v0.1.0 behavior
 
-- [docs/STATUS_AND_PLAN.md](docs/STATUS_AND_PLAN.md)
-- [docs/REJECTED_HYPOTHESES.md](docs/REJECTED_HYPOTHESES.md)
-- [docs/RETAIL_EVIDENCE_RC7G.md](docs/RETAIL_EVIDENCE_RC7G.md)
+Xbox **B does not resume directly from Clean Pause**. It reveals the ordinary KCD2 pause menu; use the normal menu controls to resume. This is an accepted v0.1.0 behavior, not a release blocker.
 
-## Retail-confirmed core behavior
+## Install
 
-On Xbox Store KCD2 1.5.6, rc7g now confirms:
+1. Close KCD2.
+2. Remove/disable any older Clean Pause PAK under `Documents\kingdomcome_mods\clean_pause`.
+3. Download `kcd2-clean-pause-v0.1.0.zip` from GitHub Releases.
+4. Place `version.dll` beside the KCD2 executable / `WHGame.dll`.
+5. Start the game normally.
 
-1. first Start/Escape enters Clean Pause without drawing the vanilla pause menu;
-2. the current subtitle remains visible at the bottom;
-3. world simulation and audio use the real vanilla pause lifecycle;
-4. second Start/Escape reveals the already-open ordinary KCD2 pause menu;
-5. that visible menu can then be exited normally without the rc7e/rc7f crashes.
+Do **not** overwrite another mod's unrelated `version.dll`. If another mod already owns that proxy DLL, the two need an explicit compatibility solution.
 
-Vanilla pause depth-of-field blur remains accepted and out of scope.
+The mod writes `kcd2_clean_pause_native.log` beside `version.dll`.
 
-## Accepted pause architecture
+## Uninstall
 
-KCD2 itself remains the only pause owner.
+Close KCD2 and remove only this mod's `version.dll` and optional `kcd2_clean_pause_native.log`.
 
-1. Forward the physical Escape/Start event to vanilla KCD2.
-2. Use `Menu@0::IsVisible()` as the retail-proven pause lifecycle signal.
-3. Keep `Menu@0` logically visible.
-4. Suppress only `Menu@0::Render()` during Clean Pause.
-5. Second Escape/Start restores captured vanilla-pause HUD presentation and reveals the already-open menu without an unpause/re-pause cycle.
+## Architecture
 
-## HUD/subtitle presentation
+The native implementation:
 
-Root `hud@0` visibility is insufficient. KCD2's HUD mask controls 28 child movie clips.
+- forwards the real Escape/Start event to vanilla KCD2;
+- uses `Menu@0::IsVisible()` as the retail-proven pause lifecycle signal;
+- keeps `Menu@0` logically visible and suppresses only its `Render()` call during Clean Pause;
+- snapshots the visibility of KCD2's 28 HUD child movie clips before pause and restores that gameplay presentation while Clean Pause is active;
+- treats `IUIElement::GetMovieClip()` results as borrowed, call-local handles: never retained, never `Release()`d by the mod;
+- suppresses only the HUD Flash calls `ClearSubtitles` and `HideNarrativeSubtitles` while Clean Pause owns presentation;
+- fails open to the visible vanilla pause menu when an assumption cannot be verified.
 
-The active implementation captures exact child visibility booleans:
-
-- gameplay snapshot before physical pause;
-- vanilla-pause snapshot after KCD2 opens pause;
-- Clean Pause restores gameplay visibility;
-- second Start restores vanilla-pause visibility before revealing Menu.
-
-rc7e first proved this child layer can keep subtitles visible; rc7g reconfirmed it with a stable core lifecycle.
-
-## Movieclip ownership
-
-Two unsafe alternatives are permanently rejected:
-
-- rc7e retained raw `GetMovieClip()` pointers across frames;
-- rc7f immediately called destructive `Release()` on every `GetMovieClip()` result and crashed on first pause.
-
-rc7g uses the retail-validated model:
-
-- `IUIElement::GetMovieClip()` result is a borrowed/cached handle;
-- use it only inside the current helper call;
-- never retain it across calls/frames;
-- never call `Release()` on it;
-- persist only visibility booleans.
-
-## Xbox input
-
-Retail-proven ids:
-
-- Start = 516
-- A = 526
-- B = 527
-
-Physical B does not leak to gameplay/dialog/cutscene while Clean Pause owns input.
-
-### Remaining input gate
-
-Direct resume from Clean Pause itself is still not retail-confirmed:
-
-```text
-Clean Pause -> Xbox B -> Running
-```
-
-That path restores the captured vanilla-pause HUD snapshot and replays the captured vanilla pause-key pair. It remains unverified rather than rejected.
-
-## Safety constraints
-
-- no custom/inferred `PauseGame` production path;
-- no `only_ui` ownership dependency;
-- no action-map mutation or `Player.OnAction` replacement;
-- no fixed libKCD2 WHGame RVAs;
-- never mutate `Menu@0` visibility;
-- never retain `GetMovieClip()` pointers across helper calls;
-- never call `Release()` on `IUIElement::GetMovieClip()` results;
-- never mutate HUD children from `Menu::Render()`;
-- child mutation only on validated main thread;
-- preserve captured visibility instead of forcing all children visible;
-- unresolved runtime state fails open.
-
-## Distribution
-
-**GitHub Releases are canonical.** Candidate binaries are published as prereleases only after generated-source safety checks, MSVC x64 build, proxy/static-runtime validation, ZIP/checksum verification and exact-tag binding succeed.
-
-For native candidates, remove the old `Documents\kingdomcome_mods\clean_pause` PAK before testing so only one implementation is active.
+No custom/inferred `PauseGame`, action-map replacement, fixed storefront-specific WHGame RVA, or replacement overlay is used.
 
 ## Documentation
 
-- [docs/STATUS_AND_PLAN.md](docs/STATUS_AND_PLAN.md)
-- [docs/REJECTED_HYPOTHESES.md](docs/REJECTED_HYPOTHESES.md)
-- [docs/RETAIL_EVIDENCE_RC7G.md](docs/RETAIL_EVIDENCE_RC7G.md)
-- [docs/RETAIL_EVIDENCE_RC7F.md](docs/RETAIL_EVIDENCE_RC7F.md)
-- [docs/RC7_SINGLE_SESSION_TEST.md](docs/RC7_SINGLE_SESSION_TEST.md)
-- [docs/RELEASE_RC7G.md](docs/RELEASE_RC7G.md)
+- [Current status](docs/STATUS_AND_PLAN.md)
+- [Design](docs/DESIGN.md)
+- [Testing](docs/TESTING.md)
+- [Release process](docs/RELEASE.md)
+- [Rejected hypotheses and evidence](docs/REJECTED_HYPOTHESES.md)
+- [Latest retail evidence](docs/RETAIL_EVIDENCE_RC7G.md)

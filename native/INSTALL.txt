@@ -1,52 +1,39 @@
-KCD2 Clean Pause — hidden vanilla pause candidate
-Target: Kingdom Come: Deliverance II 1.5.6, PC Xbox Store / Xbox app / Game Pass
-
-ARCHITECTURE
-This build does not call a custom PauseGame primitive.
-Escape / Xbox Start first goes to KCD2 unchanged so the game creates its normal full pause.
-Only after vanilla `only_ui` is verified does the mod hide the `Menu@0` Flash element.
-If hiding fails, the ordinary visible KCD2 pause menu remains.
+KCD2 Clean Pause v0.1.0
+Target: Kingdom Come: Deliverance II 1.5.6, Windows retail
+Primary tested storefront: PC Xbox Store / Xbox app / Game Pass
 
 INSTALL
-1. Remove/disable the older Clean Pause folder from Documents\kingdomcome_mods.
-2. Close KCD2 completely.
-3. Replace the previous Clean Pause version.dll with this version.dll in the same directory as KingdomCome.exe / WHGame.dll.
-4. Start the game normally from Xbox / Microsoft Store.
+1. Close KCD2 completely.
+2. Remove/disable older Clean Pause files under Documents\kingdomcome_mods\clean_pause.
+3. Extract version.dll from the release ZIP.
+4. Place version.dll beside the KCD2 executable / WHGame.dll.
+5. Start KCD2 normally.
 
-Do not replace, delete, or modify any game-owned DLL.
-If another unrelated mod already owns version.dll, do not overwrite it.
-If Windows does not allow writing to the game directory, do not change WindowsApps ownership or permissions just for this test.
+Do not overwrite an unrelated mod's version.dll. If another mod already uses that proxy DLL, the two require an explicit compatibility solution.
+Do not change WindowsApps ownership or weaken Windows permissions solely for this mod.
 
-TEST
-1. Confirm title-menu keyboard/controller input is normal.
-2. Load a save.
-3. In normal exploration press Escape or Xbox Start once.
-   Expected: gameplay/audio pause as with vanilla pause, but the pause menu itself is not visible.
-4. While Clean Paused, wait and verify world/audio really remain stopped.
-5. Press Xbox B.
-   Expected: gameplay resumes; B does not leak into gameplay/dialogue.
-6. Enter Clean Pause again and press Escape/Start a second time.
-   Expected: the already-open ordinary KCD2 pause menu becomes visible without an intermediate gameplay tick.
-7. Test dialogue with a visible subtitle:
-   - press Escape/Start during the subtitle;
-   - wait longer than the subtitle would normally remain;
-   - verify speech/progression stay paused and whether the same subtitle remains visible;
-   - press B to resume.
-8. Repeat once in an in-engine cutscene if practical.
+CONTROLS
+Running:
+  Escape / Xbox Start -> Clean Pause
 
-FAIL-OPEN EXPECTATION
-If the mod cannot verify vanilla `only_ui`, find `Menu@0`, or change Menu visibility, it must leave the normal visible KCD2 pause menu/input behavior rather than trapping input.
+Clean Pause:
+  Escape / Xbox Start -> visible vanilla pause menu
+  Xbox B               -> visible vanilla pause menu
+
+From the visible vanilla menu, use normal KCD2 controls to resume or choose another menu action.
+
+EXPECTED CLEAN PAUSE
+- World/simulation stops.
+- Audio pauses like ordinary vanilla pause.
+- The ordinary pause menu is not drawn.
+- Already-visible subtitles/HUD may remain visible.
+- The strong vanilla pause depth-of-field blur remains; this is intentional.
+
+KNOWN V0.1.0 BEHAVIOR
+Xbox B does not resume directly from Clean Pause. It reveals the ordinary pause menu. Resume normally from there.
 
 LOG
-The native loader writes kcd2_clean_pause_native.log beside version.dll.
-Useful lines include:
-
-hidden-vanilla-pause hook active; ...
-Running -> Clean Pause: vanilla pause retained, Menu@0 hidden (...)
-Clean Pause -> running via vanilla B/back
-Clean Pause -> visible vanilla pause menu (second Escape/Start consumed)
-
-If behavior differs, keep/send this log.
+kcd2_clean_pause_native.log is written beside version.dll. Keep it if behavior differs from the above.
 
 UNINSTALL
-Close KCD2 and delete only this mod's version.dll and kcd2_clean_pause_native.log from the game directory.
+Close KCD2, then delete only this mod's version.dll and optional kcd2_clean_pause_native.log.

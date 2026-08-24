@@ -1,64 +1,55 @@
-# RC7g retail evidence — first stable child-HUD Clean Pause lifecycle
+# RC7g retail evidence — accepted v0.1.0 baseline
 
-Source: Xbox Store KCD2 1.5.6 retail session on 2026-08-24 using `v0.1.0-rc.7g`.
+Source: Xbox Store KCD2 1.5.6 retail sessions on 2026-08-24.
 
-## User-visible result
+## Confirmed user-visible behavior
 
-The user reported the following working sequence:
+The working sequence is:
 
 1. press pause once -> Clean Pause opens without the vanilla pause menu;
 2. subtitles remain visible at the bottom of the screen;
 3. press pause a second time -> the ordinary KCD2 pause menu appears;
-4. pause can then be exited normally from the visible vanilla menu.
+4. the visible menu can then be exited normally;
+5. no crash occurs in this sequence.
 
-The game did not crash in this sequence.
+A later check established one additional fact:
+
+- pressing **Xbox B directly from Clean Pause reveals the ordinary vanilla pause menu** rather than resuming immediately.
+
+The user explicitly accepted this behavior for v0.1.0.
 
 ## What this proves
 
-RC7g closes the two regressions introduced by RC7e/RC7f:
+RC7g closes both previous crash regressions:
 
-- the RC7e `Clean Pause -> visible menu -> exit` crash is no longer reproduced;
-- the RC7f immediate crash on the first pause is no longer reproduced.
+- rc7e: crash after Clean Pause -> visible menu -> exit;
+- rc7f: immediate crash on first pause.
 
-It also reconfirms the positive RC7e HUD result:
+It also confirms that KCD2's 28 child HUD movie clips are the relevant presentation layer for retaining the current subtitle during Clean Pause.
 
-- KCD2's 28 child HUD movie clips are the correct presentation layer for keeping the current subtitle visible during Clean Pause.
+## Accepted movieclip ownership model
 
-## Ownership conclusion accepted
-
-The working RC7g implementation treats `IUIElement::GetMovieClip()` results as borrowed/cached handles:
+`IUIElement::GetMovieClip()` results are treated as borrowed/cached handles:
 
 - use only inside the current helper call;
-- do not persist movieclip pointers in global/snapshot state;
+- do not persist pointers in global/snapshot state;
 - do not call `Release()` on them;
-- retain only visibility booleans.
+- persist only child visibility booleans.
 
-This model is now supported by both static API evidence and retail behavior.
+This model is supported by both API evidence and successful retail behavior.
 
-The two rejected alternatives remain:
+## Accepted v0.1.0 input contract
 
-- RC7e: persist raw movieclip pointers across frames;
-- RC7f: immediately `Release()` every `GetMovieClip()` result.
+Because direct B resume was never successfully proven and the menu-reveal behavior is acceptable, stable production deliberately removes the synthetic captured-Start/Escape replay experiment.
 
-## Pause/menu lifecycle accepted
-
-Retail now confirms the combined presentation lifecycle:
-
-- real KCD2 vanilla pause owns simulation/audio state;
-- `Menu@0::IsVisible()` remains the lifecycle signal;
-- suppressing only `Menu@0::Render()` produces Clean Pause;
-- gameplay HUD child visibility can be restored without destabilizing the first pause;
-- a second Start/Escape can restore the captured vanilla-pause HUD state and reveal the existing menu;
-- exiting from that visible menu is stable.
-
-## Still unverified
-
-The user's successful report does **not** yet establish the direct-resume path:
+For v0.1.0:
 
 ```text
-Clean Pause -> physical Xbox B -> Running
+Clean Pause + B -> restore vanilla-pause HUD snapshot -> reveal vanilla Menu
 ```
 
-That path replays the captured vanilla pause-key pair while consuming physical B. It remains an explicit retail gate rather than being inferred from the successful visible-menu exit.
+Physical B is not forwarded into gameplay/dialogue/cutscene action maps while Clean Pause owns input.
 
-Long-duration subtitle lifetime, dialogue/cutscene continuation semantics and repeated-cycle robustness also remain to be confirmed when naturally convenient in one session; they do not justify separate launches by themselves.
+## Remaining non-blocking validation
+
+Long-duration subtitle lifetime, broader dialogue/cutscene coverage, repeated transitions, load/Alt-Tab, and controller reconnect are useful post-release robustness checks but are not required for the accepted v0.1.0 baseline.

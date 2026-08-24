@@ -10,144 +10,47 @@ permissions:
 jobs:
   source-tests:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Run repository tests
         run: python -m unittest discover -s tests -v
-
       - name: Historical Lua syntax
         run: |
           sudo apt-get update
           sudo apt-get install -y lua5.1
           luac5.1 -p src/Scripts/Mods/clean_pause.lua
-
-      - name: Permanent input-safety constraints
-        shell: python
-        run: |
-          from pathlib import Path
-
-          sources = [
-              Path("src/Scripts/Mods/clean_pause.lua"),
-              Path("native/src/clean_pause_native.cpp"),
-          ]
-          text = "\n".join(path.read_text(encoding="utf-8") for path in sources)
-          forbidden = (
-              "ActionMapManager.InitActionMaps(",
-              "ActionMapManager.LoadFromXML(",
-              "Player.OnAction =",
-              "System.ExecuteCommand(\"bind ",
-              "System.ExecuteCommand('bind ",
-          )
-          for needle in forbidden:
-              if needle in text:
-                  raise SystemExit(f"Forbidden input mutation found: {needle}")
-
-          native = Path("native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
-          abi = Path("native/src/kcd2_abi.h").read_text(encoding="utf-8")
-
-          # Never call an inferred or partial pause primitive. Retail rc.4 proved
-          # the direct ABI assumption wrong; retail rc.5 proved the Lua primitive
-          # only freezes simulation and does not own the full pause lifecycle.
-          for needle in (
-              "kGameFrameworkPauseGameSlot",
-              "PauseGameFn",
-              "g_gameFramework",
-              "SetNativePause(",
-              "CryAction.PauseGame(",
-              "Action.PauseGame(",
-              "Game.PauseGame(",
-          ):
-              if needle in native or needle in abi:
-                  raise SystemExit(f"Rejected non-vanilla pause primitive: {needle}")
-
-          required_abi = (
-              "kEnvGameOffset = 0x98",
-              "kEnvFlashUIOffset = 0x140",
-              "kFlashUIGetElementByInstanceStrSlot = 18",
-              "kUIElementSetVisibleSlot = 28",
-              "kUIElementIsVisibleSlot = 29",
-          )
-          for needle in required_abi:
-              if needle not in abi:
-                  raise SystemExit(f"Missing verified KCD2 ABI fact: {needle}")
-
-          required_runtime = (
-              "KeyId::XiStart",
-              "KeyId::Escape",
-              "Forward(input, event, force);",
-              "ActionMapManager.IsFilterEnabled(\"only_ui\")",
-              "getElement(g_flashUI, \"Menu@0\")",
-              "SetMenuVisible(false)",
-              "SetMenuVisible(true)",
-              "HideVerifiedVanillaPause(",
-              "g_cleanHidden",
-          )
-          for needle in required_runtime:
-              if needle not in native:
-                  raise SystemExit(f"Missing hidden-vanilla-pause contract: {needle}")
-
-          # First pause must be fail-open: the physical event is forwarded before
-          # Menu is hidden. Hidden state is entered only after only_ui verification.
-          forward_pos = native.find("Forward(input, event, force);", native.find("const bool eligible"))
-          hide_pos = native.find('HideVerifiedVanillaPause("Escape/Start press")')
-          if forward_pos == -1 or hide_pos == -1 or forward_pos > hide_pos:
-              raise SystemExit("Pause input must reach vanilla KCD2 before UI hiding")
-
-          print("hidden vanilla pause and fail-open input contracts passed")
+      - name: Validate stable native contract
+        run: python tools/validate_native_contract.py
 
   native-build:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Configure x64 Release
         run: cmake -S native -B native/build -A x64
-
       - name: Build x64 Release
         run: cmake --build native/build --config Release --parallel
-
       - name: Validate version proxy artifact
         shell: pwsh
         run: |
           $dll = "native/build/Release/version.dll"
           if (-not (Test-Path $dll)) { throw "Missing $dll" }
           if ((Get-Item $dll).Length -lt 10240) { throw "version.dll is unexpectedly small" }
-
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
           if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
           $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
-          if (-not $vs) { throw "MSVC installation not found" }
-          $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1 -ExpandProperty FullName
-          if (-not $dumpbin) { throw "dumpbin.exe not found in MSVC installation" }
-
+          $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $dumpbin) { throw "dumpbin.exe not found" }
           $exports = & $dumpbin /nologo /exports $dll | Out-String
           foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
-            if ($exports -notmatch [regex]::Escape($name)) {
-              throw "version.dll proxy export missing: $name"
-            }
+            if ($exports -notmatch [regex]::Escape($name)) { throw "version.dll proxy export missing: $name" }
           }
-
           $deps = & $dumpbin /nologo /dependents $dll | Out-String
-          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") {
-            throw "Release DLL unexpectedly depends on dynamic MSVC runtime"
-          }
-
-          Write-Host "Native version.dll validated: $((Get-Item $dll).Length) bytes"
-
-      - name: Upload native CI artifact
-        uses: actions/upload-artifact@v4
+          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") { throw "Release DLL unexpectedly depends on dynamic MSVC runtime" }
+      - uses: actions/upload-artifact@v4
         with:
           name: native-version-dll
           path: native/build/Release/version.dll

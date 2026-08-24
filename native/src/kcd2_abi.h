@@ -5,10 +5,9 @@
 
 namespace kcd2 {
 
-// Minimal KCD2 1.5.6 ABI used by the native proxy. The runtime deliberately
-// avoids inferred IGameFramework::PauseGame signatures: Clean Pause lets KCD2
-// open its own vanilla pause, then alters presentation only through verified
-// FlashUI interfaces.
+// Minimal KCD2 1.5.6 ABI used by the stable native implementation. Clean Pause
+// lets KCD2 own the real pause and changes presentation only through verified
+// Input/FlashUI interfaces.
 
 enum class DeviceId : std::int32_t {
     Keyboard = 0,
@@ -28,9 +27,8 @@ enum InputState : std::int32_t {
 enum class KeyId : std::uint32_t {
     Escape = 0,
 
-    // Do not model the KCD2 XInput key space as one contiguous enum. Retail
-    // logs from Xbox Store KCD2 1.5.6 prove Start=516, A=526 and B=527.
-    // Only values that have direct retail evidence are named here.
+    // Retail Xbox Store KCD2 1.5.6 evidence. The XInput range is not treated as
+    // contiguous; only directly observed IDs are named here.
     XiStart = 516,
     XiA = 526,
     XiB = 527,
@@ -58,85 +56,35 @@ static_assert(static_cast<std::uint32_t>(KeyId::XiStart) == 516);
 static_assert(static_cast<std::uint32_t>(KeyId::XiA) == 526);
 static_assert(static_cast<std::uint32_t>(KeyId::XiB) == 527);
 
-// KCD2 1.5.6 ScriptAnyValue layout. Only booleans are read.
-enum class ScriptAnyType : std::int32_t {
-    Any = 0,
-    Nil,
-    Boolean,
-    Handle,
-    Number,
-    String,
-    Table,
-    Function,
-    UserData,
-    Vector,
-};
-
-struct ScriptAnyValue {
-    ScriptAnyType type{ScriptAnyType::Any};
-    std::uint32_t pad04{};
-    union {
-        bool boolean;
-        std::int64_t handle;
-        float number;
-        const char* string;
-        void* pointer;
-        struct {
-            float x;
-            float y;
-            float z;
-        } vec3;
-    } value{};
-};
-
-static_assert(sizeof(ScriptAnyValue) == 0x18);
-
 // SSystemGlobalEnvironment offsets verified for KCD2 1.5.6.
-// +0x98 is IGame*, not IGameFramework*.
-// +0x140 is IFlashUI*.
 inline constexpr std::size_t kEnvScriptSystemOffset = 0x30;
 inline constexpr std::size_t kEnvInputOffset = 0x48;
-inline constexpr std::size_t kEnvGameOffset = 0x98;
+inline constexpr std::size_t kEnvGameOffset = 0x98;      // IGame*, not IGameFramework*
 inline constexpr std::size_t kEnvSystemOffset = 0xC8;
 inline constexpr std::size_t kEnvFlashUIOffset = 0x140;
 inline constexpr std::size_t kEnvMainThreadIdOffset = 0x1B0;
 inline constexpr std::size_t kEnvSize = 0x1C0;
 
-// Verified KCD2 1.5.6 vtable slots used by this build.
+// Verified vtable slots used by the stable build.
 inline constexpr std::size_t kInputPostInputEventSlot = 13;
 inline constexpr std::size_t kGameGetLongNameSlot = 12;
 inline constexpr std::size_t kGameGetNameSlot = 13;
-
 inline constexpr std::size_t kScriptExecuteBufferSlot = 6;
-inline constexpr std::size_t kScriptReleaseAnySlot = 29;
 inline constexpr std::size_t kScriptGetGlobalAnySlot = 32;
-inline constexpr std::size_t kScriptSetGlobalToNullSlot = 33;
-
 inline constexpr std::size_t kFlashUIGetElementByInstanceStrSlot = 18;
-// CFlashUIElement/IUIElement Update(float), verified by libKCD2 1.5.6.
 inline constexpr std::size_t kUIElementUpdateSlot = 23;
 inline constexpr std::size_t kUIElementSetVisibleSlot = 28;
 inline constexpr std::size_t kUIElementIsVisibleSlot = 29;
 inline constexpr std::size_t kUIElementGetMovieClipByNameSlot = 71;
-
-// IFlashVariableObject binary slots verified by libKCD2 for 1.5.6. These are
-// interface slots, not storefront-dependent WHGame RVAs.
-inline constexpr std::size_t kFlashVariableReleaseSlot = 0;
 inline constexpr std::size_t kFlashVariableGetDisplayInfoSlot = 26;
 inline constexpr std::size_t kFlashVariableSetVisibleSlot = 33;
 
 using PostInputEventFn = void(__fastcall*)(void*, const InputEvent*, bool);
-using ExecuteBufferFn = bool(__fastcall*)(void*, const char*, std::size_t, const char*, void*);
-using ReleaseAnyFn = void(__fastcall*)(void*, const ScriptAnyValue*);
-using GetGlobalAnyFn = bool(__fastcall*)(void*, const char*, ScriptAnyValue*);
-using SetGlobalToNullFn = void(__fastcall*)(void*, const char*);
-
 using GetUIElementByInstanceStrFn = void*(__fastcall*)(void*, const char*);
 using UIElementUpdateFn = void(__fastcall*)(void*, float);
 using SetVisibleFn = void(__fastcall*)(void*, bool);
 using IsVisibleFn = bool(__fastcall*)(void*);
 using GetMovieClipByNameFn = void*(__fastcall*)(void*, const char*, const char*);
-using FlashVariableReleaseFn = void(__fastcall*)(void*);
 using FlashVariableGetDisplayInfoFn = bool(__fastcall*)(void*, void*);
 using FlashVariableSetVisibleFn = bool(__fastcall*)(void*, bool);
 
