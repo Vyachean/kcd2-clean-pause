@@ -18,7 +18,7 @@ bool AcquireProcessGuard()
     wchar_t name[96]{};
     if (FAILED(StringCchPrintfW(
             name,
-            _countof(name),
+            sizeof(name) / sizeof(name[0]),
             L"Local\\KCD2CleanPauseRuntime-%lu",
             static_cast<unsigned long>(GetCurrentProcessId()))))
         return false;
