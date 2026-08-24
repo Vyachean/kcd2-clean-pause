@@ -24,31 +24,50 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(minhook)
 
-add_library(kcd2_clean_pause_native SHARED
-  src/version_proxy.cpp
-  src/version.def
+set(CLEAN_PAUSE_RUNTIME_SOURCES
   src/clean_pause_native.cpp
   src/clean_pause_native.h
   src/kcd2_abi.h
 )
 
-target_compile_definitions(kcd2_clean_pause_native PRIVATE
-  WIN32_LEAN_AND_MEAN
-  NOMINMAX
-  UNICODE
-  _UNICODE
+function(configure_clean_pause_target target)
+  target_compile_definitions(${target} PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    UNICODE
+    _UNICODE
+  )
+
+  target_compile_options(${target} PRIVATE
+    /W4
+    /permissive-
+    /EHsc
+    /utf-8
+  )
+
+  target_link_libraries(${target} PRIVATE minhook)
+  set_target_properties(${target} PROPERTIES PREFIX "")
+endfunction()
+
+# Standalone compatibility package. This remains a version.dll proxy so users
+# who do not want a shared ASI loader can keep the retail-proven installation.
+add_library(kcd2_clean_pause_version SHARED
+  src/version_proxy.cpp
+  src/version.def
+  ${CLEAN_PAUSE_RUNTIME_SOURCES}
 )
+configure_clean_pause_target(kcd2_clean_pause_version)
+set_target_properties(kcd2_clean_pause_version PROPERTIES OUTPUT_NAME "version")
 
-target_compile_options(kcd2_clean_pause_native PRIVATE
-  /W4
-  /permissive-
-  /EHsc
-  /utf-8
+# Shared-loader package. An ASI file is a normal Windows DLL loaded by an ASI
+# loader; it uses the exact same Clean Pause runtime and only replaces the
+# version.dll proxy bootstrap with a minimal DllMain entry point.
+add_library(kcd2_clean_pause_asi SHARED
+  src/asi_entry.cpp
+  ${CLEAN_PAUSE_RUNTIME_SOURCES}
 )
-
-target_link_libraries(kcd2_clean_pause_native PRIVATE minhook)
-
-set_target_properties(kcd2_clean_pause_native PROPERTIES
-  OUTPUT_NAME "version"
-  PREFIX ""
+configure_clean_pause_target(kcd2_clean_pause_asi)
+set_target_properties(kcd2_clean_pause_asi PROPERTIES
+  OUTPUT_NAME "KCD2CleanPause"
+  SUFFIX ".asi"
 )
