@@ -1,63 +1,73 @@
 # KCD2 Clean Pause
 
-Experimental **Kingdom Come: Deliverance II** mod targeting the eventual interaction:
+Experimental **Kingdom Come: Deliverance II** mod targeting:
 
 ```text
 Running
   Xbox Menu / Start -> Clean Pause
+  Escape           -> Clean Pause
 
 Clean Pause
-  B                  -> Resume
-  Xbox Menu / Start  -> vanilla KCD2 pause menu
+  B                 -> Resume
+  Xbox Menu / Start -> visible vanilla KCD2 pause menu
+  Escape            -> visible vanilla KCD2 pause menu
 ```
 
-The goal is to freeze gameplay, dialogue and in-engine cutscenes without covering the current rendered frame, so a visible subtitle can remain on screen.
+The goal is to freeze gameplay, dialogue, in-engine cutscenes, audio and subtitle lifetime without covering the current rendered frame.
 
 ## Target
 
 - KCD2 **1.5.6**
 - PC Xbox Store / Xbox app / Game Pass
-- Xbox controller; Escape is intended to behave analogously
+- Xbox controller; Escape behaves analogously for pause/menu entry
 
 ## Retail findings
 
-`v0.1.0-rc.1` and `rc.2` broke normal Escape/Start pause routing and are obsolete.
+- `v0.1.0-rc.1` / `rc.2` broke normal Escape/Start routing and are obsolete.
+- `rc.3` proved the official PAK/Lua/bootstrap/`consoleCMD` route works, but `Game.PauseGame` is unavailable in the tested retail runtime.
+- `rc.4` used an invalid native ABI. KCD2 `gEnv+0x98` is `IGame*`, not `IGameFramework*`; rc.4 accidentally called `IGame::GetName()` as though it were PauseGame and then swallowed input.
+- `rc.5` safely proved that a retail Lua `PauseGame` binding exists and freezes world simulation, but **does not implement the full vanilla pause lifecycle**: audio/UI continue, subtitles expire, and UI state can still react to input.
 
-`v0.1.0-rc.3` was an intentionally safe profile/Lua diagnostic. Retail testing proved that the PAK, Lua bootstrap, `System.AddCCommand`, `consoleCMD`, and F10 routing all work. Its pause attempt failed specifically because it tested `Game.PauseGame`, which is unavailable in the tested Xbox Store 1.5.6 runtime.
+Therefore the mod no longer calls any explicit `PauseGame` primitive.
 
-`v0.1.0-rc.4` moved pause acquisition to a native `version.dll`, but retail testing exposed a more serious ABI error: pressing Escape/Start left the game running while input became unresponsive.
+## Current architecture — vanilla pause, hidden Menu
 
-The rc.4 root cause is now identified:
+The next candidate lets KCD2 create its own real pause and changes presentation only:
 
-- KCD2 1.5.6 `SSystemGlobalEnvironment + 0x98` is verified as **`IGame*`**, not `IGameFramework*`;
-- `IGame` slot 13 is `GetName()` and returns `"kcd2"`;
-- rc.4 called that slot through a PauseGame-shaped function pointer;
-- because the wrong call did not raise an access violation, rc.4 incorrectly set its own `g_cleanPaused` flag and started consuming input although the simulation had never paused.
+1. Escape/Start is checked only for gameplay eligibility.
+2. The physical input is forwarded to KCD2 unchanged.
+3. The mod verifies that vanilla KCD2 enabled the `only_ui` filter.
+4. It resolves the retail `Menu@0` Flash element through verified KCD2 1.5.6 `IFlashUI`/`IUIElement` slots.
+5. It calls only `IUIElement::SetVisible(false)` on that Menu element.
 
-That direct native pause ABI is permanently rejected by CI.
+KCD2 therefore remains the sole owner of pause counters, audio state, dialogue/cutscene suspension and action filters.
 
-## Current diagnostic implementation
+While the verified vanilla pause is hidden:
 
-The next prerelease (`rc.5`) is deliberately **not** a Start/Menu Clean Pause candidate. It exists to prove the actual retail pause primitive safely.
+- unrelated input is consumed so invisible menu/gameplay actions cannot fire;
+- **B** temporarily reveals the Menu inside the same input dispatch and forwards B to vanilla Back; if KCD2 closes the pause, gameplay resumes;
+- a second **Escape/Start** reveals the already-open vanilla pause menu and consumes that physical input, avoiding an intermediate unpause tick.
 
-The native diagnostic build:
+### Fail-open behavior
 
-- loads as a `version.dll` proxy;
-- hooks KCD2's raw `IInput::PostInputEvent` only to reserve **F10**;
-- leaves **Escape and Xbox Start completely untouched/vanilla**;
-- corrects `gEnv + 0x98` to `IGame*` and uses it only as a structural runtime anchor;
-- never calls an inferred `IGameFramework` pause vfunc;
-- never enters a persistent input-swallow state;
-- on F10 probes the documented/observed Lua bindings in this order:
-  1. `CryAction.PauseGame(bool)`;
-  2. `Action.PauseGame(bool)`;
-  3. legacy `Game.PauseGame(bool)`;
-- logs the selected route and Lua `pcall` result;
-- a second F10 requests resume if the first probe call completed successfully.
+If any runtime assumption fails:
 
-Warhorse ScriptBind documentation defines `Action.PauseGame(pause)` as putting the game into or out of pause mode. A captured KCD2 Lua global-state dump also exposes `PauseGame()` under `CryAction`. rc.3 simply never tested those two bindings.
+- if vanilla `only_ui` does not become active, nothing is hidden;
+- if `Menu@0` cannot be found or hidden, the ordinary visible vanilla pause menu remains;
+- hidden state is never entered merely because a function call did not crash.
 
-See [docs/RC5_DIAGNOSTIC.md](docs/RC5_DIAGNOSTIC.md) for the failure analysis and acceptance gate.
+## Verified ABI facts used
+
+For KCD2 1.5.6:
+
+- `SSystemGlobalEnvironment + 0x98` = `IGame*`;
+- `SSystemGlobalEnvironment + 0x140` = `IFlashUI*`;
+- `IFlashUI::GetUIElementByInstanceStr` = slot 18;
+- `IUIElement::SetVisible` = slot 28;
+- `IUIElement::IsVisible` = slot 29;
+- input hook remains `IInput::PostInputEvent` before ActionMapManager.
+
+No inferred `IGameFramework::PauseGame` ABI is used.
 
 ## Safety constraints
 
@@ -67,10 +77,8 @@ Permanent rules:
 - never reload a partial action-map profile at runtime;
 - never persistently remap the controller;
 - never replace `Player.OnAction`;
-- never treat "native call did not crash" as proof that pause succeeded;
-- fail open to vanilla input whenever a runtime assumption cannot be verified.
-
-An earlier `InitActionMaps()` prototype disabled Xbox-controller input globally, including the title menu; that API is permanently forbidden.
+- never use `CryAction.PauseGame`, `Action.PauseGame`, `Game.PauseGame`, or an inferred native PauseGame ABI as the production pause mechanism;
+- fail open to vanilla pause/input whenever a runtime assumption cannot be verified.
 
 ## Distribution
 
@@ -92,7 +100,7 @@ For native candidates, remove the old `Documents\kingdomcome_mods\clean_pause` P
 
 See:
 
-- [docs/RC5_DIAGNOSTIC.md](docs/RC5_DIAGNOSTIC.md)
-- [docs/RESEARCH.md](docs/RESEARCH.md)
 - [docs/TESTING.md](docs/TESTING.md)
+- [docs/RESEARCH.md](docs/RESEARCH.md)
 - [docs/RELEASE.md](docs/RELEASE.md)
+- [docs/RC5_DIAGNOSTIC.md](docs/RC5_DIAGNOSTIC.md) — historical rc.5 gate/results
