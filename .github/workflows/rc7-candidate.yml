@@ -198,8 +198,11 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout
+      - name: Checkout exact candidate commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
 
       - name: Download verified candidate
         uses: actions/download-artifact@v4
@@ -215,7 +218,7 @@ jobs:
           sha256sum --check SHA256SUMS.txt
           test "$(find . -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 1
 
-      - name: Publish GitHub prerelease
+      - name: Publish GitHub prerelease and bind tag to verified commit
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -223,11 +226,12 @@ jobs:
           set -euo pipefail
           asset="$(find release-artifact -maxdepth 1 -type f -name '*.zip' -print -quit)"
           checksum="release-artifact/SHA256SUMS.txt"
+          expected_tag="v$(tr -d '\r\n' < VERSION)"
+          test "$expected_tag" = "$CANDIDATE_TAG"
 
           if gh release view "$CANDIDATE_TAG" >/dev/null 2>&1; then
             gh release upload "$CANDIDATE_TAG" "$asset" "$checksum" --clobber
             gh release edit "$CANDIDATE_TAG" \
-              --target "$GITHUB_SHA" \
               --title "$CANDIDATE_TAG — concrete HUD candidate" \
               --notes-file docs/RELEASE_RC7D.md \
               --prerelease
@@ -238,3 +242,12 @@ jobs:
               --notes-file docs/RELEASE_RC7D.md \
               --prerelease
           fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "$CANDIDATE_TAG" "$GITHUB_SHA"
+          git push origin "+refs/tags/$CANDIDATE_TAG:refs/tags/$CANDIDATE_TAG"
+
+          remote_sha="$(git ls-remote --tags origin "refs/tags/$CANDIDATE_TAG" | awk '{print $1}')"
+          test "$remote_sha" = "$GITHUB_SHA"
+          echo "Verified $CANDIDATE_TAG -> $GITHUB_SHA"
