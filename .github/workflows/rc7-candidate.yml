@@ -1,6 +1,21 @@
 name: RC7c HUD-preserving candidate
 
 on:
+  push:
+    branches:
+      - candidate/rc7-render-suppression
+    paths:
+      - native/candidate/rc7/**
+      - native/src/clean_pause_native.h
+      - native/src/kcd2_abi.h
+      - native/src/version_proxy.cpp
+      - native/src/version.def
+      - docs/RC7_SINGLE_SESSION_TEST.md
+      - docs/RELEASE_RC7C.md
+      - docs/STATUS_AND_PLAN.md
+      - docs/REJECTED_HYPOTHESES.md
+      - docs/RETAIL_EVIDENCE_RC7C.md
+      - .github/workflows/rc7-candidate.yml
   pull_request:
     paths:
       - native/candidate/rc7/**
@@ -14,6 +29,10 @@ on:
 
 permissions:
   contents: read
+
+env:
+  CANDIDATE_TAG: v0.1.0-rc.7c
+  CANDIDATE_SLUG: rc7c-hud-preserving
 
 jobs:
   build-candidate:
@@ -150,7 +169,7 @@ jobs:
           Copy-Item $dll candidate/stage/version.dll
           Copy-Item docs/RC7_SINGLE_SESSION_TEST.md candidate/stage/TEST.md
 
-          $asset = "kcd2-clean-pause-rc7c-hud-preserving-$env:GITHUB_SHA.zip"
+          $asset = "kcd2-clean-pause-$env:CANDIDATE_SLUG-$env:GITHUB_SHA.zip"
           Compress-Archive -Path candidate/stage/* -DestinationPath "candidate/$asset" -CompressionLevel Optimal
           $hash = (Get-FileHash "candidate/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $asset" | Set-Content candidate/SHA256SUMS.txt -Encoding ascii -NoNewline
@@ -163,4 +182,53 @@ jobs:
             candidate/kcd2-clean-pause-rc7c-hud-preserving-*.zip
             candidate/SHA256SUMS.txt
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
+
+  publish-prerelease:
+    if: github.event_name == 'push'
+    needs: build-candidate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download verified candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: rc7c-hud-preserving-candidate
+          path: release-artifact
+
+      - name: Verify checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-artifact
+          sha256sum --check SHA256SUMS.txt
+          test "$(find . -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 1
+
+      - name: Publish GitHub prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          asset="$(find release-artifact -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          checksum="release-artifact/SHA256SUMS.txt"
+
+          if gh release view "$CANDIDATE_TAG" >/dev/null 2>&1; then
+            gh release upload "$CANDIDATE_TAG" "$asset" "$checksum" --clobber
+            gh release edit "$CANDIDATE_TAG" \
+              --target "$GITHUB_SHA" \
+              --title "$CANDIDATE_TAG — HUD-preserving candidate" \
+              --notes-file docs/RELEASE_RC7C.md \
+              --prerelease
+          else
+            gh release create "$CANDIDATE_TAG" "$asset" "$checksum" \
+              --target "$GITHUB_SHA" \
+              --title "$CANDIDATE_TAG — HUD-preserving candidate" \
+              --notes-file docs/RELEASE_RC7C.md \
+              --prerelease
+          fi
