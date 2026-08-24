@@ -1,4 +1,4 @@
-name: RC7e HUD child snapshot candidate
+name: RC7f race-free HUD snapshot candidate
 
 on:
   push:
@@ -13,8 +13,8 @@ on:
       - VERSION
       - README.md
       - docs/RC7_SINGLE_SESSION_TEST.md
-      - docs/RELEASE_RC7E.md
-      - docs/RETAIL_EVIDENCE_RC7D.md
+      - docs/RELEASE_RC7F.md
+      - docs/RETAIL_EVIDENCE_RC7E.md
       - docs/STATUS_AND_PLAN.md
       - docs/REJECTED_HYPOTHESES.md
       - .github/workflows/rc7-candidate.yml
@@ -28,8 +28,8 @@ on:
       - VERSION
       - README.md
       - docs/RC7_SINGLE_SESSION_TEST.md
-      - docs/RELEASE_RC7E.md
-      - docs/RETAIL_EVIDENCE_RC7D.md
+      - docs/RELEASE_RC7F.md
+      - docs/RETAIL_EVIDENCE_RC7E.md
       - docs/STATUS_AND_PLAN.md
       - docs/REJECTED_HYPOTHESES.md
       - .github/workflows/rc7-candidate.yml
@@ -43,8 +43,8 @@ permissions:
   contents: read
 
 env:
-  CANDIDATE_TAG: v0.1.0-rc.7e
-  CANDIDATE_ASSET: kcd2-clean-pause-v0.1.0-rc.7e.zip
+  CANDIDATE_TAG: v0.1.0-rc.7f
+  CANDIDATE_ASSET: kcd2-clean-pause-v0.1.0-rc.7f.zip
 
 jobs:
   build-candidate:
@@ -62,10 +62,10 @@ jobs:
           import subprocess
           import sys
 
-          generated = Path("native/candidate/rc7/clean_pause_candidate_rc7e.ci.cpp")
+          generated = Path("native/candidate/rc7/clean_pause_candidate_rc7f.ci.cpp")
           subprocess.run([
               sys.executable,
-              "native/candidate/rc7/generate_candidate_v4.py",
+              "native/candidate/rc7/generate_candidate_v5.py",
               "native/candidate/rc7/clean_pause_candidate.cpp",
               str(generated),
           ], check=True)
@@ -87,10 +87,16 @@ jobs:
               "HookGlobalHudVisibility",
               "EnsureGlobalHudVisibilityHook",
               "kHudElementSetVisibleSlot",
+              "HudClipSnapshot",
+              "g_hudClipSnapshot",
+              "ReleaseHudClipSnapshot",
+              "g_hudSnapshotCaptured",
+              "snapshot.clip",
+              "RestoreHudClipSnapshot()",
           )
           for needle in forbidden:
               if needle in source:
-                  raise SystemExit(f"Forbidden rc7e candidate path: {needle}")
+                  raise SystemExit(f"Forbidden rc7f candidate path: {needle}")
 
           required = (
               'getElement(g_flashUI, "Menu@0")',
@@ -105,29 +111,33 @@ jobs:
               "kHudClipCount = 28",
               '"Subtitles"',
               '"Hints"',
-              "kUIElementGetMovieClipByNameSlot",
-              "kFlashVariableGetDisplayInfoSlot",
-              "kFlashVariableSetVisibleSlot",
-              "CaptureHudClipSnapshot",
-              "RestoreHudClipSnapshot",
-              "ReleaseHudClipSnapshot",
-              "HUD child visibility snapshot captured for all 28 clips",
-              "Clean Pause HUD child snapshot restored across all 28 clips",
+              "HudVisibilitySnapshot g_gameplayHudSnapshot",
+              "HudVisibilitySnapshot g_vanillaPauseHudSnapshot",
+              "CaptureHudVisibilitySnapshot",
+              "RestoreHudVisibilitySnapshot",
+              "ReleaseFlashVariable",
+              "HookHudUpdate",
+              "EnsureHudUpdateHook",
               "kHudSnapshotHoldMs = 750",
+              "kHudSnapshotRefreshIntervalMs = 75",
+              'CaptureHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause")',
+              'RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu")',
+              'RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-before-B")',
               "ReplayVanillaPauseToggle",
               "Clean Pause -> running via B using replayed vanilla pause toggle",
               "g_forwardDepth",
               "if (g_forwardDepth != 0)",
-              "rc7e child-HUD-snapshot render-suppression candidate active",
+              "rc7f race-free child-HUD-snapshot candidate active",
           )
           for needle in required:
               if needle not in source:
-                  raise SystemExit(f"Missing rc7e candidate contract: {needle}")
+                  raise SystemExit(f"Missing rc7f candidate contract: {needle}")
 
           for needle in (
               "XiStart = 516",
               "XiA = 526",
               "XiB = 527",
+              "kUIElementUpdateSlot = 23",
               "kUIElementGetMovieClipByNameSlot = 71",
               "kFlashVariableReleaseSlot = 0",
               "kFlashVariableGetDisplayInfoSlot = 26",
@@ -142,21 +152,60 @@ jobs:
           if table.count('"') != 56:
               raise SystemExit("HUD child snapshot must name exactly 28 clips")
 
-          capture = source[source.index("bool CaptureHudClipSnapshot"):source.index("bool RestoreHudClipSnapshot")]
+          capture = source[source.index("bool CaptureHudVisibilitySnapshot"):source.index("bool RestoreHudVisibilitySnapshot")]
+          restore = source[source.index("bool RestoreHudVisibilitySnapshot"):source.index("void FailOpenHudMaintenance")]
           if "getMovieClip(hud, kHudClipNames[i], nullptr)" not in capture:
-              raise SystemExit("HUD snapshot must resolve each child through hud@0 GetMovieClip")
+              raise SystemExit("capture must resolve each child through hud@0 GetMovieClip")
           if "info[kFlashDisplayInfoVisibleOffset] != 0" not in capture:
-              raise SystemExit("HUD snapshot must preserve pre-pause child visibility")
-
-          restore = source[source.index("bool RestoreHudClipSnapshot"):source.index("void __fastcall HookMenuRender")]
-          if "setVisible(snapshot.clip, snapshot.visible)" not in restore:
-              raise SystemExit("HUD restore must replay captured visibility, not force every child visible")
+              raise SystemExit("capture must preserve the exact pre-transition bool")
+          if capture.count("ReleaseFlashVariable(clip)") < 3:
+              raise SystemExit("capture must release every fresh wrapper on success/failure")
+          if "setVisible(clip, snapshot.visible[i])" not in restore:
+              raise SystemExit("restore must replay the captured bool rather than force true")
+          if restore.count("ReleaseFlashVariable(clip)") < 3:
+              raise SystemExit("restore must release every fresh wrapper on success/failure")
 
           menu_hook = source[source.index("void __fastcall HookMenuRender"):source.index("bool EnsureMenuRenderHook")]
-          if "RestoreHudClipSnapshot()" not in menu_hook:
-              raise SystemExit("Menu render transition must hold the child snapshot across late HUD refreshes")
+          for needle in ("GetMovieClip", "RestoreHudVisibilitySnapshot", "ReleaseFlashVariable", "ResetHudSnapshots", "SetVisible"):
+              if needle in menu_hook:
+                  raise SystemExit(f"Menu Render hook must be presentation-only; found {needle}")
           if "g_originalRender(element);" not in menu_hook:
-              raise SystemExit("Menu render hook must fail open / forward when not suppressing")
+              raise SystemExit("Menu Render hook must forward all non-suppressed renders")
+
+          hud_update = source[source.index("void __fastcall HookHudUpdate"):source.index("bool EnsureHudUpdateHook")]
+          if "g_originalHudUpdate(element, deltaTime);" not in hud_update:
+              raise SystemExit("HUD Update hook must forward the original Update first")
+          if "GetCurrentThreadId() != g_mainThreadId" not in hud_update:
+              raise SystemExit("HUD maintenance must refuse Flash mutation off validated main thread")
+          if 'RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay-maintenance")' not in hud_update:
+              raise SystemExit("HUD Update hook must maintain the gameplay snapshot during the bounded transition")
+
+          enter_start = source.index("bool TryEnterCleanPause")
+          enter_end = source.index("void HandleHiddenInput", enter_start)
+          enter = source[enter_start:enter_end]
+          capture_pause = enter.index('CaptureHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause")')
+          restore_gameplay = enter.index('RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay")')
+          if capture_pause >= restore_gameplay:
+              raise SystemExit("vanilla-pause HUD snapshot must be captured before gameplay HUD is restored")
+
+          hidden_start = source.index("void HandleHiddenInput")
+          hidden_end = source.index("void __fastcall HookPostInputEvent", hidden_start)
+          hidden = source[hidden_start:hidden_end]
+          second = hidden[hidden.index("if (IsPauseKey(key))"):hidden.index("if (key == KeyId::XiB)")]
+          restore_pause = second.index('RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu")')
+          disable_hidden = second.index("g_cleanHidden.store(false")
+          if restore_pause >= disable_hidden:
+              raise SystemExit("second Start/Escape must restore vanilla-pause HUD before revealing Menu")
+
+          b_start = hidden.index("if (key == KeyId::XiB)")
+          b_end = hidden.index("// Once a real Menu@0 render", b_start)
+          b_block = hidden[b_start:b_end]
+          if "ReplayVanillaPauseToggle" not in b_block:
+              raise SystemExit("B must use the captured vanilla pause route")
+          if "Forward(input, event, force);" in b_block:
+              raise SystemExit("physical B must not leak to gameplay/dialog/cutscene")
+          if b_block.index('RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-before-B")') >= b_block.index("ReplayVanillaPauseToggle"):
+              raise SystemExit("B must restore vanilla-pause child state before replaying the vanilla toggle")
 
           freeze_fn = source[source.index("bool ShouldFreezeHudFunction"):source.index("bool __fastcall HookHudCallFunction")]
           if freeze_fn.count("std::strcmp(") != 2:
@@ -165,15 +214,7 @@ jobs:
               if allowed not in freeze_fn:
                   raise SystemExit(f"Subtitle freeze whitelist missing {allowed}")
 
-          b_start = source.index("if (key == KeyId::XiB) {", source.index("void HandleHiddenInput"))
-          b_end = source.index("// Once a real Menu@0 render", b_start)
-          b_block = source[b_start:b_end]
-          if "ReplayVanillaPauseToggle" not in b_block:
-              raise SystemExit("B must use the captured vanilla pause route")
-          if "Forward(input, event, force);" in b_block:
-              raise SystemExit("Physical B must not leak to gameplay/dialog/cutscene while Clean Pause owns input")
-
-          print("rc7e child-HUD snapshot safety contract passed")
+          print("rc7f race-free HUD lifecycle safety contract passed")
 
       - name: Configure x64 Release
         run: cmake -S native/candidate/rc7 -B native/candidate/rc7/build -A x64
@@ -221,7 +262,7 @@ jobs:
       - name: Upload candidate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rc7e-child-hud-snapshot-candidate
+          name: rc7f-race-free-hud-candidate
           path: |
             candidate/${{ env.CANDIDATE_ASSET }}
             candidate/SHA256SUMS.txt
@@ -245,7 +286,7 @@ jobs:
       - name: Download verified candidate
         uses: actions/download-artifact@v4
         with:
-          name: rc7e-child-hud-snapshot-candidate
+          name: rc7f-race-free-hud-candidate
           path: release-artifact
 
       - name: Verify checksum
@@ -278,14 +319,14 @@ jobs:
 
             gh release upload "$CANDIDATE_TAG" "$asset" "$checksum" --clobber
             gh release edit "$CANDIDATE_TAG" \
-              --title "$CANDIDATE_TAG — HUD child snapshot candidate" \
-              --notes-file docs/RELEASE_RC7E.md \
+              --title "$CANDIDATE_TAG — race-free HUD snapshot candidate" \
+              --notes-file docs/RELEASE_RC7F.md \
               --prerelease
           else
             gh release create "$CANDIDATE_TAG" "$asset" "$checksum" \
               --target "$GITHUB_SHA" \
-              --title "$CANDIDATE_TAG — HUD child snapshot candidate" \
-              --notes-file docs/RELEASE_RC7E.md \
+              --title "$CANDIDATE_TAG — race-free HUD snapshot candidate" \
+              --notes-file docs/RELEASE_RC7F.md \
               --prerelease
           fi
 
