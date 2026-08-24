@@ -9,6 +9,11 @@ on:
       - .github/workflows/release.yml
     tags:
       - "v*"
+  pull_request:
+    paths:
+      - VERSION
+      - .github/workflows/release.yml
+      - native/**
   workflow_dispatch:
 
 permissions:
@@ -59,17 +64,13 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Run repository tests
+        run: python -m unittest discover -s tests -v
+
       - name: Validate source contracts
         shell: python
         run: |
           from pathlib import Path
-          import unittest
-
-          result = unittest.TextTestRunner(verbosity=2).run(
-              unittest.defaultTestLoader.discover("tests")
-          )
-          if not result.wasSuccessful():
-              raise SystemExit(1)
 
           native = Path("native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
           abi = Path("native/src/kcd2_abi.h").read_text(encoding="utf-8")
@@ -144,6 +145,7 @@ jobs:
           retention-days: 30
 
   publish:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: build
