@@ -1,46 +1,61 @@
-# rc.5 diagnostic — retail Lua pause primitive
+# rc.5 diagnostic — historical result
 
-## Why rc.4 failed
+> **Status: complete / superseded.** This document records why rc.5 existed and what the retail test proved. The active architecture and next steps are in [STATUS_AND_PLAN.md](STATUS_AND_PLAN.md).
 
-Retail test of `v0.1.0-rc.4` produced a specific failure: after Escape or Xbox Start, the game continued running but stopped reacting to input.
+## Why rc.5 existed
 
-The native implementation had two related defects:
+`v0.1.0-rc.4` failed after Escape/Xbox Start: gameplay continued but ordinary input became unresponsive.
 
-1. `SSystemGlobalEnvironment + 0x98` was treated as `IGameFramework*`. Current KCD2 1.5.6 reverse engineering identifies that field as `IGame*` (`wh::game::C_Game`). Its vtable slot 13 is `GetName()` and returns `"kcd2"`; it is not `PauseGame`.
-2. `SetNativePause()` treated "the inferred vfunc returned without an access violation" as proof that pausing succeeded. It then set `g_cleanPaused=true`, causing the input hook to consume gameplay/dialogue input even though the game had not paused.
+The root cause was an invalid native ABI assumption:
 
-The rc.4 direct native pause ABI is therefore rejected and guarded against in CI.
+1. `SSystemGlobalEnvironment + 0x98` was treated as `IGameFramework*`, but current KCD2 1.5.6 reverse engineering identifies it as `IGame*` (`wh::game::C_Game`).
+2. KCD2 `IGame` slot 13 is `GetName()` (`"kcd2"`), not PauseGame.
+3. rc.4 considered the inferred call successful merely because it returned without an access violation, then set its own `g_cleanPaused=true` and swallowed input although the game had not paused.
 
-## Why rc.5 uses a Lua probe
+rc.5 therefore removed the inferred native PauseGame call and removed Start/Escape interception entirely.
 
-Warhorse ScriptBind documentation exposes:
+## Diagnostic safety contract
 
-```lua
-Action.PauseGame(pause)
+rc.5 was intentionally not a production candidate:
+
+- Escape was always forwarded untouched;
+- Xbox Start was always forwarded untouched;
+- no persistent input-swallow state existed;
+- no inferred `IGameFramework::PauseGame` vfunc was called;
+- F10 was the only intercepted key;
+- F10 probed the retail Lua pause bindings;
+- failure could not disable normal vanilla pause/input.
+
+## Retail result
+
+The retail test established that a Lua pause binding can freeze **world simulation**.
+
+That was useful, but insufficient for Clean Pause. The diagnostic did not reproduce the complete vanilla KCD2 pause lifecycle:
+
+- audio/UI continued;
+- subtitle lifetime was not retained correctly;
+- the result was a partial simulation freeze rather than the coherent pause state required by the product contract.
+
+Therefore the important conclusion is:
+
+> `PauseGame` can stop simulation, but custom pause ownership does not automatically reproduce vanilla pause behavior across audio, UI, dialogue/cutscene state and subtitle presentation.
+
+## Decision
+
+The following are rejected as the production pause mechanism:
+
+```text
+CryAction.PauseGame(...)
+Action.PauseGame(...)
+Game.PauseGame(...)
+inferred native IGameFramework::PauseGame(...)
 ```
 
-and describes it as putting the game into or out of pause mode. A captured KCD2 retail Lua global-state dump also lists `PauseGame()` under `CryAction`.
+The next architecture instead lets KCD2 execute its ordinary pause path and hides only the visible pause-menu presentation after vanilla pause ownership is verified.
 
-The earlier rc.3 diagnostic tested only `Game.PauseGame`, which the tested Xbox Store 1.5.6 runtime did not expose. It did not test `CryAction.PauseGame` or `Action.PauseGame`.
+See:
 
-## rc.5 safety contract
-
-rc.5 is deliberately diagnostic:
-
-- Escape is always forwarded untouched.
-- Xbox Start is always forwarded untouched.
-- No `g_cleanPaused` state exists.
-- No `IGameFramework` pause vfunc is called.
-- F10 is the only intercepted key.
-- F10 probes, in order:
-  1. `CryAction.PauseGame(bool)`
-  2. `Action.PauseGame(bool)`
-  3. `Game.PauseGame(bool)`
-- a second F10 requests resume if the first Lua call completed successfully.
-- failure never changes routing for any other input.
-
-The native log records the selected Lua route and `pcall` result.
-
-## Acceptance gate
-
-Do not restore Start/Escape interception until a retail test proves that one of the Lua pause bindings actually freezes gameplay/dialogue without showing the pause menu and resumes cleanly.
+- [DESIGN.md](DESIGN.md)
+- [RESEARCH.md](RESEARCH.md)
+- [STATUS_AND_PLAN.md](STATUS_AND_PLAN.md)
+- [TESTING.md](TESTING.md)

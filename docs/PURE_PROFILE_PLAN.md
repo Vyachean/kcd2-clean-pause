@@ -1,10 +1,12 @@
 # Official-profile implementation plan
 
+> **Status: superseded historical plan.** This document records the rc.1/rc.2 pure-profile direction and must not be used as the current implementation plan. Retail testing later rejected this architecture. See [STATUS_AND_PLAN.md](STATUS_AND_PLAN.md) and [DESIGN.md](DESIGN.md) for the active hidden-vanilla-pause design.
+
 Primary target: KCD2 1.5.6, PC Xbox Store / Xbox app / Game Pass.
 
-## Decision
+## Historical decision
 
-Use the official KCD2 `.pak`/Lua path first. Native DLL/ASI remains fallback-only.
+At this stage of the project the plan was to use the official KCD2 `.pak`/Lua path first and keep native code as fallback-only. Subsequent retail evidence superseded that decision.
 
 ## Stage status
 
@@ -39,7 +41,7 @@ rc1 is not a valid acceptance candidate.
 
 ### 4. Fail-safe pause entry — implemented for rc2
 
-Each retail pause route is split into custom press + original release fallback:
+Each retail pause route was split into custom press + original release fallback:
 
 ```text
 press
@@ -52,19 +54,21 @@ release
   -> vanilla fallback
 ```
 
-If Clean Pause succeeds, it enables `clean_pause_controls` before release and the explicit `clean_pause_block_start_release` sink consumes that release.
+If Clean Pause succeeded, it enabled `clean_pause_controls` before release and the explicit `clean_pause_block_start_release` sink consumed that release.
 
-If the custom command/bootstrap fails, the controls map never activates and the original release opens normal vanilla pause.
+If the custom command/bootstrap failed, the intended fallback was for the original release to open normal vanilla pause.
 
-### 5. Context/filter preservation — implemented
+Retail rc.2 testing showed this fallback assumption was not sufficient: Escape/Start could still become dead. That failure is one of the reasons this architecture is superseded.
 
-The custom entry action is mirrored anywhere an existing pause action appears in an `actionFail` filter. This includes the exact retail `no_menu` filter.
+### 5. Context/filter preservation — historical implementation
 
-Relevant `actionPass` filters receive the custom entry plus all temporary Clean Pause controls.
+The custom entry action was mirrored anywhere an existing pause action appeared in an `actionFail` filter, including the exact retail `no_menu` filter.
 
-The exact target profile contains no `actionPass` filters.
+Relevant `actionPass` filters received the custom entry plus all temporary Clean Pause controls.
 
-### 6. Clean Pause state machine — implemented for retail testing
+The exact target profile contained no `actionPass` filters.
+
+### 6. Historical Clean Pause state machine
 
 ```text
 Running + custom press
@@ -83,41 +87,21 @@ CleanPaused + Escape/Start press
   -> vanilla menu owns pause lifecycle
 ```
 
-The `MenuEvents` handoff remains a runtime gate.
+This state machine is rejected. Later retail testing established that the relevant custom pause primitives either were unavailable or did not reproduce the full vanilla pause lifecycle.
 
-### 7. Self-contained release source — complete
+### 7. Self-contained release source — historical
 
-Versioned target source:
+The pure-profile release path versioned a reviewed target profile under `vendor/kcd2/xbox-1.5.6/` and generated the `.pak`/ZIP in CI.
 
-```text
-vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz.b64
-```
+The active native release no longer depends on a full `defaultProfile.xml` replacement.
 
-Current patched-profile SHA-256:
+### 8. Static validation — historical
 
-```text
-9838db3747f7f36e0c9c281b8770bc7300998515407515b65493b8e9a9bcd14e
-```
+CI for this path proved profile/Lua structure and packaging, but static validation could not prove the critical retail behavior. The rc.1/rc.2 failures demonstrated that distinction.
 
-`tools/build_release.py` verifies the hash and the full fail-safe XML contract before packaging.
+### 9. GitHub release flow — retained conceptually
 
-### 8. Static validation — implemented
-
-CI proves:
-
-- Lua 5.1 syntax;
-- exact `consoleCMD` spelling and absence of wrong-case `consoleCmd`;
-- original pause actions remain release-only, non-console fallbacks;
-- custom entries are press-only Escape/Start console commands;
-- exclusive controls map contains Start/Escape release and B press sinks;
-- actionFail/actionPass mirroring;
-- forbidden runtime input mutation remains absent;
-- synthetic development build succeeds;
-- self-contained retail release build contains the same contract.
-
-### 9. GitHub release flow — implemented
-
-Normal flow:
+The normal release flow remains:
 
 ```text
 implementation PR -> merge
@@ -125,31 +109,24 @@ release PR changes VERSION -> CI -> merge
 main Release workflow -> tag v<VERSION> -> ZIP + SHA256SUMS -> GitHub Release
 ```
 
-No generated ZIP/PAK is committed. No Actions Secret or user game file is required at publication time.
+Generated release artifacts are not committed.
 
-### 10. Xbox Store 1.5.6 rc2 retail acceptance — next
+### 10. Retail acceptance — failed for this architecture
 
-Must prove in order:
+The expected rc.2 acceptance gates were not met. In particular, the design could not guarantee that Escape/Start remained valid vanilla pause controls under custom profile routing.
 
-1. Escape and Xbox Start are never dead controls;
-2. corrected custom press route enters Clean Pause;
-3. successful entry consumes the corresponding release;
-4. if custom entry cannot execute, vanilla release fallback still opens pause;
-5. first Clean Pause has zero vanilla-menu frame;
-6. subtitle/frame remain visible;
-7. unrelated input is isolated;
-8. B resumes without dialogue/cutscene skip;
-9. second Escape/Start opens the real vanilla menu;
-10. dialogue/cutscene/audio progression resumes coherently.
+## Historical compatibility issue
 
-See `docs/TESTING.md`.
+`defaultProfile.xml` is a whole-file last-mod-wins conflict point. Any production design based on replacing it would conflict with another mod that replaces the same file unless deliberately merged.
 
-## Compatibility policy
+Avoiding that conflict is an additional benefit of the current native presentation-only architecture.
 
-`defaultProfile.xml` is a whole-file conflict point. The release source is pinned to KCD2 1.5.6 and conflicts with another mod that replaces that file unless intentionally merged.
+## Current decision
 
-A new KCD2 version requires regeneration/review of the target profile and a new release.
+Do **not** return to this pure-profile plan merely because a newer native experiment fails.
 
-## Native fallback criteria
+The active rule is:
 
-Return to native input interception only if retail testing proves an essential behavior cannot be delivered safely through the official profile/Lua path. A failure of one uncertain API is not enough by itself; the official route must first exhaust safe fallbacks.
+> keep vanilla KCD2 pause ownership intact and modify only the visible pause-menu presentation after pause state is verified.
+
+See [STATUS_AND_PLAN.md](STATUS_AND_PLAN.md).
