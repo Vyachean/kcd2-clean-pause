@@ -83,14 +83,23 @@ jobs:
           if (-not (Test-Path $dll)) { throw "Missing $dll" }
           if ((Get-Item $dll).Length -lt 10240) { throw "version.dll is unexpectedly small" }
 
-          $exports = & dumpbin /nologo /exports $dll | Out-String
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
+          $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          if (-not $vs) { throw "MSVC installation not found" }
+          $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $dumpbin) { throw "dumpbin.exe not found in MSVC installation" }
+
+          $exports = & $dumpbin /nologo /exports $dll | Out-String
           foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
             if ($exports -notmatch [regex]::Escape($name)) {
               throw "version.dll proxy export missing: $name"
             }
           }
 
-          $deps = & dumpbin /nologo /dependents $dll | Out-String
+          $deps = & $dumpbin /nologo /dependents $dll | Out-String
           if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") {
             throw "Release DLL unexpectedly depends on dynamic MSVC runtime"
           }
