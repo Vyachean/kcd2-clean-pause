@@ -11,6 +11,7 @@ on:
       - native/src/version_proxy.cpp
       - native/src/version.def
       - VERSION
+      - README.md
       - docs/RC7_SINGLE_SESSION_TEST.md
       - docs/RELEASE_RC7E.md
       - docs/RETAIL_EVIDENCE_RC7D.md
@@ -25,6 +26,7 @@ on:
       - native/src/version_proxy.cpp
       - native/src/version.def
       - VERSION
+      - README.md
       - docs/RC7_SINGLE_SESSION_TEST.md
       - docs/RELEASE_RC7E.md
       - docs/RETAIL_EVIDENCE_RC7D.md
@@ -134,8 +136,6 @@ jobs:
               if needle not in abi:
                   raise SystemExit(f"Missing retail/RE-proven ABI contract: {needle}")
 
-          # The 28-name table must be a complete one-to-one snapshot, not a small
-          # whitelist that could accidentally preserve subtitles while losing hints.
           table_start = source.index("const char* const kHudClipNames")
           table_end = source.index("};", table_start)
           table = source[table_start:table_end]
