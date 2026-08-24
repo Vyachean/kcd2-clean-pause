@@ -50,21 +50,39 @@ Superseded by render suppression. It destroys the independent `IsVisible()` life
 
 ### Suppressing only `Menu@0::Render()`
 
-Accepted as the current pause/menu foundation. rc7b proved that this keeps vanilla pause ownership alive while hiding the pause menu. World simulation and audio pause, and second Escape/Start can reveal the already-open vanilla menu without an unpause/re-pause transition.
+**Accepted foundation, not rejected.** rc7b proved that this keeps vanilla pause ownership alive while hiding the pause menu. World simulation and audio pause, and second Escape/Start can reveal the already-open vanilla menu without an unpause/re-pause transition.
 
 ### One-shot `IFlashUI::SetHudElementsVisible(true)` is sufficient
 
-Rejected by rc7c. The verified call was made after pause acquisition, `hud@0` resolved, the HUD CallFunction hook installed, and `hud.ClearSubtitles` was actually intercepted, yet the user observed no visible HUD/subtitle difference from rc7b.
+Rejected by rc7c. The call was made after pause acquisition, `hud@0` resolved, and `hud.ClearSubtitles` was actually intercepted, yet the user observed no visible HUD/subtitle difference from rc7b.
 
-Important distinction: this rejection applies to a **one-shot enable call as the complete solution**. It does not prove that the global gate is irrelevant. Vanilla may set the gate false again during/after pause acquisition. rc7d therefore tests persistent suppression of `SetHudElementsVisible(false)` together with concrete `hud@0` visibility holding. That combined mechanism is currently unverified, not rejected.
+### Persistent global HUD gate holding is sufficient
 
-### Blocking `hud.ClearSubtitles` alone preserves subtitles
+Rejected by rc7d. `IFlashUI::SetHudElementsVisible(false)` was intercepted during pause acquisition/Clean Pause, but the user still saw no HUD.
 
-Rejected as a complete solution. rc7c proved the call can be intercepted, but no subtitle was visible because the HUD presentation itself remained hidden. Keep this as a secondary lifetime safeguard only.
+Do not continue adding stronger global-HUD-gate variants unless new evidence shows the child HUD state is already correct and the root alone is preventing rendering.
 
-### Concrete `hud@0::SetVisible(false)` suppression
+### Persistent concrete `hud@0::SetVisible(false)` suppression is sufficient
 
-Unverified active hypothesis in rc7d. The hook is object-identity gated and false-only. It is combined with persistent global HUD-gate holding to avoid spending separate retail launches on two closely related presentation hypotheses.
+Rejected by rc7d. The concrete hook was active and `hud@0::IsVisible() == true` was verified on Clean Pause entry, but the user still saw no HUD/hints/subtitles.
+
+### `hud@0::IsVisible() == true` proves HUD presentation is visible
+
+Rejected by rc7d. It is only the root Flash-element visibility flag.
+
+Static libKCD2 analysis explains the discrepancy: `C_UIHudMask` separately controls 28 named child movie clips inside the still-visible `hud` movie according to active UI sources. Vanilla pause can therefore leave `hud@0` visible while disabling relevant children.
+
+### Blocking `hud.ClearSubtitles` alone preserves visible subtitles
+
+Rejected as a complete solution. rc7c proved the call can be intercepted, but no subtitle was visible because the HUD presentation itself remained hidden.
+
+The narrow `ClearSubtitles` / `HideNarrativeSubtitles` suppression remains useful only as a secondary lifetime safeguard after child presentation is preserved.
+
+### Force every HUD child visible during Clean Pause
+
+Rejected **by design**, without retail testing. The product requirement is to preserve the current frame/UI, not to expose normally-hidden widgets, cursors, crime indicators, dialog sides, dice UI, etc.
+
+rc7e must snapshot the pre-pause visibility of all 28 children and replay that exact bool per child.
 
 ## Input/resume findings
 
@@ -74,9 +92,29 @@ Rejected by rc7b. While Menu rendering was suppressed, physical B did not direct
 
 Physical B must not leak to gameplay/dialog/cutscene action maps while Clean Pause is active.
 
+### Assume KCD2 XInput `KeyId` values are one contiguous range
+
+Rejected by rc7d retail evidence.
+
+The old enum started at 512 and auto-incremented, compiling:
+
+- `XiStart=516` (accidentally correct);
+- `XiA=522` (wrong);
+- `XiB=523` (wrong).
+
+The retail log proves:
+
+- `xi_start=516`;
+- `xi_a=526`;
+- `xi_b=527`.
+
+Only directly evidenced controller ids may be named in the active ABI. Do not infer the gaps.
+
 ### Replay the captured vanilla pause key pair for B
 
-Still unverified. rc7c contained this route, but the supplied retail log contains Escape interactions only and no physical B attempt. Do not claim it works until a retail log records a B-resume attempt and `Menu@0` closes without menu flash/cancel/skip.
+**Still unverified, not rejected.** rc7d physically received `xi_b=527`, but the wrong enum meant `key == KeyId::XiB` never matched and the replay function was never entered.
+
+Therefore rc7d says nothing about whether the replay mechanism works. rc7e is the first candidate with a correct B id and can test it without leaking physical B into dialogue/cutscene/gameplay.
 
 ## Current accepted foundation
 
@@ -87,7 +125,8 @@ Still unverified. rc7c contained this route, but the supplied retail log contain
 5. World simulation and audio pause correctly.
 6. Second Escape/Start can reveal the existing vanilla menu while keeping pause continuous.
 7. Strong vanilla pause depth-of-field blur is accepted and out of scope.
-8. HUD/subtitle presentation requires more than the rejected rc7c one-shot global-gate call.
-9. Direct B resume remains to be proven.
+8. The missing HUD layer is below `hud@0` root visibility: KCD2's `C_UIHudMask` controls 28 child clips.
+9. The next candidate preserves an exact pre-pause child-visibility snapshot through verified Flash interfaces.
+10. Direct B resume remains to be proven now that its retail key id is corrected.
 
 All unresolved paths must fail open to ordinary visible vanilla pause behavior.
