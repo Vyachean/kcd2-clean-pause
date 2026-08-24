@@ -1,132 +1,116 @@
-# RC7 render-suppression candidate — single-session retail test
+# RC7c HUD-preserving Clean Pause — single-session retail test
 
-This candidate is designed to maximize evidence from one KCD2 launch.
+This candidate builds on retail-proven rc7b behavior. Do not spend launches re-checking already established facts unless they regress.
 
-## What changed
+## Already established by rc7b
 
-The candidate keeps KCD2 as the only pause owner. It never calls a pause/unpause primitive and never changes action maps.
+On Xbox Store KCD2 1.5.6:
 
-Unlike rc.6, it does **not** use `only_ui` and does **not** call `Menu@0::SetVisible(false)`.
+- vanilla pause acquisition through `Menu@0::IsVisible()` is reliable;
+- suppressing only `Menu@0::Render()` produces a real paused state without drawing the pause menu;
+- world simulation and audio stop like ordinary vanilla pause;
+- second Escape/Start can reveal the already-open vanilla pause menu without resuming first;
+- vanilla pause applies strong depth-of-field blur; that is accepted for this mod;
+- rc7b also showed the remaining defects: vanilla pause hides the HUD/subtitles, and physical B does not resume directly while Menu rendering is suppressed.
 
-Instead:
+## RC7c changes
 
-1. the real physical Escape/Xbox Start event is forwarded to KCD2;
-2. the candidate observes `Menu@0::IsVisible()`;
-3. once vanilla has made `Menu@0` visible, the candidate suppresses only that element's `IUIElement::Render()` call;
-4. `Menu@0` remains logically visible to KCD2, so `IsVisible()` remains an independent vanilla-owned lifecycle signal;
-5. B is forwarded to the still-live vanilla menu to resume;
-6. second Escape/Start stops render suppression and consumes that physical pause event, revealing the already-open vanilla menu without unpause/re-pause.
+KCD2 remains the only pause owner. The candidate still contains no custom `PauseGame` call, no action-map mutation, no `only_ui` dependency, and no fixed reverse-engineered runtime RVA.
 
-Nested/synthetic `PostInputEvent` calls generated while KCD2 processes a physical event are always forwarded exactly once and are never interpreted as new Clean Pause commands.
+RC7c adds two narrow presentation/input adaptations:
 
-## Safety / fail-open
+1. **HUD/subtitle preservation**
+   - after vanilla pause is verified, call KCD2's `IFlashUI::SetHudElementsVisible(true)`;
+   - keep `Menu@0` logically open but suppress only its Render call;
+   - on `hud@0`, suppress only Flash calls named `ClearSubtitles` and `HideNarrativeSubtitles` during the pause transition/Clean Pause;
+   - all other HUD Flash calls are forwarded unchanged.
 
-The candidate must leave ordinary vanilla behavior if any prerequisite fails:
+2. **Direct B resume**
+   - physical Xbox B is consumed by Clean Pause and never forwarded as `dialog_cancel` / `cutscene_skip`;
+   - the candidate records the exact physical Escape/Start press/release pair that opened vanilla pause;
+   - B replays that same pause pair through the already-proven original `PostInputEvent` route;
+   - resume is accepted only if `Menu@0::IsVisible()` becomes false;
+   - if it cannot be verified, render suppression is removed and ordinary visible vanilla pause is shown (fail-open).
 
-- `Menu@0` cannot be resolved;
-- `Render`/`IsVisible` vtable slots cannot be validated;
-- the render hook cannot be installed;
-- Menu visibility cannot be verified;
-- a hidden state reaches another physical event before at least one Menu render was actually suppressed.
-
-The candidate contains no `PauseGame`, no `SetVisible`, no action-map mutation, and no fixed `libKCD2` runtime RVAs.
+Second Escape/Start still reveals the ordinary already-open pause menu instead of resuming.
 
 ## Install
 
 1. Close KCD2.
-2. Replace only the Clean Pause `version.dll` beside the game executable with the candidate DLL.
-3. Delete `kcd2_clean_pause_native.log` before launch so the result is unambiguous.
-4. Do not install the failed `rc6-menu-mode-diagnostic` DLL again.
+2. Replace only `version.dll` beside the game executable with this candidate.
+3. Delete `kcd2_clean_pause_native.log` once before launch so the new session is easy to read.
+4. Do not use the rejected rc6 `C_UIMenu` diagnostic.
 
-## One-launch test matrix
+## One-launch acceptance matrix
 
-Do all feasible checks in the same game session.
+Use one normal gameplay session. No restart is required just to reach an optional test.
 
-### A. Startup/title
+### A. Exploration — HUD and B
 
-- Game reaches the title/front-end normally.
-- Keyboard/controller/mouse remain normal.
+1. In ordinary gameplay, note a visible HUD element or contextual hint if available.
+2. Press Xbox Start/Menu once.
+3. Wait 2–3 seconds.
+4. Expected:
+   - pause menu is not drawn;
+   - world and audio are paused;
+   - existing HUD/hints remain visible;
+   - strong background blur is acceptable.
+5. Press B once.
+6. Expected: gameplay resumes immediately **without first showing the pause menu**.
 
-Expected log eventually contains:
-
-```text
-rc7 render-suppression candidate active
-```
-
-No Clean Pause action should occur on the title screen.
-
-### B. Exploration — first Start
-
-While standing still in ordinary gameplay:
-
-1. press Xbox Start/Menu once;
-2. wait 2–3 seconds;
-3. confirm the pause menu itself is not drawn and the current frame remains unobscured;
-4. confirm world simulation is stopped;
-5. confirm audio behaves like normal KCD2 pause;
-6. press an unrelated D-pad direction once — it should do nothing;
-7. press B to resume.
-
-Expected log sequence includes:
+Useful log sequence:
 
 ```text
-Menu@0 render hook active
+rc7c HUD-preserving render-suppression candidate active
+hud@0 subtitle-preservation hook active
 Running -> Clean Pause candidate
 Clean Pause render suppression observed for Menu@0
-Clean Pause -> running via vanilla B/back
+B resume: replaying vanilla pause ...
+Clean Pause -> running via B using replayed vanilla pause toggle
 ```
 
-Hard failure: live gameplay with swallowed input, crash, or visible menu while the log claims render suppression was observed.
+### B. Second pause-key behavior
 
-### C. Exploration — second Start behavior
+1. Enter Clean Pause again.
+2. Press Start a second time.
+3. Expected: ordinary vanilla pause menu appears and gameplay stays continuously paused.
+4. Close that ordinary menu normally with B.
 
-1. enter Clean Pause again with Start;
-2. after the clean frame is visible, press Start a second time;
-3. the already-open ordinary vanilla pause menu should become visible;
-4. gameplay must remain continuously paused;
-5. close normally with B.
+Repeat with keyboard Escape if convenient. Escape should have the same Clean Pause / second-Escape behavior.
 
-Expected log:
+### C. Dialogue/subtitle — highest-value test
 
-```text
-Clean Pause -> visible vanilla pause menu (second Escape/Start consumed; Render restored)
-```
+During a spoken line while its subtitle is visibly on screen:
 
-### D. Escape parity
+1. Press Start or Escape.
+2. Wait longer than the subtitle would normally remain on screen.
+3. Expected:
+   - **the same subtitle remains visible**;
+   - speech/dialogue progression is stopped;
+   - audio is paused like vanilla pause;
+   - no pause menu is drawn.
+4. Press B.
+5. Expected: the same line continues normally without skip/cancel/duplicate and without showing the pause menu first.
 
-Repeat B and C using keyboard Escape. Escape should behave analogously to Xbox Start/Menu.
+The physical B must not reach `dialog_cancel` or cutscene-skip bindings.
 
-### E. Dialogue/subtitle — highest-value acceptance check
+### D. Cutscene if naturally available
 
-During a spoken dialogue line with an on-screen subtitle:
+If an in-engine cutscene occurs during the same session, repeat the subtitle/B test once. Do not restart or reload solely to manufacture this case.
 
-1. press Start or Escape while the subtitle is visible;
-2. wait longer than that subtitle would normally remain on screen;
-3. record whether the **same subtitle remains visible**;
-4. record whether speech/dialogue progression is fully stopped;
-5. record audio behavior;
-6. press B and confirm the line resumes without skip/cancel/duplicate.
+## Fail-open expectations
 
-This result decides whether hidden vanilla menu presentation is sufficient or whether vanilla pause separately hides/expires HUD/subtitle presentation.
+If HUD restoration, Menu verification, or the B replay route cannot be verified, the candidate must prefer an ordinary visible vanilla pause menu over swallowed/lost input.
 
-### F. In-engine cutscene if readily available
-
-If a cutscene is available without a restart, repeat the dialogue test once. Do not restart the game solely to reach one.
-
-### G. Robustness in the same session
-
-If convenient, do one load transition and one Alt-Tab/controller reconnect, then use Start once more. Any failure must degrade to ordinary vanilla input/menu behavior.
+Stop testing only for a crash, input loss, or inability to recover with the ordinary menu. Do not relaunch merely to repeat a failed subcase; return the one fresh log.
 
 ## Evidence to return
 
-Return one fresh `kcd2_clean_pause_native.log` plus a short note containing:
+One fresh `kcd2_clean_pause_native.log` plus a short note:
 
-- first Start: clean frame yes/no;
-- B resume yes/no;
-- second Start shows vanilla menu yes/no;
-- Escape parity yes/no;
-- dialogue subtitle retained yes/no;
-- dialogue/audio stopped yes/no;
-- any menu flash or input loss.
-
-One session is intended to answer the remaining major architectural questions.
+- HUD/hints remain during Clean Pause: yes/no;
+- subtitle remains during dialogue Clean Pause: yes/no/not reached;
+- B resumes directly without menu: yes/no;
+- second Start/Escape shows ordinary menu: yes/no;
+- dialogue/audio remain paused: yes/no/not reached;
+- any skip/cancel, input loss, crash, or menu flash.
