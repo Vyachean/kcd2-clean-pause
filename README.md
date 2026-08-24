@@ -21,7 +21,19 @@ Authoritative state:
 
 - [docs/STATUS_AND_PLAN.md](docs/STATUS_AND_PLAN.md)
 - [docs/REJECTED_HYPOTHESES.md](docs/REJECTED_HYPOTHESES.md)
-- [docs/RETAIL_EVIDENCE_RC7F.md](docs/RETAIL_EVIDENCE_RC7F.md)
+- [docs/RETAIL_EVIDENCE_RC7G.md](docs/RETAIL_EVIDENCE_RC7G.md)
+
+## Retail-confirmed core behavior
+
+On Xbox Store KCD2 1.5.6, rc7g now confirms:
+
+1. first Start/Escape enters Clean Pause without drawing the vanilla pause menu;
+2. the current subtitle remains visible at the bottom;
+3. world simulation and audio use the real vanilla pause lifecycle;
+4. second Start/Escape reveals the already-open ordinary KCD2 pause menu;
+5. that visible menu can then be exited normally without the rc7e/rc7f crashes.
+
+Vanilla pause depth-of-field blur remains accepted and out of scope.
 
 ## Accepted pause architecture
 
@@ -31,65 +43,35 @@ KCD2 itself remains the only pause owner.
 2. Use `Menu@0::IsVisible()` as the retail-proven pause lifecycle signal.
 3. Keep `Menu@0` logically visible.
 4. Suppress only `Menu@0::Render()` during Clean Pause.
-5. Second Escape/Start reveals the already-open vanilla menu without an unpause/re-pause cycle.
+5. Second Escape/Start restores captured vanilla-pause HUD presentation and reveals the already-open menu without an unpause/re-pause cycle.
 
-Retail testing confirms world simulation and audio pause correctly. Vanilla pause depth-of-field blur is accepted.
+## HUD/subtitle presentation
 
-## HUD/subtitle result
+Root `hud@0` visibility is insufficient. KCD2's HUD mask controls 28 child movie clips.
 
-rc7c/rc7d proved that root `hud@0` visibility is insufficient. KCD2's HUD mask controls 28 child movie clips.
-
-rc7e switched to that child layer and produced the first positive result: **the subtitle at the bottom remained visible during Clean Pause**.
-
-The 28-child layer is therefore retained.
-
-## rc7f crash and ownership correction
-
-rc7f crashed immediately on the first pause. Its log reached:
-
-- all three hooks installed;
-- complete gameplay snapshot for all 28 children;
-- `hud.ClearSubtitles` suppression;
-
-but never reached vanilla-pause snapshot capture or Clean Pause entry.
-
-The relevant rc7f change was immediate `Release()` of every `IUIElement::GetMovieClip()` result.
-
-That ownership assumption is rejected. CryEngine's documented IUIElement usage treats `GetMovieClip()` as a directly usable returned pointer and separately requires caller `Release()` only for variable objects created through raw `IFlashPlayer` APIs. libKCD2 confirms `IFlashVariableObject::Release()` is destructive.
-
-## rc7g
-
-rc7g therefore treats `IUIElement::GetMovieClip()` results as **borrowed/cached handles**:
-
-- use only inside the current capture/restore helper;
-- never retain a movieclip pointer across calls or frames;
-- never call `Release()` on it;
-- store only the 28 visibility booleans.
-
-This avoids both unsafe variants:
-
-- rc7e retained raw pointers across frames;
-- rc7f destructively released borrowed pointers.
-
-The dual bool-only state remains:
+The active implementation captures exact child visibility booleans:
 
 - gameplay snapshot before physical pause;
-- vanilla-pause snapshot after KCD2 opens pause but before gameplay HUD is restored;
-- second Start restores vanilla-pause HUD before showing Menu;
-- direct B restores vanilla-pause HUD before replaying the vanilla pause toggle.
+- vanilla-pause snapshot after KCD2 opens pause;
+- Clean Pause restores gameplay visibility;
+- second Start restores vanilla-pause visibility before revealing Menu.
 
-`Menu::Render()` remains presentation-only.
+rc7e first proved this child layer can keep subtitles visible; rc7g reconfirmed it with a stable core lifecycle.
 
-## Additional crash localization
+## Movieclip ownership
 
-rc7g logs exactly one first-entry/first-return pair around the `hud@0::Update` trampoline:
+Two unsafe alternatives are permanently rejected:
 
-```text
-hud@0 Update hook first entry ...
-hud@0 Update original returned successfully
-```
+- rc7e retained raw `GetMovieClip()` pointers across frames;
+- rc7f immediately called destructive `Release()` on every `GetMovieClip()` result and crashed on first pause.
 
-If a crash remains, one log distinguishes the Update detour from child-snapshot ownership without a separate diagnostic build.
+rc7g uses the retail-validated model:
+
+- `IUIElement::GetMovieClip()` result is a borrowed/cached handle;
+- use it only inside the current helper call;
+- never retain it across calls/frames;
+- never call `Release()` on it;
+- persist only visibility booleans.
 
 ## Xbox input
 
@@ -100,6 +82,16 @@ Retail-proven ids:
 - B = 527
 
 Physical B does not leak to gameplay/dialog/cutscene while Clean Pause owns input.
+
+### Remaining input gate
+
+Direct resume from Clean Pause itself is still not retail-confirmed:
+
+```text
+Clean Pause -> Xbox B -> Running
+```
+
+That path restores the captured vanilla-pause HUD snapshot and replays the captured vanilla pause-key pair. It remains unverified rather than rejected.
 
 ## Safety constraints
 
@@ -125,6 +117,7 @@ For native candidates, remove the old `Documents\kingdomcome_mods\clean_pause` P
 
 - [docs/STATUS_AND_PLAN.md](docs/STATUS_AND_PLAN.md)
 - [docs/REJECTED_HYPOTHESES.md](docs/REJECTED_HYPOTHESES.md)
+- [docs/RETAIL_EVIDENCE_RC7G.md](docs/RETAIL_EVIDENCE_RC7G.md)
 - [docs/RETAIL_EVIDENCE_RC7F.md](docs/RETAIL_EVIDENCE_RC7F.md)
 - [docs/RC7_SINGLE_SESSION_TEST.md](docs/RC7_SINGLE_SESSION_TEST.md)
 - [docs/RELEASE_RC7G.md](docs/RELEASE_RC7G.md)
