@@ -17,7 +17,7 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(RC7_GENERATED_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/clean_pause_candidate_rc7f.generated.cpp")
 execute_process(
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_candidate_v5.py"
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_candidate_v6.py"
           "${CMAKE_CURRENT_SOURCE_DIR}/clean_pause_candidate.cpp" "${RC7_GENERATED_SOURCE}"
   RESULT_VARIABLE RC7_GENERATE_RESULT
   OUTPUT_VARIABLE RC7_GENERATE_OUTPUT
