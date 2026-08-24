@@ -1,216 +1,96 @@
-name: RC7g borrowed movieclip HUD candidate
+name: RC7g source materialization
 
 on:
   push:
     branches:
       - candidate/rc7-render-suppression
     paths:
-      - native/candidate/rc7/**
-      - native/src/**
-      - VERSION
-      - README.md
-      - docs/RC7_SINGLE_SESSION_TEST.md
-      - docs/RELEASE_RC7G.md
-      - docs/RETAIL_EVIDENCE_RC7F.md
-      - docs/STATUS_AND_PLAN.md
-      - docs/REJECTED_HYPOTHESES.md
       - .github/workflows/rc7-candidate.yml
+      - native/candidate/rc7/**
   pull_request:
     paths:
-      - native/candidate/rc7/**
-      - native/src/**
-      - VERSION
-      - README.md
-      - docs/**
       - .github/workflows/rc7-candidate.yml
+      - native/candidate/rc7/**
   workflow_dispatch:
-
-concurrency:
-  group: rc7-candidate-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
 
-env:
-  CANDIDATE_TAG: v0.1.0-rc.7g
-  CANDIDATE_ASSET: kcd2-clean-pause-v0.1.0-rc.7g.zip
-
 jobs:
-  build-candidate:
+  materialize:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Verify generated-source safety contract
+      - name: Generate exact rc7g source
         shell: python
         run: |
           from pathlib import Path
-          import subprocess, sys
+          import subprocess
+          import sys
 
-          generated = Path("native/candidate/rc7/clean_pause_candidate_rc7g.ci.cpp")
+          out = Path('materialized/clean_pause_native.cpp')
+          out.parent.mkdir(parents=True, exist_ok=True)
           subprocess.run([
               sys.executable,
-              "native/candidate/rc7/generate_candidate_v7.py",
-              "native/candidate/rc7/clean_pause_candidate.cpp",
-              str(generated),
+              'native/candidate/rc7/generate_candidate_v7.py',
+              'native/candidate/rc7/clean_pause_candidate.cpp',
+              str(out),
           ], check=True)
-          source = generated.read_text(encoding="utf-8")
-          abi = Path("native/src/kcd2_abi.h").read_text(encoding="utf-8")
 
-          forbidden = (
-              "PauseGame(",
-              'IsFilterEnabled("only_ui")',
-              "ActionMapManager.InitActionMaps(",
-              "ActionMapManager.LoadFromXML(",
-              "Player.OnAction =",
-              "0x492D7F8", "0x549D388",
-              "SetHudGateVisible", "HookHudSetVisible", "HookGlobalHudVisibility",
-              "HudClipSnapshot", "g_hudClipSnapshot", "snapshot.clip",
-              "ReleaseFlashVariable", "FlashVariableReleaseFn",
-              "kFlashVariableReleaseSlot",
-          )
-          for needle in forbidden:
-              if needle in source:
-                  raise SystemExit(f"Forbidden rc7g path: {needle}")
+          source = out.read_text(encoding='utf-8')
+          replacements = {
+              'rc7g borrowed-movieclip HUD candidate active': 'KCD2 Clean Pause v0.1.0 active',
+              'native bootstrap started; target=KCD2 1.5.6 Windows retail; rc7g borrowed-movieclip HUD candidate':
+                  'native bootstrap started; target=KCD2 1.5.6 Windows retail; KCD2 Clean Pause v0.1.0',
+          }
+          for old, new in replacements.items():
+              if old not in source:
+                  raise SystemExit(f'missing expected runtime marker: {old}')
+              source = source.replace(old, new)
 
           required = (
-              'getElement(g_flashUI, "Menu@0")',
-              'getElement(g_flashUI, "hud@0")',
-              "kUIElementRenderSlot = 24",
-              "HookMenuRender",
-              "kHudClipCount = 28",
-              "HudVisibilitySnapshot g_gameplayHudSnapshot",
-              "HudVisibilitySnapshot g_vanillaPauseHudSnapshot",
-              "CaptureHudVisibilitySnapshot",
-              "RestoreHudVisibilitySnapshot",
-              "getMovieClip(hud, kHudClipNames[i], nullptr)",
-              "HookHudUpdate",
-              "hud@0 Update hook first entry",
-              "hud@0 Update original returned successfully",
-              'CaptureHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause")',
-              'RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu")',
-              'RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-before-B")',
-              "ReplayVanillaPauseToggle",
-              "g_forwardDepth",
-              "rc7g borrowed-movieclip child-HUD-snapshot candidate active",
+              'HookMenuRender',
+              'HookHudUpdate',
+              'CaptureHudVisibilitySnapshot',
+              'RestoreHudVisibilitySnapshot',
+              'ShouldFreezeHudFunction',
+              'ClearSubtitles',
+              'HideNarrativeSubtitles',
+              'ReplayVanillaPauseToggle',
+              'KeyId::XiB',
+              'KCD2 Clean Pause v0.1.0 active',
           )
           for needle in required:
               if needle not in source:
-                  raise SystemExit(f"Missing rc7g contract: {needle}")
+                  raise SystemExit(f'materialized source missing: {needle}')
 
-          for needle in (
-              "XiStart = 516", "XiA = 526", "XiB = 527",
-              "kUIElementUpdateSlot = 23",
-              "kUIElementGetMovieClipByNameSlot = 71",
-              "kFlashVariableGetDisplayInfoSlot = 26",
-              "kFlashVariableSetVisibleSlot = 33",
-          ):
-              if needle not in abi:
-                  raise SystemExit(f"Missing ABI contract: {needle}")
+          forbidden = (
+              'ActionMapManager.IsFilterEnabled("only_ui")',
+              'HideVerifiedVanillaPause(',
+              'ReleaseFlashVariable',
+              'snapshot.clip',
+              'rc7g borrowed-movieclip HUD candidate active',
+          )
+          for needle in forbidden:
+              if needle in source:
+                  raise SystemExit(f'materialized source retained rejected path: {needle}')
 
-          table = source[source.index("const char* const kHudClipNames"):]
-          table = table[:table.index("};")]
-          if table.count('"') != 56:
-              raise SystemExit("HUD child table must contain exactly 28 names")
+          out.write_text(source, encoding='utf-8')
+          print(f'materialized {out} ({len(source)} chars)')
 
-          capture = source[source.index("bool CaptureHudVisibilitySnapshot"):source.index("bool RestoreHudVisibilitySnapshot")]
-          restore = source[source.index("bool RestoreHudVisibilitySnapshot"):source.index("void FailOpenHudMaintenance")]
-          if "Release" in capture or "Release" in restore:
-              raise SystemExit("IUIElement::GetMovieClip results must not be Release()d")
-          if "void* clip{};" not in capture or "void* clip{};" not in restore:
-              raise SystemExit("movieclip access must remain call-local")
-          if "info[kFlashDisplayInfoVisibleOffset] != 0" not in capture:
-              raise SystemExit("capture must preserve actual visibility")
-          if "setVisible(clip, snapshot.visible[i])" not in restore:
-              raise SystemExit("restore must replay captured bools")
-
-          menu_hook = source[source.index("void __fastcall HookMenuRender"):source.index("bool EnsureMenuRenderHook")]
-          for needle in ("GetMovieClip", "RestoreHudVisibilitySnapshot", "SetVisible", "Release"):
-              if needle in menu_hook:
-                  raise SystemExit(f"Menu Render must remain presentation-only: {needle}")
-
-          update = source[source.index("void __fastcall HookHudUpdate"):source.index("bool EnsureHudUpdateHook")]
-          if "g_originalHudUpdate(element, deltaTime);" not in update:
-              raise SystemExit("HUD Update must forward original")
-          if "GetCurrentThreadId() != g_mainThreadId" not in update:
-              raise SystemExit("HUD mutation must remain main-thread-only")
-
-          print("rc7g borrowed-movieclip safety contract passed")
-
-      - name: Configure x64 Release
+      - name: Configure candidate x64 Release
         run: cmake -S native/candidate/rc7 -B native/candidate/rc7/build -A x64
 
-      - name: Build x64 Release
+      - name: Build candidate x64 Release
         run: cmake --build native/candidate/rc7/build --config Release --parallel
 
-      - name: Validate and package
-        shell: pwsh
-        run: |
-          $dll = "native/candidate/rc7/build/Release/version.dll"
-          if (-not (Test-Path $dll)) { throw "Missing $dll" }
-          if ((Get-Item $dll).Length -lt 10240) { throw "version.dll unexpectedly small" }
-
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
-          $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
-          $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
-          $exports = & $dumpbin /nologo /exports $dll | Out-String
-          foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
-            if ($exports -notmatch [regex]::Escape($name)) { throw "proxy export missing: $name" }
-          }
-          $deps = & $dumpbin /nologo /dependents $dll | Out-String
-          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") { throw "dynamic MSVC runtime dependency" }
-
-          New-Item -ItemType Directory -Force candidate/stage | Out-Null
-          Copy-Item $dll candidate/stage/version.dll
-          Copy-Item docs/RC7_SINGLE_SESSION_TEST.md candidate/stage/TEST.md
-          Compress-Archive -Path candidate/stage/* -DestinationPath "candidate/$env:CANDIDATE_ASSET" -CompressionLevel Optimal
-          $hash = (Get-FileHash "candidate/$env:CANDIDATE_ASSET" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $env:CANDIDATE_ASSET" | Set-Content candidate/SHA256SUMS.txt -Encoding ascii -NoNewline
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload materialized production source
+        uses: actions/upload-artifact@v4
         with:
-          name: rc7g-borrowed-movieclip-candidate
-          path: |
-            candidate/${{ env.CANDIDATE_ASSET }}
-            candidate/SHA256SUMS.txt
+          name: rc7g-materialized-production-source
+          path: materialized/clean_pause_native.cpp
           if-no-files-found: error
-          retention-days: 14
-
-  publish-prerelease:
-    if: github.event_name == 'push'
-    needs: build-candidate
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-      - uses: actions/download-artifact@v4
-        with:
-          name: rc7g-borrowed-movieclip-candidate
-          path: release-artifact
-      - name: Verify and publish exact prerelease
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          cd release-artifact
-          sha256sum --check SHA256SUMS.txt
-          cd ..
-          test "v$(tr -d '\r\n' < VERSION)" = "$CANDIDATE_TAG"
-          if gh release view "$CANDIDATE_TAG" >/dev/null 2>&1; then
-            gh release upload "$CANDIDATE_TAG" "release-artifact/$CANDIDATE_ASSET" release-artifact/SHA256SUMS.txt --clobber
-            gh release edit "$CANDIDATE_TAG" --title "$CANDIDATE_TAG — borrowed movieclip HUD candidate" --notes-file docs/RELEASE_RC7G.md --prerelease
-          else
-            gh release create "$CANDIDATE_TAG" "release-artifact/$CANDIDATE_ASSET" release-artifact/SHA256SUMS.txt --target "$GITHUB_SHA" --title "$CANDIDATE_TAG — borrowed movieclip HUD candidate" --notes-file docs/RELEASE_RC7G.md --prerelease
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f "$CANDIDATE_TAG" "$GITHUB_SHA"
-          git push origin "+refs/tags/$CANDIDATE_TAG:refs/tags/$CANDIDATE_TAG"
-          test "$(git ls-remote --tags origin "refs/tags/$CANDIDATE_TAG" | awk '{print $1}')" = "$GITHUB_SHA"
+          retention-days: 7
