@@ -1,4 +1,4 @@
-name: RC7c HUD-preserving candidate
+name: RC7d concrete HUD candidate
 
 on:
   push:
@@ -11,10 +11,9 @@ on:
       - native/src/version_proxy.cpp
       - native/src/version.def
       - docs/RC7_SINGLE_SESSION_TEST.md
-      - docs/RELEASE_RC7C.md
+      - docs/RELEASE_RC7D.md
       - docs/STATUS_AND_PLAN.md
       - docs/REJECTED_HYPOTHESES.md
-      - docs/RETAIL_EVIDENCE_RC7C.md
       - .github/workflows/rc7-candidate.yml
   pull_request:
     paths:
@@ -27,12 +26,16 @@ on:
       - .github/workflows/rc7-candidate.yml
   workflow_dispatch:
 
+concurrency:
+  group: rc7-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 env:
-  CANDIDATE_TAG: v0.1.0-rc.7c
-  CANDIDATE_SLUG: rc7c-hud-preserving
+  CANDIDATE_TAG: v0.1.0-rc.7d
+  CANDIDATE_SLUG: rc7d-concrete-hud
 
 jobs:
   build-candidate:
@@ -50,10 +53,10 @@ jobs:
           import subprocess
           import sys
 
-          generated = Path("native/candidate/rc7/clean_pause_candidate_rc7c.ci.cpp")
+          generated = Path("native/candidate/rc7/clean_pause_candidate_rc7d.ci.cpp")
           subprocess.run([
               sys.executable,
-              "native/candidate/rc7/generate_candidate_v2.py",
+              "native/candidate/rc7/generate_candidate_v3.py",
               "native/candidate/rc7/clean_pause_candidate.cpp",
               str(generated),
           ], check=True)
@@ -61,8 +64,6 @@ jobs:
 
           forbidden = (
               "PauseGame(",
-              "SetVisibleFn",
-              "kUIElementSetVisibleSlot",
               'IsFilterEnabled("only_ui")',
               "ActionMapManager.InitActionMaps(",
               "ActionMapManager.LoadFromXML(",
@@ -73,63 +74,68 @@ jobs:
           )
           for needle in forbidden:
               if needle in source:
-                  raise SystemExit(f"Forbidden rc7c candidate path: {needle}")
+                  raise SystemExit(f"Forbidden rc7d candidate path: {needle}")
 
           required = (
               'getElement(g_flashUI, "Menu@0")',
               "kUIElementRenderSlot = 24",
               "kUIElementIsVisibleSlot",
               "HookMenuRender",
-              "g_renderSuppressionObserved",
-              "g_cleanHiddenSinceMs",
-              "kRenderObservationGraceMs = 250",
               "kFlashUISetHudElementsVisibleSlot = 28",
-              "SetHudGateVisible(true)",
               'getElement(g_flashUI, "hud@0")',
+              "kHudElementSetVisibleSlot = 28",
+              "HookHudSetVisible",
+              "element == g_hudElement && !visible && ShouldHoldConcreteHudVisible()",
+              "suppressed hud@0 SetVisible(false)",
+              "SetConcreteHudVisibleAndVerify(true, false)",
+              "Clean Pause HUD presentation verified: hud@0 visible=true",
+              "RestoreVisibleVanillaPausePresentation",
               "kUIElementCallFunctionByNameSlot = 69",
               "HookHudCallFunction",
               'std::strcmp(name, "ClearSubtitles") == 0',
               'std::strcmp(name, "HideNarrativeSubtitles") == 0',
               "ReplayVanillaPauseToggle",
-              "g_pausePressTemplate",
-              "g_pauseReleaseTemplate",
               "Clean Pause -> running via B using replayed vanilla pause toggle",
-              "B resume toggle was not verified; showing ordinary vanilla pause menu (fail-open)",
-              "second Escape/Start consumed; Render restored",
               "g_forwardDepth",
               "if (g_forwardDepth != 0)",
-              "rc7c HUD-preserving render-suppression candidate active",
+              "rc7d concrete-HUD render-suppression candidate active",
           )
           for needle in required:
               if needle not in source:
-                  raise SystemExit(f"Missing rc7c candidate contract: {needle}")
+                  raise SystemExit(f"Missing rc7d candidate contract: {needle}")
 
           menu_hook = source[source.index("void __fastcall HookMenuRender"):source.index("bool EnsureMenuRenderHook")]
           if "g_originalRender(element);" not in menu_hook or "return;" not in menu_hook:
               raise SystemExit("Menu Render hook must suppress only hidden Menu@0 and forward all other renders")
 
+          visibility_hook = source[source.index("void __fastcall HookHudSetVisible"):source.index("bool EnsureHudVisibilityHook")]
+          if "element == g_hudElement" not in visibility_hook or "!visible" not in visibility_hook:
+              raise SystemExit("HUD visibility suppression must be object-identity- and false-only gated")
+          if "g_originalHudSetVisible(element, visible);" not in visibility_hook:
+              raise SystemExit("HUD visibility hook must forward every non-suppressed call")
+          if "g_menuElement" in visibility_hook:
+              raise SystemExit("HUD visibility hook must never special-case or mutate Menu@0")
+
           freeze_fn = source[source.index("bool ShouldFreezeHudFunction"):source.index("bool __fastcall HookHudCallFunction")]
+          if freeze_fn.count("std::strcmp(") != 2:
+              raise SystemExit("Subtitle freeze whitelist must contain exactly two function-name comparisons")
           for allowed in ("ClearSubtitles", "HideNarrativeSubtitles"):
               if allowed not in freeze_fn:
                   raise SystemExit(f"Subtitle freeze whitelist missing {allowed}")
-          if freeze_fn.count("std::strcmp(") != 2:
-              raise SystemExit("Subtitle freeze whitelist must contain exactly two function-name comparisons")
 
-          hud_hook = source[source.index("bool __fastcall HookHudCallFunction"):source.index("bool EnsureHudSubtitleHook")]
-          if "ShouldFreezeHudFunction(functionName)" not in hud_hook:
-              raise SystemExit("HUD hook must delegate suppression to the exact subtitle whitelist")
-          if "g_originalHudCallFunction" not in hud_hook:
-              raise SystemExit("HUD hook must forward non-subtitle Flash calls")
+          hud_call_hook = source[source.index("bool __fastcall HookHudCallFunction"):source.index("bool EnsureHudSubtitleHook")]
+          if "g_originalHudCallFunction" not in hud_call_hook:
+              raise SystemExit("HUD CallFunction hook must forward non-subtitle calls")
 
           b_start = source.index("if (key == KeyId::XiB) {", source.index("void HandleHiddenInput"))
           b_end = source.index("// Once a real Menu@0 render", b_start)
           b_block = source[b_start:b_end]
           if "ReplayVanillaPauseToggle" not in b_block:
-              raise SystemExit("B must resume through the captured vanilla pause route")
+              raise SystemExit("B must use the captured vanilla pause route")
           if "Forward(input, event, force);" in b_block:
-              raise SystemExit("Physical B must not leak to dialog/cutscene/gameplay while Clean Pause owns input")
+              raise SystemExit("Physical B must not leak to gameplay/dialog/cutscene while Clean Pause owns input")
 
-          print("rc7c safety contract passed")
+          print("rc7d safety contract passed")
 
       - name: Configure x64 Release
         run: cmake -S native/candidate/rc7 -B native/candidate/rc7/build -A x64
@@ -177,9 +183,9 @@ jobs:
       - name: Upload candidate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rc7c-hud-preserving-candidate
+          name: rc7d-concrete-hud-candidate
           path: |
-            candidate/kcd2-clean-pause-rc7c-hud-preserving-*.zip
+            candidate/kcd2-clean-pause-rc7d-concrete-hud-*.zip
             candidate/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
@@ -198,7 +204,7 @@ jobs:
       - name: Download verified candidate
         uses: actions/download-artifact@v4
         with:
-          name: rc7c-hud-preserving-candidate
+          name: rc7d-concrete-hud-candidate
           path: release-artifact
 
       - name: Verify checksum
@@ -222,13 +228,13 @@ jobs:
             gh release upload "$CANDIDATE_TAG" "$asset" "$checksum" --clobber
             gh release edit "$CANDIDATE_TAG" \
               --target "$GITHUB_SHA" \
-              --title "$CANDIDATE_TAG — HUD-preserving candidate" \
-              --notes-file docs/RELEASE_RC7C.md \
+              --title "$CANDIDATE_TAG — concrete HUD candidate" \
+              --notes-file docs/RELEASE_RC7D.md \
               --prerelease
           else
             gh release create "$CANDIDATE_TAG" "$asset" "$checksum" \
               --target "$GITHUB_SHA" \
-              --title "$CANDIDATE_TAG — HUD-preserving candidate" \
-              --notes-file docs/RELEASE_RC7C.md \
+              --title "$CANDIDATE_TAG — concrete HUD candidate" \
+              --notes-file docs/RELEASE_RC7D.md \
               --prerelease
           fi
