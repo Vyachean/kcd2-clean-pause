@@ -42,6 +42,6 @@ The concrete visibility hook may suppress only `hud@0` hide calls; all other ele
 
 ## Release integrity
 
-The prerelease is created only after the candidate build and checksum gate succeed. A follow-up integrity workflow force-binds the prerelease tag to the exact successful push workflow `head_sha`. Therefore `VERSION`, source tree, release tag, ZIP, and checksum describe the same verified candidate snapshot rather than an earlier intermediate commit.
+The same push workflow that builds and checksum-verifies the candidate publishes the prerelease and then force-binds `v0.1.0-rc.7d` to that workflow's exact `GITHUB_SHA`. The job verifies the remote tag immediately after pushing it. Therefore `VERSION`, source tree, release tag, ZIP, and checksum describe the same verified candidate snapshot rather than an earlier intermediate commit.
 
 See `docs/STATUS_AND_PLAN.md` and `docs/REJECTED_HYPOTHESES.md` for the current evidence ledger.
