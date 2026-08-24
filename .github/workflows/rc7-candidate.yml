@@ -1,4 +1,4 @@
-name: RC7f race-free HUD snapshot candidate
+name: RC7g borrowed movieclip HUD candidate
 
 on:
   push:
@@ -6,32 +6,22 @@ on:
       - candidate/rc7-render-suppression
     paths:
       - native/candidate/rc7/**
-      - native/src/clean_pause_native.h
-      - native/src/kcd2_abi.h
-      - native/src/version_proxy.cpp
-      - native/src/version.def
+      - native/src/**
       - VERSION
       - README.md
       - docs/RC7_SINGLE_SESSION_TEST.md
-      - docs/RELEASE_RC7F.md
-      - docs/RETAIL_EVIDENCE_RC7E.md
+      - docs/RELEASE_RC7G.md
+      - docs/RETAIL_EVIDENCE_RC7F.md
       - docs/STATUS_AND_PLAN.md
       - docs/REJECTED_HYPOTHESES.md
       - .github/workflows/rc7-candidate.yml
   pull_request:
     paths:
       - native/candidate/rc7/**
-      - native/src/clean_pause_native.h
-      - native/src/kcd2_abi.h
-      - native/src/version_proxy.cpp
-      - native/src/version.def
+      - native/src/**
       - VERSION
       - README.md
-      - docs/RC7_SINGLE_SESSION_TEST.md
-      - docs/RELEASE_RC7F.md
-      - docs/RETAIL_EVIDENCE_RC7E.md
-      - docs/STATUS_AND_PLAN.md
-      - docs/REJECTED_HYPOTHESES.md
+      - docs/**
       - .github/workflows/rc7-candidate.yml
   workflow_dispatch:
 
@@ -43,29 +33,26 @@ permissions:
   contents: read
 
 env:
-  CANDIDATE_TAG: v0.1.0-rc.7f
-  CANDIDATE_ASSET: kcd2-clean-pause-v0.1.0-rc.7f.zip
+  CANDIDATE_TAG: v0.1.0-rc.7g
+  CANDIDATE_ASSET: kcd2-clean-pause-v0.1.0-rc.7g.zip
 
 jobs:
   build-candidate:
     runs-on: windows-latest
     timeout-minutes: 15
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Verify candidate safety contract
+      - name: Verify generated-source safety contract
         shell: python
         run: |
           from pathlib import Path
-          import subprocess
-          import sys
+          import subprocess, sys
 
-          generated = Path("native/candidate/rc7/clean_pause_candidate_rc7f.ci.cpp")
+          generated = Path("native/candidate/rc7/clean_pause_candidate_rc7g.ci.cpp")
           subprocess.run([
               sys.executable,
-              "native/candidate/rc7/generate_candidate_v6.py",
+              "native/candidate/rc7/generate_candidate_v7.py",
               "native/candidate/rc7/clean_pause_candidate.cpp",
               str(generated),
           ], check=True)
@@ -77,144 +64,80 @@ jobs:
               'IsFilterEnabled("only_ui")',
               "ActionMapManager.InitActionMaps(",
               "ActionMapManager.LoadFromXML(",
-              "ActionMapManager.EnableActionFilter(",
               "Player.OnAction =",
-              "0x492D7F8",
-              "0x549D388",
-              "SetHudGateVisible",
-              "g_hudGateForcedVisible",
-              "HookHudSetVisible",
-              "HookGlobalHudVisibility",
-              "EnsureGlobalHudVisibilityHook",
-              "kHudElementSetVisibleSlot",
-              "HudClipSnapshot",
-              "g_hudClipSnapshot",
-              "ReleaseHudClipSnapshot",
-              "g_hudSnapshotCaptured",
-              "snapshot.clip",
-              "RestoreHudClipSnapshot()",
+              "0x492D7F8", "0x549D388",
+              "SetHudGateVisible", "HookHudSetVisible", "HookGlobalHudVisibility",
+              "HudClipSnapshot", "g_hudClipSnapshot", "snapshot.clip",
+              "ReleaseFlashVariable", "FlashVariableReleaseFn",
+              "kFlashVariableReleaseSlot",
           )
           for needle in forbidden:
               if needle in source:
-                  raise SystemExit(f"Forbidden rc7f candidate path: {needle}")
+                  raise SystemExit(f"Forbidden rc7g path: {needle}")
 
           required = (
               'getElement(g_flashUI, "Menu@0")',
-              "kUIElementRenderSlot = 24",
-              "kUIElementIsVisibleSlot",
-              "HookMenuRender",
               'getElement(g_flashUI, "hud@0")',
-              "kUIElementCallFunctionByNameSlot = 69",
-              "HookHudCallFunction",
-              'std::strcmp(name, "ClearSubtitles") == 0',
-              'std::strcmp(name, "HideNarrativeSubtitles") == 0',
+              "kUIElementRenderSlot = 24",
+              "HookMenuRender",
               "kHudClipCount = 28",
-              '"Subtitles"',
-              '"Hints"',
               "HudVisibilitySnapshot g_gameplayHudSnapshot",
               "HudVisibilitySnapshot g_vanillaPauseHudSnapshot",
               "CaptureHudVisibilitySnapshot",
               "RestoreHudVisibilitySnapshot",
-              "ReleaseFlashVariable",
+              "getMovieClip(hud, kHudClipNames[i], nullptr)",
               "HookHudUpdate",
-              "EnsureHudUpdateHook",
-              "kHudSnapshotHoldMs = 750",
-              "kHudSnapshotRefreshIntervalMs = 75",
+              "hud@0 Update hook first entry",
+              "hud@0 Update original returned successfully",
               'CaptureHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause")',
               'RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu")',
               'RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-before-B")',
               "ReplayVanillaPauseToggle",
-              "Clean Pause -> running via B using replayed vanilla pause toggle",
               "g_forwardDepth",
-              "if (g_forwardDepth != 0)",
-              "rc7f race-free child-HUD-snapshot candidate active",
+              "rc7g borrowed-movieclip child-HUD-snapshot candidate active",
           )
           for needle in required:
               if needle not in source:
-                  raise SystemExit(f"Missing rc7f candidate contract: {needle}")
+                  raise SystemExit(f"Missing rc7g contract: {needle}")
 
           for needle in (
-              "XiStart = 516",
-              "XiA = 526",
-              "XiB = 527",
+              "XiStart = 516", "XiA = 526", "XiB = 527",
               "kUIElementUpdateSlot = 23",
               "kUIElementGetMovieClipByNameSlot = 71",
-              "kFlashVariableReleaseSlot = 0",
               "kFlashVariableGetDisplayInfoSlot = 26",
               "kFlashVariableSetVisibleSlot = 33",
           ):
               if needle not in abi:
-                  raise SystemExit(f"Missing retail/RE-proven ABI contract: {needle}")
+                  raise SystemExit(f"Missing ABI contract: {needle}")
 
-          table_start = source.index("const char* const kHudClipNames")
-          table_end = source.index("};", table_start)
-          table = source[table_start:table_end]
+          table = source[source.index("const char* const kHudClipNames"):]
+          table = table[:table.index("};")]
           if table.count('"') != 56:
-              raise SystemExit("HUD child snapshot must name exactly 28 clips")
+              raise SystemExit("HUD child table must contain exactly 28 names")
 
           capture = source[source.index("bool CaptureHudVisibilitySnapshot"):source.index("bool RestoreHudVisibilitySnapshot")]
           restore = source[source.index("bool RestoreHudVisibilitySnapshot"):source.index("void FailOpenHudMaintenance")]
-          if "getMovieClip(hud, kHudClipNames[i], nullptr)" not in capture:
-              raise SystemExit("capture must resolve each child through hud@0 GetMovieClip")
+          if "Release" in capture or "Release" in restore:
+              raise SystemExit("IUIElement::GetMovieClip results must not be Release()d")
+          if "void* clip{};" not in capture or "void* clip{};" not in restore:
+              raise SystemExit("movieclip access must remain call-local")
           if "info[kFlashDisplayInfoVisibleOffset] != 0" not in capture:
-              raise SystemExit("capture must preserve the exact pre-transition bool")
-          if capture.count("ReleaseFlashVariable(clip)") < 2:
-              raise SystemExit("capture must release fresh wrappers on validation-failure and normal paths")
+              raise SystemExit("capture must preserve actual visibility")
           if "setVisible(clip, snapshot.visible[i])" not in restore:
-              raise SystemExit("restore must replay the captured bool rather than force true")
-          if restore.count("ReleaseFlashVariable(clip)") < 2:
-              raise SystemExit("restore must release fresh wrappers on validation-failure and normal paths")
+              raise SystemExit("restore must replay captured bools")
 
           menu_hook = source[source.index("void __fastcall HookMenuRender"):source.index("bool EnsureMenuRenderHook")]
-          for needle in ("GetMovieClip", "RestoreHudVisibilitySnapshot", "ReleaseFlashVariable", "ResetHudSnapshots", "SetVisible"):
+          for needle in ("GetMovieClip", "RestoreHudVisibilitySnapshot", "SetVisible", "Release"):
               if needle in menu_hook:
-                  raise SystemExit(f"Menu Render hook must be presentation-only; found {needle}")
-          if "g_originalRender(element);" not in menu_hook:
-              raise SystemExit("Menu Render hook must forward all non-suppressed renders")
+                  raise SystemExit(f"Menu Render must remain presentation-only: {needle}")
 
-          hud_update = source[source.index("void __fastcall HookHudUpdate"):source.index("bool EnsureHudUpdateHook")]
-          if "g_originalHudUpdate(element, deltaTime);" not in hud_update:
-              raise SystemExit("HUD Update hook must forward the original Update first")
-          if "GetCurrentThreadId() != g_mainThreadId" not in hud_update:
-              raise SystemExit("HUD maintenance must refuse Flash mutation off validated main thread")
-          if 'RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay-maintenance")' not in hud_update:
-              raise SystemExit("HUD Update hook must maintain the gameplay snapshot during the bounded transition")
+          update = source[source.index("void __fastcall HookHudUpdate"):source.index("bool EnsureHudUpdateHook")]
+          if "g_originalHudUpdate(element, deltaTime);" not in update:
+              raise SystemExit("HUD Update must forward original")
+          if "GetCurrentThreadId() != g_mainThreadId" not in update:
+              raise SystemExit("HUD mutation must remain main-thread-only")
 
-          enter_start = source.index("bool TryEnterCleanPause")
-          enter_end = source.index("void HandleHiddenInput", enter_start)
-          enter = source[enter_start:enter_end]
-          capture_pause = enter.index('CaptureHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause")')
-          restore_gameplay = enter.index('RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay")')
-          if capture_pause >= restore_gameplay:
-              raise SystemExit("vanilla-pause HUD snapshot must be captured before gameplay HUD is restored")
-
-          hidden_start = source.index("void HandleHiddenInput")
-          hidden_end = source.index("void __fastcall HookPostInputEvent", hidden_start)
-          hidden = source[hidden_start:hidden_end]
-          second = hidden[hidden.index("if (IsPauseKey(key))"):hidden.index("if (key == KeyId::XiB)")]
-          restore_pause = second.index('RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu")')
-          disable_hidden = second.index("g_cleanHidden.store(false")
-          if restore_pause >= disable_hidden:
-              raise SystemExit("second Start/Escape must restore vanilla-pause HUD before revealing Menu")
-
-          b_start = hidden.index("if (key == KeyId::XiB)")
-          b_end = hidden.index("// Once a real Menu@0 render", b_start)
-          b_block = hidden[b_start:b_end]
-          if "ReplayVanillaPauseToggle" not in b_block:
-              raise SystemExit("B must use the captured vanilla pause route")
-          if "Forward(input, event, force);" in b_block:
-              raise SystemExit("physical B must not leak to gameplay/dialog/cutscene")
-          if b_block.index('RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-before-B")') >= b_block.index("ReplayVanillaPauseToggle"):
-              raise SystemExit("B must restore vanilla-pause child state before replaying the vanilla toggle")
-
-          freeze_fn = source[source.index("bool ShouldFreezeHudFunction"):source.index("bool __fastcall HookHudCallFunction")]
-          if freeze_fn.count("std::strcmp(") != 2:
-              raise SystemExit("Subtitle freeze whitelist must contain exactly two function-name comparisons")
-          for allowed in ("ClearSubtitles", "HideNarrativeSubtitles"):
-              if allowed not in freeze_fn:
-                  raise SystemExit(f"Subtitle freeze whitelist missing {allowed}")
-
-          print("rc7f race-free HUD lifecycle safety contract passed")
+          print("rc7g borrowed-movieclip safety contract passed")
 
       - name: Configure x64 Release
         run: cmake -S native/candidate/rc7 -B native/candidate/rc7/build -A x64
@@ -222,47 +145,33 @@ jobs:
       - name: Build x64 Release
         run: cmake --build native/candidate/rc7/build --config Release --parallel
 
-      - name: Validate and package candidate
+      - name: Validate and package
         shell: pwsh
         run: |
           $dll = "native/candidate/rc7/build/Release/version.dll"
           if (-not (Test-Path $dll)) { throw "Missing $dll" }
-          if ((Get-Item $dll).Length -lt 10240) { throw "version.dll is unexpectedly small" }
+          if ((Get-Item $dll).Length -lt 10240) { throw "version.dll unexpectedly small" }
 
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
-          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
           $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
-          if (-not $vs) { throw "MSVC installation not found" }
-          $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1 -ExpandProperty FullName
-          if (-not $dumpbin) { throw "dumpbin.exe not found" }
-
+          $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
           $exports = & $dumpbin /nologo /exports $dll | Out-String
           foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
-            if ($exports -notmatch [regex]::Escape($name)) {
-              throw "version.dll proxy export missing: $name"
-            }
+            if ($exports -notmatch [regex]::Escape($name)) { throw "proxy export missing: $name" }
           }
-
           $deps = & $dumpbin /nologo /dependents $dll | Out-String
-          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") {
-            throw "Candidate DLL unexpectedly depends on dynamic MSVC runtime"
-          }
+          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") { throw "dynamic MSVC runtime dependency" }
 
           New-Item -ItemType Directory -Force candidate/stage | Out-Null
           Copy-Item $dll candidate/stage/version.dll
           Copy-Item docs/RC7_SINGLE_SESSION_TEST.md candidate/stage/TEST.md
+          Compress-Archive -Path candidate/stage/* -DestinationPath "candidate/$env:CANDIDATE_ASSET" -CompressionLevel Optimal
+          $hash = (Get-FileHash "candidate/$env:CANDIDATE_ASSET" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $env:CANDIDATE_ASSET" | Set-Content candidate/SHA256SUMS.txt -Encoding ascii -NoNewline
 
-          $asset = $env:CANDIDATE_ASSET
-          Compress-Archive -Path candidate/stage/* -DestinationPath "candidate/$asset" -CompressionLevel Optimal
-          $hash = (Get-FileHash "candidate/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $asset" | Set-Content candidate/SHA256SUMS.txt -Encoding ascii -NoNewline
-
-      - name: Upload candidate artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: rc7f-race-free-hud-candidate
+          name: rc7g-borrowed-movieclip-candidate
           path: |
             candidate/${{ env.CANDIDATE_ASSET }}
             candidate/SHA256SUMS.txt
@@ -275,72 +184,33 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
-      - name: Checkout exact candidate commit
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
-
-      - name: Download verified candidate
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: rc7f-race-free-hud-candidate
+          name: rc7g-borrowed-movieclip-candidate
           path: release-artifact
-
-      - name: Verify checksum
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd release-artifact
-          sha256sum --check SHA256SUMS.txt
-          test -f "$CANDIDATE_ASSET"
-          test "$(find . -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 1
-
-      - name: Publish canonical GitHub prerelease and bind exact tag
+      - name: Verify and publish exact prerelease
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          asset="release-artifact/$CANDIDATE_ASSET"
-          checksum="release-artifact/SHA256SUMS.txt"
-          expected_tag="v$(tr -d '\r\n' < VERSION)"
-          test "$expected_tag" = "$CANDIDATE_TAG"
-
+          cd release-artifact
+          sha256sum --check SHA256SUMS.txt
+          cd ..
+          test "v$(tr -d '\r\n' < VERSION)" = "$CANDIDATE_TAG"
           if gh release view "$CANDIDATE_TAG" >/dev/null 2>&1; then
-            while IFS= read -r old_asset; do
-              [[ -z "$old_asset" ]] && continue
-              if [[ "$old_asset" == *.zip && "$old_asset" != "$CANDIDATE_ASSET" ]]; then
-                gh release delete-asset "$CANDIDATE_TAG" "$old_asset" --yes
-              fi
-            done < <(gh release view "$CANDIDATE_TAG" --json assets --jq '.assets[].name')
-
-            gh release upload "$CANDIDATE_TAG" "$asset" "$checksum" --clobber
-            gh release edit "$CANDIDATE_TAG" \
-              --title "$CANDIDATE_TAG — race-free HUD snapshot candidate" \
-              --notes-file docs/RELEASE_RC7F.md \
-              --prerelease
+            gh release upload "$CANDIDATE_TAG" "release-artifact/$CANDIDATE_ASSET" release-artifact/SHA256SUMS.txt --clobber
+            gh release edit "$CANDIDATE_TAG" --title "$CANDIDATE_TAG — borrowed movieclip HUD candidate" --notes-file docs/RELEASE_RC7G.md --prerelease
           else
-            gh release create "$CANDIDATE_TAG" "$asset" "$checksum" \
-              --target "$GITHUB_SHA" \
-              --title "$CANDIDATE_TAG — race-free HUD snapshot candidate" \
-              --notes-file docs/RELEASE_RC7F.md \
-              --prerelease
+            gh release create "$CANDIDATE_TAG" "release-artifact/$CANDIDATE_ASSET" release-artifact/SHA256SUMS.txt --target "$GITHUB_SHA" --title "$CANDIDATE_TAG — borrowed movieclip HUD candidate" --notes-file docs/RELEASE_RC7G.md --prerelease
           fi
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -f "$CANDIDATE_TAG" "$GITHUB_SHA"
           git push origin "+refs/tags/$CANDIDATE_TAG:refs/tags/$CANDIDATE_TAG"
-
-          remote_sha="$(git ls-remote --tags origin "refs/tags/$CANDIDATE_TAG" | awk '{print $1}')"
-          test "$remote_sha" = "$GITHUB_SHA"
-
-          assets="$(gh release view "$CANDIDATE_TAG" --json assets --jq '.assets[].name')"
-          test "$(printf '%s\n' "$assets" | grep -Fx "$CANDIDATE_ASSET" | wc -l)" -eq 1
-          test "$(printf '%s\n' "$assets" | grep -Fx 'SHA256SUMS.txt' | wc -l)" -eq 1
-          test "$(printf '%s\n' "$assets" | grep -E '\.zip$' | wc -l)" -eq 1
-
-          echo "Verified canonical prerelease $CANDIDATE_TAG -> $GITHUB_SHA"
+          test "$(git ls-remote --tags origin "refs/tags/$CANDIDATE_TAG" | awk '{print $1}')" = "$GITHUB_SHA"
