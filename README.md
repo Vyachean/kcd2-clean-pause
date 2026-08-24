@@ -1,49 +1,92 @@
 # KCD2 Clean Pause
 
-Clean Pause is a small **Kingdom Come: Deliverance II** mod whose goal is to pause the game without covering the current rendered frame.
-
-Target UX with an Xbox controller:
+Clean Pause is an experimental **Kingdom Come: Deliverance II** mod whose target UX is:
 
 ```text
 Running
-  Menu / Start -> Clean Pause
+  Xbox Menu / Start -> Clean Pause
 
 Clean Pause
-  B            -> Resume
-  Menu / Start -> vanilla KCD2 pause menu
+  B                  -> Resume
+  Xbox Menu / Start  -> vanilla KCD2 pause menu
 ```
 
-The first Start press must not show the vanilla pause overlay, even for one frame. The main product use case is being able to leave the current subtitle visible for as long as needed.
+The product goal is to freeze gameplay/dialogue/in-engine cutscenes without covering the current rendered frame, so the current subtitle can remain visible.
 
 ## Target
 
-Primary acceptance target:
-
-- KCD2 **1.5.6**;
-- PC Xbox Store / Xbox app / Game Pass;
-- Xbox controller;
-- keyboard Escape is also covered by the pause route.
+- KCD2 **1.5.6**
+- PC Xbox Store / Xbox app / Game Pass
+- Xbox controller
 
 ## Current status
 
-**Retail prerelease development. `v0.1.0-rc.1` is known broken and must not be used.**
+**Diagnostic prerelease development. `v0.1.0-rc.1` and `v0.1.0-rc.2` are confirmed broken.**
 
-Retail testing of rc1 showed that neither Escape nor Xbox Start paused the game. The root cause was an incorrect XML action attribute (`consoleCmd` instead of KCD2's exact `consoleCMD`) combined with an unsafe design that had replaced the vanilla pause actions outright.
+Retail results:
 
-The current fix does two things:
+- `rc.1`: Escape and Xbox Start did nothing;
+- `rc.2`: Escape and Xbox Start still did nothing.
 
-1. uses exact KCD2 `consoleCMD="1"` actions;
-2. retains vanilla pause as a release-time fallback so a Clean Pause command failure degrades to the normal KCD2 pause rather than removing pause entirely.
+`rc.2` disproved the assumption that changing the original KCD2 pause action to `onRelease`-only provides a usable vanilla fallback. The project will not touch Start again until the Lua/console-command layer is independently proven.
 
-The implementation uses only KCD2's normal `.pak`/Lua mod path. It does **not** require `version.dll`, ASI, KCSE, an external process, or an overlay.
+## Next diagnostic candidate
 
-## Downloads
+The next prerelease restores the original retail pause actions to their normal activation contract:
 
-**GitHub Releases are the canonical distribution channel.** Generated `.pak`/`.zip` files are not committed to the repository.
+```text
+open_menu/open_menu
+open_pause_menu/open_pause_menu
 
-Do not use `v0.1.0-rc.1`. The next retail candidate is `v0.1.0-rc.2` after the fail-safe fix passes CI and is published.
+onPress="1"
+onRelease="1"
+keyboard="_keybinds_ref_"
+xboxpad="xi_start"
+```
 
-Release flow:
+They remain non-console actions. **Escape and Xbox Start must therefore open the ordinary vanilla pause menu.**
+
+A separate keyboard-only probe is derived at build time:
+
+```text
+F10
+  -> clean_pause_probe_gameplay / clean_pause_probe_pause_context
+  -> consoleCMD="1"
+  -> System.AddCCommand
+  -> CleanPause.Enter()
+  -> Game.PauseGame(true)
+```
+
+The F10 actions have no Xbox or PlayStation binding.
+
+If F10 clean-pauses successfully, the packed Lua bootstrap and `consoleCMD` route are proven and only Start interception remains. If F10 does nothing, the next investigation is the Lua/bootstrap/command-registration layer rather than another input remap.
+
+## Release source
+
+The already CI-verified Xbox 1.5.6 rc2 profile remains the single versioned source under:
+
+```text
+vendor/kcd2/xbox-1.5.6/profile.b64.parts/
+```
+
+The diagnostic profile is **derived in CI** from that verified source. `tools/profile_probe_patch.py`:
+
+1. restores `onPress="1"` on the original `open_menu` and `open_pause_menu` actions while retaining their original release/bindings;
+2. converts the rc2 custom entry slots into F10-only probe actions;
+3. renames the corresponding filter references;
+4. leaves the temporary `clean_pause_controls` map available only after a successful Clean Pause entry.
+
+No second 100 KB profile copy is committed.
+
+Verified rc2 source profile SHA-256:
+
+```text
+9838db3747f7f36e0c9c281b8770bc7300998515407515b65493b8e9a9bcd14e
+```
+
+## Distribution
+
+GitHub Releases are the canonical distribution channel. Generated `.pak`/`.zip` files are not committed.
 
 ```text
 implementation PR
@@ -53,159 +96,42 @@ implementation PR
   -> Validate CI
   -> merge to main
   -> GitHub Actions creates tag + GitHub Release
-  -> ZIP + SHA256SUMS.txt
 ```
-
-Direct matching `v*` tag publication is also supported by `.github/workflows/release.yml`.
-
-## Pause routing
-
-KCD2 1.5.6 uses two semantic pause actions:
-
-```text
-ordinary gameplay        open_menu/open_menu
-dialogue/cutscene/etc.   open_pause_menu/open_pause_menu
-```
-
-Both retail actions use the normal keybind reference for keyboard and `xi_start` for Xbox Start.
-
-The patched profile now splits each physical press/release cycle:
-
-```text
-Escape / Start press
-  -> clean_pause_enter_gameplay
-     or clean_pause_enter_pause_context
-  -> consoleCMD
-  -> CleanPause.Enter()
-  -> enable clean_pause_controls
-  -> Game.PauseGame(true)
-
-Escape / Start release
-  -> if Clean Pause succeeded:
-       clean_pause_controls is exclusive
-       clean_pause_block_start_release consumes release
-  -> if Clean Pause failed to start:
-       original open_menu/open_pause_menu release fires
-       vanilla pause menu opens
-```
-
-The original `open_menu` and `open_pause_menu` actions therefore remain in the profile with their retail bindings, but are changed to **release-only** fallback actions. They are not console commands.
-
-The custom press actions explicitly bind `keyboard="escape"` and `xboxpad="xi_start"`. The exact retail `no_menu` actionFail filter is mirrored to the custom gameplay entry, so Clean Pause cannot bypass a context in which vanilla pause is disabled.
-
-## Clean-paused controls
-
-`clean_pause_controls` is defined as:
-
-```text
-priority="overlays"
-exclusivity="1"
-```
-
-It is disabled outside Clean Pause. While active it owns:
-
-- Escape / Start press -> `clean_pause_open_menu`;
-- Escape / Start release -> sink (`clean_pause_block_start_release`);
-- B press -> sink;
-- B release -> `clean_pause_resume`.
-
-B resumes with `Game.PauseGame(false)`.
-
-Second Start currently hands pause ownership to the vanilla UI through:
-
-```lua
-UIAction.CallFunction("MenuEvents", -1, "DisplayIngameMenu", true)
-```
-
-That path remains a retail acceptance item; the current fix is specifically designed so failure of the **first** Clean Pause entry can no longer remove normal pause functionality.
-
-## Release source
-
-KCD2 uses last-mod-wins for `defaultProfile.xml`, so this implementation is intentionally version-specific. The patched Xbox 1.5.6 profile is stored as deterministic gzip+base64 source split into integrity-checked text chunks:
-
-```text
-vendor/kcd2/xbox-1.5.6/profile.b64.parts/
-  00.txt
-  ...
-  07.txt
-```
-
-Original retail profile SHA-256:
-
-```text
-69ad9fd618cd31961fef8eb061f3f2723997df5e0fb257ec74d0d5f555592565
-```
-
-Assembled encoded-source SHA-256:
-
-```text
-01b70dab6d8cfbdb502bfd683d4341ef9121c9a22b0440c06653e946413c9880
-```
-
-Current fail-safe patched profile SHA-256:
-
-```text
-9838db3747f7f36e0c9c281b8770bc7300998515407515b65493b8e9a9bcd14e
-```
-
-`tools/build_release.py` verifies every chunk, the assembled source, the decompressed profile digest and the complete fallback/console-command contract before packaging.
 
 ## Safety constraints
 
-The implementation intentionally does **not**:
+Clean Pause does **not**:
 
 - call `ActionMapManager.InitActionMaps()`;
 - call runtime `ActionMapManager.LoadFromXML()`;
-- call the retail-unavailable `ActionMapManager.EnableActionFilter()`;
+- call `ActionMapManager.EnableActionFilter()`;
 - replace `Player.OnAction`;
-- remap the controller persistently;
-- replace `Menu.gfx`;
-- install native DLL/ASI code.
+- persistently remap controller input;
+- replace `Menu.gfx`.
 
-An earlier prototype using `InitActionMaps()` disabled controller input globally, including the title menu. That API is permanently forbidden here.
+`InitActionMaps()` is permanently forbidden because an earlier retail prototype broke controller input globally.
 
 ## Installation
 
-Download the current candidate ZIP from GitHub Releases. Extract its `clean_pause` directory into:
-
-```text
-%USERPROFILE%\Documents\kingdomcome_mods\
-```
-
-Expected final path:
+Extract the release ZIP so this exists:
 
 ```text
 %USERPROFILE%\Documents\kingdomcome_mods\clean_pause\mod.manifest
 ```
 
-Do not install the PAK beside `KingdomCome.exe`.
+Disable other mods that replace `Libs/Config/defaultProfile.xml` while testing.
 
-For testing, disable any other mod that replaces `Libs/Config/defaultProfile.xml`.
+## Diagnostic retail test
 
-## Compatibility
+For the next candidate only:
 
-This build conflicts with another mod that supplies `defaultProfile.xml`. The release target is explicitly KCD2 1.5.6; another game version requires a newly reviewed target profile and release.
+1. verify **Escape opens the normal vanilla pause menu**;
+2. verify **Xbox Start opens the normal vanilla pause menu**;
+3. return to ordinary exploration;
+4. press **F10**;
+5. report whether F10 freezes the world without the vanilla pause overlay;
+6. if F10 does nothing, report whether `kcd.log` contains any `[Clean Pause]` lines.
 
-## Retail acceptance still required
+Do not continue to subtitle/second-Start acceptance until the F10 probe succeeds.
 
-The next candidate must prove:
-
-1. Escape and Xbox Start execute Clean Pause on press;
-2. if the custom entry cannot execute, vanilla pause remains available on release;
-3. first pause has no vanilla menu flash;
-4. `Game.PauseGame(true)` retains the current subtitle/frame;
-5. unrelated input is isolated while paused;
-6. B resumes without triggering dialogue/cutscene actions;
-7. second Start opens the untouched vanilla pause menu;
-8. dialogue/cutscene audio and scripted progression resume coherently.
-
-See [docs/TESTING.md](docs/TESTING.md).
-
-## Documentation
-
-- [docs/DESIGN.md](docs/DESIGN.md) — state/input architecture;
-- [docs/RESEARCH.md](docs/RESEARCH.md) — confirmed retail findings and failures;
-- [docs/TESTING.md](docs/TESTING.md) — Xbox Store 1.5.6 acceptance procedure;
-- [docs/RETAIL_TEST1.md](docs/RETAIL_TEST1.md) — retail profile / candidate provenance;
-- [docs/RELEASE.md](docs/RELEASE.md) — CI and GitHub Release flow;
-- [docs/PURE_PROFILE_PLAN.md](docs/PURE_PROFILE_PLAN.md) — implementation stages.
+See [docs/TESTING.md](docs/TESTING.md) for the exact diagnostic procedure.
