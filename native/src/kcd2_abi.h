@@ -7,7 +7,8 @@ namespace kcd2 {
 
 // Minimal KCD2 1.5.6 ABI used by the native proxy. The runtime deliberately
 // avoids inferred IGameFramework::PauseGame signatures: Clean Pause lets KCD2
-// open its own vanilla pause, then hides only the Menu Flash element.
+// open its own vanilla pause, then alters presentation only through verified
+// FlashUI interfaces.
 
 enum class DeviceId : std::int32_t {
     Keyboard = 0,
@@ -27,20 +28,12 @@ enum InputState : std::int32_t {
 enum class KeyId : std::uint32_t {
     Escape = 0,
 
-    XiDPadUp = 512,
-    XiDPadDown,
-    XiDPadLeft,
-    XiDPadRight,
-    XiStart,
-    XiBack,
-    XiThumbL,
-    XiThumbR,
-    XiShoulderL,
-    XiShoulderR,
-    XiA,
-    XiB,
-    XiX,
-    XiY,
+    // Do not model the KCD2 XInput key space as one contiguous enum. Retail
+    // logs from Xbox Store KCD2 1.5.6 prove Start=516, A=526 and B=527.
+    // Only values that have direct retail evidence are named here.
+    XiStart = 516,
+    XiA = 526,
+    XiB = 527,
 
     None = 0xffffffffu,
 };
@@ -61,6 +54,9 @@ struct InputEvent {
 static_assert(offsetof(InputEvent, keyName) == 0x08);
 static_assert(offsetof(InputEvent, keyId) == 0x10);
 static_assert(offsetof(InputEvent, value) == 0x18);
+static_assert(static_cast<std::uint32_t>(KeyId::XiStart) == 516);
+static_assert(static_cast<std::uint32_t>(KeyId::XiA) == 526);
+static_assert(static_cast<std::uint32_t>(KeyId::XiB) == 527);
 
 // KCD2 1.5.6 ScriptAnyValue layout. Only booleans are read.
 enum class ScriptAnyType : std::int32_t {
@@ -119,6 +115,13 @@ inline constexpr std::size_t kScriptSetGlobalToNullSlot = 33;
 inline constexpr std::size_t kFlashUIGetElementByInstanceStrSlot = 18;
 inline constexpr std::size_t kUIElementSetVisibleSlot = 28;
 inline constexpr std::size_t kUIElementIsVisibleSlot = 29;
+inline constexpr std::size_t kUIElementGetMovieClipByNameSlot = 71;
+
+// IFlashVariableObject binary slots verified by libKCD2 for 1.5.6. These are
+// interface slots, not storefront-dependent WHGame RVAs.
+inline constexpr std::size_t kFlashVariableReleaseSlot = 0;
+inline constexpr std::size_t kFlashVariableGetDisplayInfoSlot = 26;
+inline constexpr std::size_t kFlashVariableSetVisibleSlot = 33;
 
 using PostInputEventFn = void(__fastcall*)(void*, const InputEvent*, bool);
 using ExecuteBufferFn = bool(__fastcall*)(void*, const char*, std::size_t, const char*, void*);
@@ -129,6 +132,10 @@ using SetGlobalToNullFn = void(__fastcall*)(void*, const char*);
 using GetUIElementByInstanceStrFn = void*(__fastcall*)(void*, const char*);
 using SetVisibleFn = void(__fastcall*)(void*, bool);
 using IsVisibleFn = bool(__fastcall*)(void*);
+using GetMovieClipByNameFn = void*(__fastcall*)(void*, const char*, const char*);
+using FlashVariableReleaseFn = void(__fastcall*)(void*);
+using FlashVariableGetDisplayInfoFn = bool(__fastcall*)(void*, void*);
+using FlashVariableSetVisibleFn = bool(__fastcall*)(void*, bool);
 
 template <class Fn>
 Fn VFunc(void* object, std::size_t slot)
