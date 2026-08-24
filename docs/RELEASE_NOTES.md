@@ -1,6 +1,17 @@
-# KCD2 Clean Pause v0.1.0
+# KCD2 Clean Pause v0.1.1-rc.1
 
-Initial stable release for **Kingdom Come: Deliverance II 1.5.6** on Windows, with primary retail testing on the PC Xbox Store / Xbox app build.
+Prerelease for **Kingdom Come: Deliverance II 1.5.6** on Windows. The Clean Pause runtime is unchanged from the retail-proven v0.1.0 architecture; this release adds a second native loading/package option.
+
+## Two installation editions
+
+This release publishes two mutually exclusive packages built from the same Clean Pause runtime:
+
+- `kcd2-clean-pause-v0.1.1-rc.1-asi.zip` — contains `KCD2CleanPause.asi`; requires a compatible x64 ASI loader, normally installed as `dinput8.dll` beside the game executable / `WHGame.dll`.
+- `kcd2-clean-pause-v0.1.1-rc.1-version-dll.zip` — contains the standalone `version.dll` proxy; no separate ASI loader is required.
+
+Use the ASI edition when another mod already owns `version.dll` or when you already use a shared ASI loader. Do **not** install both Clean Pause editions together.
+
+The standalone `version.dll` path retains the v0.1.0 bootstrap and runtime. The ASI edition replaces only the proxy bootstrap with a minimal ASI `DllMain` that starts the same runtime.
 
 ## What it does
 
@@ -13,10 +24,11 @@ Initial stable release for **Kingdom Come: Deliverance II 1.5.6** on Windows, wi
 
 ## Known behavior
 
-- **B does not resume directly from Clean Pause in v0.1.0.** It reveals the normal KCD2 pause menu; resume from there normally.
+- **B does not resume directly from Clean Pause.** It reveals the normal KCD2 pause menu; resume from there normally.
 - KCD2's vanilla pause depth-of-field blur remains visible and is intentionally not modified.
-- Compatibility is currently claimed for KCD2 1.5.6 only.
+- Runtime compatibility is currently claimed for KCD2 1.5.6 only.
+- The standalone `version.dll` loading path is already retail-proven on the primary Xbox Store target. The new ASI loading path remains prerelease until its dedicated retail-equivalence checklist passes.
 
 ## Safety/implementation notes
 
-The stable implementation intentionally does not ship the experimental synthetic B-resume replay route. It also avoids custom/inferred PauseGame calls, action-map replacement, Menu visibility mutation, fixed storefront-specific WHGame RVAs, long-lived Flash movieclip pointers, and destructive `Release()` calls on `IUIElement::GetMovieClip()` results.
+The implementation intentionally avoids custom/inferred PauseGame calls, action-map replacement, Menu visibility mutation, fixed storefront-specific WHGame RVAs, long-lived Flash movieclip pointers, destructive `Release()` calls on `IUIElement::GetMovieClip()` results, and synthetic B-resume replay.

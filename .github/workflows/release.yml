@@ -29,7 +29,8 @@ jobs:
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
-      asset: ${{ steps.package.outputs.asset }}
+      asi_asset: ${{ steps.package.outputs.asi_asset }}
+      version_asset: ${{ steps.package.outputs.version_asset }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,36 +58,63 @@ jobs:
         run: cmake -S native -B native/build -A x64
       - name: Build x64 Release
         run: cmake --build native/build --config Release --parallel
-      - name: Validate and package native DLL
+      - name: Validate and package both native editions
         id: package
         shell: pwsh
         run: |
-          $dll = "native/build/Release/version.dll"
-          if (-not (Test-Path $dll)) { throw "Missing $dll" }
-          if ((Get-Item $dll).Length -lt 10240) { throw "version.dll is unexpectedly small" }
+          $versionDll = "native/build/Release/version.dll"
+          $asi = "native/build/Release/KCD2CleanPause.asi"
+          foreach ($artifact in @($versionDll, $asi)) {
+            if (-not (Test-Path $artifact)) { throw "Missing $artifact" }
+            if ((Get-Item $artifact).Length -lt 10240) { throw "$artifact is unexpectedly small" }
+          }
+
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
           $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
           $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
           if (-not $dumpbin) { throw "dumpbin.exe not found" }
-          $exports = & $dumpbin /nologo /exports $dll | Out-String
+
+          $exports = & $dumpbin /nologo /exports $versionDll | Out-String
           foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
             if ($exports -notmatch [regex]::Escape($name)) { throw "version.dll proxy export missing: $name" }
           }
-          $deps = & $dumpbin /nologo /dependents $dll | Out-String
-          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") { throw "Release DLL unexpectedly depends on dynamic MSVC runtime" }
-          New-Item -ItemType Directory -Force release/stage | Out-Null
-          Copy-Item $dll release/stage/version.dll
-          Copy-Item native/INSTALL.txt release/stage/INSTALL.txt
-          $asset = "kcd2-clean-pause-${{ steps.meta.outputs.tag }}.zip"
-          Compress-Archive -Path release/stage/* -DestinationPath "release/$asset" -CompressionLevel Optimal
-          $hash = (Get-FileHash "release/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $asset" | Set-Content release/SHA256SUMS.txt -Encoding ascii -NoNewline
-          "asset=$asset" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          foreach ($artifact in @($versionDll, $asi)) {
+            $headers = & $dumpbin /nologo /headers $artifact | Out-String
+            if ($headers -notmatch "machine \(x64\)") { throw "$artifact is not an x64 image" }
+            $deps = & $dumpbin /nologo /dependents $artifact | Out-String
+            if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") {
+              throw "$artifact unexpectedly depends on dynamic MSVC runtime"
+            }
+          }
+
+          New-Item -ItemType Directory -Force -Path release/asi | Out-Null
+          New-Item -ItemType Directory -Force -Path release/version-dll | Out-Null
+          Copy-Item $asi release/asi/KCD2CleanPause.asi
+          Copy-Item native/INSTALL_ASI.txt release/asi/INSTALL.txt
+          Copy-Item $versionDll release/version-dll/version.dll
+          Copy-Item native/INSTALL_VERSION_DLL.txt release/version-dll/INSTALL.txt
+
+          $asiAsset = "kcd2-clean-pause-${{ steps.meta.outputs.tag }}-asi.zip"
+          $versionAsset = "kcd2-clean-pause-${{ steps.meta.outputs.tag }}-version-dll.zip"
+          Compress-Archive -Path release/asi/* -DestinationPath "release/$asiAsset" -CompressionLevel Optimal
+          Compress-Archive -Path release/version-dll/* -DestinationPath "release/$versionAsset" -CompressionLevel Optimal
+
+          $asiHash = (Get-FileHash "release/$asiAsset" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $versionHash = (Get-FileHash "release/$versionAsset" -Algorithm SHA256).Hash.ToLowerInvariant()
+          @(
+            "$asiHash  $asiAsset",
+            "$versionHash  $versionAsset"
+          ) | Set-Content release/SHA256SUMS.txt -Encoding ascii
+
+          "asi_asset=$asiAsset" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "version_asset=$versionAsset" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ steps.meta.outputs.tag }}
           path: |
-            release/${{ steps.package.outputs.asset }}
+            release/${{ steps.package.outputs.asi_asset }}
+            release/${{ steps.package.outputs.version_asset }}
             release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
@@ -104,18 +132,25 @@ jobs:
         with:
           name: release-${{ needs.build.outputs.tag }}
           path: release
-      - name: Verify downloaded release artifact
+      - name: Verify downloaded release artifacts
         shell: bash
+        env:
+          ASI_ASSET: ${{ needs.build.outputs.asi_asset }}
+          VERSION_ASSET: ${{ needs.build.outputs.version_asset }}
         run: |
           set -euo pipefail
           cd release
           sha256sum -c SHA256SUMS.txt
-          unzip -t "${{ needs.build.outputs.asset }}"
+          unzip -t "$ASI_ASSET"
+          unzip -t "$VERSION_ASSET"
+          [[ "$(unzip -Z1 "$ASI_ASSET" | sort)" == $'INSTALL.txt\nKCD2CleanPause.asi' ]]
+          [[ "$(unzip -Z1 "$VERSION_ASSET" | sort)" == $'INSTALL.txt\nversion.dll' ]]
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.build.outputs.tag }}
-          ASSET: ${{ needs.build.outputs.asset }}
+          ASI_ASSET: ${{ needs.build.outputs.asi_asset }}
+          VERSION_ASSET: ${{ needs.build.outputs.version_asset }}
           PRERELEASE: ${{ needs.build.outputs.prerelease }}
         shell: bash
         run: |
@@ -125,7 +160,7 @@ jobs:
             exit 0
           fi
           remote_tag_sha="$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')"
-          args=("$TAG" "release/$ASSET" "release/SHA256SUMS.txt" --title "KCD2 Clean Pause $TAG" --notes-file docs/RELEASE_NOTES.md)
+          args=("$TAG" "release/$ASI_ASSET" "release/$VERSION_ASSET" "release/SHA256SUMS.txt" --title "KCD2 Clean Pause $TAG" --notes-file docs/RELEASE_NOTES.md)
           if [[ -n "$remote_tag_sha" ]]; then
             [[ "$remote_tag_sha" == "$GITHUB_SHA" ]] || { echo "Existing tag points elsewhere" >&2; exit 1; }
             args+=(--verify-tag)

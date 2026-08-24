@@ -1,0 +1,15 @@
+KCD2 Clean Pause — standalone version.dll installation
+
+1. Close Kingdom Come: Deliverance II.
+2. Remove/disable any older Clean Pause installation.
+3. Copy version.dll beside the game executable / WHGame.dll.
+4. Start the game normally.
+
+Do not install this standalone package together with the ASI Clean Pause package. They contain the same mod and would load it twice.
+
+Do not overwrite another mod's unrelated version.dll. Only one file with this name can exist beside the executable. If another installed mod already requires its own version.dll, use the ASI edition of Clean Pause instead when possible.
+
+The mod writes kcd2_clean_pause_native.log beside version.dll.
+
+Uninstall:
+Close KCD2 and remove this mod's version.dll and the optional kcd2_clean_pause_native.log.

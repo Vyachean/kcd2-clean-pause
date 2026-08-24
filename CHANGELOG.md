@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.1.1-rc.1 — 2026-08-25
+
+Dual-package prerelease.
+
+- Adds `KCD2CleanPause.asi`, loaded by a compatible shared ASI loader.
+- Retains the standalone `version.dll` edition for self-contained installation.
+- Builds both editions from the same retail-proven Clean Pause runtime; only bootstrap/loading differs.
+- Publishes separate `-asi.zip` and `-version-dll.zip` assets with edition-specific installation instructions and shared checksums.
+- Adds CI contract coverage for both native images and exact package contents.
+- Keeps the ASI edition prerelease-only until its dedicated Xbox Store 1.5.6 retail-equivalence acceptance passes.
+
 ## v0.1.0 — 2026-08-24
 
 Initial stable release.
