@@ -14,6 +14,20 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(RC7_GENERATED_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/clean_pause_candidate_v2.generated.cpp")
+execute_process(
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_candidate_v2.py"
+          "${CMAKE_CURRENT_SOURCE_DIR}/clean_pause_candidate.cpp" "${RC7_GENERATED_SOURCE}"
+  RESULT_VARIABLE RC7_GENERATE_RESULT
+  OUTPUT_VARIABLE RC7_GENERATE_OUTPUT
+  ERROR_VARIABLE RC7_GENERATE_ERROR
+)
+if(NOT RC7_GENERATE_RESULT EQUAL 0)
+  message(FATAL_ERROR "Failed to generate rc7b source: ${RC7_GENERATE_ERROR}")
+endif()
+message(STATUS "${RC7_GENERATE_OUTPUT}")
+
 include(FetchContent)
 FetchContent_Declare(
   minhook
@@ -26,7 +40,7 @@ FetchContent_MakeAvailable(minhook)
 add_library(kcd2_clean_pause_rc7_candidate SHARED
   ../../src/version_proxy.cpp
   ../../src/version.def
-  clean_pause_candidate.cpp
+  "${RC7_GENERATED_SOURCE}"
   ../../src/clean_pause_native.h
   ../../src/kcd2_abi.h
 )
