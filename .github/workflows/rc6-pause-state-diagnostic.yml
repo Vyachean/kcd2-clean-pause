@@ -1,0 +1,116 @@
+name: RC6 pause-state diagnostic
+
+on:
+  pull_request:
+    paths:
+      - native/diagnostic/**
+      - native/src/clean_pause_native.h
+      - native/src/kcd2_abi.h
+      - native/src/version_proxy.cpp
+      - native/src/version.def
+      - docs/RC6_PAUSE_STATE_DIAGNOSTIC.md
+      - .github/workflows/rc6-pause-state-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-diagnostic:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify read-only diagnostic contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          source = Path("native/diagnostic/pause_state_probe.cpp").read_text(encoding="utf-8")
+
+          forbidden = (
+              "PauseGame(",
+              "SetVisibleFn",
+              "kUIElementSetVisibleSlot",
+              "ActionMapManager.InitActionMaps(",
+              "ActionMapManager.LoadFromXML(",
+              "ActionMapManager.EnableActionFilter(",
+              "Player.OnAction =",
+              "g_cleanHidden",
+              "SetMenuVisible(",
+          )
+          for needle in forbidden:
+              if needle in source:
+                  raise SystemExit(f"Diagnostic must remain read-only: {needle}")
+
+          required = (
+              'ActionMapManager.IsFilterEnabled("only_ui")',
+              'getElement(g_flashUI, "Menu@0")',
+              "kUIElementIsVisibleSlot",
+              "pause-state snapshot",
+              "vanilla input untouched",
+              "Forward(input, event, force);",
+          )
+          for needle in required:
+              if needle not in source:
+                  raise SystemExit(f"Missing diagnostic contract: {needle}")
+
+          print("read-only pause-state diagnostic contract passed")
+
+      - name: Configure x64 Release
+        run: cmake -S native/diagnostic -B native/diagnostic/build -A x64
+
+      - name: Build x64 Release
+        run: cmake --build native/diagnostic/build --config Release --parallel
+
+      - name: Validate and package diagnostic
+        shell: pwsh
+        run: |
+          $dll = "native/diagnostic/build/Release/version.dll"
+          if (-not (Test-Path $dll)) { throw "Missing $dll" }
+          if ((Get-Item $dll).Length -lt 10240) { throw "version.dll is unexpectedly small" }
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
+          $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          if (-not $vs) { throw "MSVC installation not found" }
+          $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $dumpbin) { throw "dumpbin.exe not found" }
+
+          $exports = & $dumpbin /nologo /exports $dll | Out-String
+          foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
+            if ($exports -notmatch [regex]::Escape($name)) {
+              throw "version.dll proxy export missing: $name"
+            }
+          }
+
+          $deps = & $dumpbin /nologo /dependents $dll | Out-String
+          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") {
+            throw "Diagnostic DLL unexpectedly depends on dynamic MSVC runtime"
+          }
+
+          New-Item -ItemType Directory -Force diagnostic/stage | Out-Null
+          Copy-Item $dll diagnostic/stage/version.dll
+          Copy-Item docs/RC6_PAUSE_STATE_DIAGNOSTIC.md diagnostic/stage/TEST.md
+
+          $asset = "kcd2-clean-pause-rc6-pause-state-diagnostic-$env:GITHUB_SHA.zip"
+          Compress-Archive -Path diagnostic/stage/* -DestinationPath "diagnostic/$asset" -CompressionLevel Optimal
+          $hash = (Get-FileHash "diagnostic/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $asset" | Set-Content diagnostic/SHA256SUMS.txt -Encoding ascii -NoNewline
+
+          Write-Host "Packaged diagnostic/$asset"
+
+      - name: Upload diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc6-pause-state-diagnostic
+          path: |
+            diagnostic/kcd2-clean-pause-rc6-pause-state-diagnostic-*.zip
+            diagnostic/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
