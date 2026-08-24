@@ -1,0 +1,48 @@
+name: RC7 prerelease target integrity
+
+on:
+  workflow_run:
+    workflows:
+      - RC7d concrete HUD candidate
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  retarget-verified-prerelease:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'candidate/rc7-render-suppression'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout exact verified candidate commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Retarget prerelease tag to verified commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          tag="v$(tr -d '\r\n' < VERSION)"
+
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "Expected prerelease $tag does not exist" >&2
+            exit 1
+          fi
+
+          git tag -f "$tag" "$VERIFIED_SHA"
+          git push origin "+refs/tags/$tag:refs/tags/$tag"
+
+          resolved="$(git rev-parse "$tag^{commit}")"
+          test "$resolved" = "$VERIFIED_SHA"
+
+          echo "Verified prerelease $tag -> $VERIFIED_SHA"
