@@ -80,7 +80,7 @@ def inspect_game(game_root: Path) -> tuple[Path, str, object]:
 
 def build(game_root: Path) -> Path:
     pak_path, patched_profile, info = inspect_game(game_root)
-    rendered_lua = render_lua(info.gameplay.action_name, info.pause.action_name)
+    rendered_lua = render_lua(info.gameplay.entry_action_name, info.pause.entry_action_name)
 
     if MOD_DIR.exists():
         shutil.rmtree(MOD_DIR)
@@ -92,7 +92,7 @@ def build(game_root: Path) -> Path:
         pak.writestr(VANILLA_PROFILE, patched_profile.encode("utf-8"))
         pak.writestr("Scripts/Mods/clean_pause.lua", rendered_lua.encode("utf-8"))
 
-    validate_build(info.gameplay.action_name, info.pause.action_name)
+    validate_build(info.gameplay.entry_action_name, info.pause.entry_action_name)
 
     if ZIP_OUTPUT.exists():
         ZIP_OUTPUT.unlink()
@@ -105,10 +105,11 @@ def build(game_root: Path) -> Path:
     print(f"Game data: {pak_path}")
     print(f"Profile version: {info.profile_version}")
     print(
-        "Routed Start actions: "
-        f"{info.gameplay.map_name}/{info.gameplay.action_name}, "
-        f"{info.pause.map_name}/{info.pause.action_name}"
+        "Clean Pause entry actions: "
+        f"{info.gameplay.map_name}/{info.gameplay.entry_action_name}, "
+        f"{info.pause.map_name}/{info.pause.entry_action_name}"
     )
+    print("Vanilla release fallbacks retained: open_menu, open_pause_menu")
     print(f"Built: {ZIP_OUTPUT}")
     print(f"SHA-256: {digest}")
     return ZIP_OUTPUT
@@ -175,9 +176,9 @@ def main() -> None:
             print(f"Game data: {pak_path}")
             print(f"Profile version: {info.profile_version}")
             print(
-                "Routed Start actions: "
-                f"{info.gameplay.map_name}/{info.gameplay.action_name}, "
-                f"{info.pause.map_name}/{info.pause.action_name}"
+                "Clean Pause entry actions: "
+                f"{info.gameplay.map_name}/{info.gameplay.entry_action_name}, "
+                f"{info.pause.map_name}/{info.pause.entry_action_name}"
             )
         else:
             build(args.game_root)

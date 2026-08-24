@@ -1,10 +1,10 @@
-# Xbox Store 1.5.6 retail test candidate 1
+# Xbox Store 1.5.6 retail candidate history
 
-This note records the provenance and release contract for the first installable Clean Pause candidate intended for retail testing.
+This note records the exact retail profile provenance and the first prerelease test result.
 
 ## Original retail source
 
-The target profile was extracted from the Xbox Store / Xbox app KCD2 1.5.6 installation.
+The target `Libs/Config/defaultProfile.xml` was extracted from the Xbox Store / Xbox app KCD2 1.5.6 installation.
 
 Original retail profile SHA-256:
 
@@ -12,78 +12,88 @@ Original retail profile SHA-256:
 69ad9fd618cd31961fef8eb061f3f2723997df5e0fb257ec74d0d5f555592565
 ```
 
-Observed source-profile properties:
+Confirmed properties:
 
 ```text
 profile version="0"
-open_menu/open_menu             -> xboxpad="xi_start"
-open_pause_menu/open_pause_menu -> xboxpad="xi_start"
+open_menu/open_menu             -> keyboard="_keybinds_ref_", xboxpad="xi_start"
+open_pause_menu/open_pause_menu -> keyboard="_keybinds_ref_", xboxpad="xi_start"
 overlays priority               -> 12
 ```
 
-The profile contains no `actionPass` filters, so this exact target does not need any actionPass allow-list extension. Existing `actionFail` filters remain untouched.
+The exact profile contains no `actionPass` filters. It does contain the retail `no_menu` actionFail filter for `open_menu`.
 
-## Repository release source
+## v0.1.0-rc.1 — failed
 
-For releases, `tools/profile_patch.py` was applied to that verified retail profile and the resulting **patched** target profile is versioned with the mod source as deterministic gzip+base64 text at:
+Retail result on the target installation:
 
-```text
-vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz.b64
-```
+- Escape did not pause;
+- Xbox Start did not pause;
+- Clean Pause did not activate.
 
-Decoded/decompressed patched-profile SHA-256:
+The rc1 profile had converted the two original pause actions to `consoleCmd="1"`. KCD2 keybind actions use the exact case-sensitive spelling `consoleCMD="1"`.
+
+Because rc1 also removed the normal vanilla activation route, the command failure left both controls with no working pause action. rc1 is therefore invalid and must not be used for further acceptance testing.
+
+rc1 patched-profile SHA-256:
 
 ```text
 28e210454d749869b1fa26d4414ba3c055157e731856f9610d6ffce5ddfbc373
 ```
 
-This makes a release self-contained and reproducible from its Git tag. GitHub Actions does not need a user's game installation or a repository secret.
+## v0.1.0-rc.2 source — fail-safe redesign
 
-The encoded profile is target release source, not a generated install package. Generated `.pak` and install `.zip` files remain excluded from Git.
+The next candidate is regenerated from the same verified original retail profile.
 
-## Build paths
+Current patched-profile SHA-256:
 
-Development helpers:
+```text
+9838db3747f7f36e0c9c281b8770bc7300998515407515b65493b8e9a9bcd14e
+```
 
-- `tools/build_from_game.py` — extracts and patches `Data/IPL_GameData.pak` from an installation;
-- `tools/build_from_profile.py` — patches an already extracted exact retail `defaultProfile.xml`.
+Versioned release source:
+
+```text
+vendor/kcd2/xbox-1.5.6/defaultProfile.clean-pause.xml.gz.b64
+```
+
+The new contract is:
+
+```text
+Escape / Start press
+  -> clean_pause_enter_gameplay or clean_pause_enter_pause_context
+  -> exact consoleCMD="1"
+
+Escape / Start release
+  -> original open_menu / open_pause_menu vanilla action
+```
+
+After successful custom entry, the exclusive `clean_pause_controls` map contains a release sink and consumes the same physical release. If the custom command does not execute, that map never becomes active and the original release-only action opens the vanilla pause menu.
+
+The `no_menu` actionFail filter is mirrored to `clean_pause_enter_gameplay`, preventing the custom press route from bypassing vanilla restrictions.
+
+## Packaging
+
+Generated `.pak` and install `.zip` files are not tracked in Git.
 
 Canonical release builder:
 
-- `tools/build_release.py` — decodes, verifies and packages the versioned patched Xbox 1.5.6 source.
-
-`.github/workflows/validate.yml` exercises the release builder on PRs. `.github/workflows/release.yml` runs from version tags and attaches the resulting package to GitHub Releases.
-
-## Candidate contents
-
-The installable directory is:
-
 ```text
-clean_pause/
-  mod.manifest
-  Data/
-    clean_pause.pak
+tools/build_release.py
 ```
 
-The PAK contains only:
+PR CI validates both the development builder and the self-contained release source. A release PR changes `VERSION`; after it reaches `main`, `.github/workflows/release.yml` publishes the matching GitHub tag/release and attaches the install ZIP plus `SHA256SUMS.txt`.
 
-```text
-Libs/Config/defaultProfile.xml
-Scripts/Mods/clean_pause.lua
-```
+## rc2 runtime acceptance
 
-The patched profile routes both retail Start actions to Clean Pause and adds the temporary exclusive `clean_pause_controls` map. No DLL/ASI/native loader is part of this candidate.
+The next test must establish, in this order:
 
-## Runtime acceptance still required
+1. Escape and Xbox Start are no longer dead controls;
+2. successful custom entry happens on press and the same release is consumed;
+3. if custom entry still fails, vanilla pause opens on release;
+4. Clean Pause keeps the frame/subtitle unobscured;
+5. B resumes without underlying dialogue/cutscene side effects;
+6. second Escape/Start opens the real vanilla pause menu;
+7. dialogue/cutscene audio and scripted progression resume coherently.
 
-The first tagged build should be published as a prerelease (for example `v0.1.0-rc.1`), not as a stable release. Retail testing must still prove:
-
-1. title/front-end controller input is unaffected;
-2. first Start enters Clean Pause with zero visible pause-menu frame;
-3. the current subtitle remains visible while paused;
-4. unrelated input is isolated while clean-paused;
-5. B resumes without triggering dialogue/cutscene skip/cancel actions;
-6. second Start opens the real vanilla pause menu;
-7. dialogue/cutscene audio and progression pause and resume coherently.
-
-Record runtime results in the PR before promoting the candidate to a stable release.
+See `docs/TESTING.md` for the full matrix.

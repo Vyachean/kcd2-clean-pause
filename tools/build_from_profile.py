@@ -34,7 +34,7 @@ def prepare_profile(profile_path: Path) -> tuple[bytes, str, str, object]:
     source_bytes = profile_path.read_bytes()
     source_text = decode_profile(source_bytes)
     patched_profile, info = patch_profile(source_text)
-    rendered_lua = render_lua(info.gameplay.action_name, info.pause.action_name)
+    rendered_lua = render_lua(info.gameplay.entry_action_name, info.pause.entry_action_name)
     return source_bytes, patched_profile, rendered_lua, info
 
 
@@ -51,7 +51,7 @@ def build(profile_path: Path) -> Path:
         pak.writestr(VANILLA_PROFILE, patched_profile.encode("utf-8"))
         pak.writestr("Scripts/Mods/clean_pause.lua", rendered_lua.encode("utf-8"))
 
-    validate_build(info.gameplay.action_name, info.pause.action_name)
+    validate_build(info.gameplay.entry_action_name, info.pause.entry_action_name)
 
     if ZIP_OUTPUT.exists():
         ZIP_OUTPUT.unlink()
@@ -66,10 +66,11 @@ def build(profile_path: Path) -> Path:
     print(f"Source profile SHA-256: {profile_digest}")
     print(f"Profile version: {info.profile_version}")
     print(
-        "Routed Start actions: "
-        f"{info.gameplay.map_name}/{info.gameplay.action_name}, "
-        f"{info.pause.map_name}/{info.pause.action_name}"
+        "Clean Pause entry actions: "
+        f"{info.gameplay.map_name}/{info.gameplay.entry_action_name}, "
+        f"{info.pause.map_name}/{info.pause.entry_action_name}"
     )
+    print("Vanilla release fallbacks retained: open_menu, open_pause_menu")
     print(f"Built: {ZIP_OUTPUT}")
     print(f"SHA-256: {archive_digest}")
     return ZIP_OUTPUT
