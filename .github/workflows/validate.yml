@@ -52,16 +52,42 @@ jobs:
 
           native = Path("native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
           abi = Path("native/src/kcd2_abi.h").read_text(encoding="utf-8")
-          if "Game.PauseGame" in native:
-              raise SystemExit("Native runtime must not depend on unavailable retail Lua Game.PauseGame")
-          if "kGameFrameworkPauseGameSlot = 13" not in abi:
-              raise SystemExit("Pinned KCD2 1.5.6 IGameFramework PauseGame slot changed")
-          if "PauseGameFn" not in abi or "g_gameFramework" not in native:
-              raise SystemExit("Direct native pause contract is missing")
-          if "ValidateObjectVtable(value.gameFramework, {kGameFrameworkPauseGameSlot})" not in native:
-              raise SystemExit("Runtime environment does not validate the pause vfunc before hooking")
 
-          print("Native pause and input safety contracts passed")
+          # rc.4 failed because gEnv+0x98 was incorrectly treated as IGameFramework*;
+          # KCD2 1.5.6 reverse engineering identifies it as IGame*.
+          for needle in (
+              "kGameFrameworkPauseGameSlot",
+              "PauseGameFn",
+              "g_gameFramework",
+              "g_cleanPaused",
+              "SetNativePause(",
+          ):
+              if needle in native or needle in abi:
+                  raise SystemExit(f"Rejected rc.4 inferred native pause contract: {needle}")
+
+          required = (
+              "kEnvGameOffset = 0x98",
+              "F10 = 67",
+          )
+          for needle in required:
+              if needle not in abi:
+                  raise SystemExit(f"Missing corrected KCD2 ABI fact: {needle}")
+
+          for needle in (
+              "CryAction.PauseGame(true)",
+              "CryAction.PauseGame(false)",
+              "key != KeyId::F10",
+              "g_probePaused",
+          ):
+              if needle not in native:
+                  raise SystemExit(f"Missing rc.5 diagnostic probe contract: {needle}")
+
+          # Start/Escape must be completely vanilla in this diagnostic release.
+          for needle in ("KeyId::XiStart", "KeyId::Escape"):
+              if needle in native:
+                  raise SystemExit(f"rc.5 must not intercept vanilla pause input: {needle}")
+
+          print("rc.5 fail-open Lua pause probe and input safety contracts passed")
 
   native-build:
     runs-on: windows-latest
