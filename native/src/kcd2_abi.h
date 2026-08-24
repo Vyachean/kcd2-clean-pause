@@ -113,6 +113,8 @@ inline constexpr std::size_t kScriptGetGlobalAnySlot = 32;
 inline constexpr std::size_t kScriptSetGlobalToNullSlot = 33;
 
 inline constexpr std::size_t kFlashUIGetElementByInstanceStrSlot = 18;
+// CFlashUIElement/IUIElement Update(float), verified by libKCD2 1.5.6.
+inline constexpr std::size_t kUIElementUpdateSlot = 23;
 inline constexpr std::size_t kUIElementSetVisibleSlot = 28;
 inline constexpr std::size_t kUIElementIsVisibleSlot = 29;
 inline constexpr std::size_t kUIElementGetMovieClipByNameSlot = 71;
@@ -130,6 +132,7 @@ using GetGlobalAnyFn = bool(__fastcall*)(void*, const char*, ScriptAnyValue*);
 using SetGlobalToNullFn = void(__fastcall*)(void*, const char*);
 
 using GetUIElementByInstanceStrFn = void*(__fastcall*)(void*, const char*);
+using UIElementUpdateFn = void(__fastcall*)(void*, float);
 using SetVisibleFn = void(__fastcall*)(void*, bool);
 using IsVisibleFn = bool(__fastcall*)(void*);
 using GetMovieClipByNameFn = void*(__fastcall*)(void*, const char*, const char*);
