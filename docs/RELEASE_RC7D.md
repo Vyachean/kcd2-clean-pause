@@ -40,4 +40,8 @@ This candidate does not use:
 
 The concrete visibility hook may suppress only `hud@0` hide calls; all other elements and `SetVisible(true)` calls forward to the original engine method.
 
+## Release integrity
+
+The prerelease is created only after the candidate build and checksum gate succeed. A follow-up integrity workflow force-binds the prerelease tag to the exact successful push workflow `head_sha`. Therefore `VERSION`, source tree, release tag, ZIP, and checksum describe the same verified candidate snapshot rather than an earlier intermediate commit.
+
 See `docs/STATUS_AND_PLAN.md` and `docs/REJECTED_HYPOTHESES.md` for the current evidence ledger.
