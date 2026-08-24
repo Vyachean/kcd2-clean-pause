@@ -1,0 +1,51 @@
+name: Verify rc4 assets
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/verify-rc4-assets.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v0.1.0-rc.4
+      ASSET: kcd2-clean-pause-v0.1.0-rc.4.zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inspect published release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json tagName,isPrerelease,targetCommitish,assets,url > release.json
+          cat release.json
+          jq -e '.tagName == "v0.1.0-rc.4"' release.json >/dev/null
+          jq -e '.isPrerelease == true' release.json >/dev/null
+          jq -e '[.assets[].name] | sort == ["SHA256SUMS.txt", "kcd2-clean-pause-v0.1.0-rc.4.zip"]' release.json >/dev/null
+
+      - name: Download published assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release
+          gh release download "$TAG" -p "$ASSET" -p SHA256SUMS.txt -D release
+
+      - name: Verify checksum and ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum -c SHA256SUMS.txt
+          unzip -t "$ASSET"
+          mapfile -t members < <(unzip -Z1 "$ASSET" | sort)
+          expected=("INSTALL.txt" "version.dll")
+          printf 'Published ZIP members:\n%s\n' "${members[*]}"
+          [[ "${members[*]}" == "${expected[*]}" ]]
