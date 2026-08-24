@@ -28,8 +28,17 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import subprocess
+          import sys
 
-          source = Path("native/candidate/rc7/clean_pause_candidate.cpp").read_text(encoding="utf-8")
+          generated = Path("native/candidate/rc7/clean_pause_candidate_v2.ci.cpp")
+          subprocess.run([
+              sys.executable,
+              "native/candidate/rc7/generate_candidate_v2.py",
+              "native/candidate/rc7/clean_pause_candidate.cpp",
+              str(generated),
+          ], check=True)
+          source = generated.read_text(encoding="utf-8")
 
           forbidden = (
               "PauseGame(",
@@ -53,6 +62,9 @@ jobs:
               "kUIElementIsVisibleSlot",
               "HookMenuRender",
               "g_renderSuppressionObserved",
+              "g_cleanHiddenSinceMs",
+              "kRenderObservationGraceMs = 250",
+              "Render suppression was not observed within 250 ms; fail-open",
               "g_forwardDepth",
               "if (g_forwardDepth != 0)",
               "Running -> Clean Pause candidate",
@@ -63,15 +75,13 @@ jobs:
               if needle not in source:
                   raise SystemExit(f"Missing rc7 candidate contract: {needle}")
 
-          # Render suppression must be presentation-only: the hook may skip only
-          # Menu@0's original Render call while hidden.
           hook = source[source.index("void __fastcall HookMenuRender"):source.index("bool EnsureMenuRenderHook")]
           if "g_originalRender(element);" not in hook:
               raise SystemExit("Render hook must forward non-Menu/non-hidden renders")
           if "return;" not in hook:
               raise SystemExit("Render hook does not contain suppression path")
 
-          print("rc7 safety contract passed")
+          print("rc7b safety contract passed")
 
       - name: Configure x64 Release
         run: cmake -S native/candidate/rc7 -B native/candidate/rc7/build -A x64
@@ -111,7 +121,7 @@ jobs:
           Copy-Item $dll candidate/stage/version.dll
           Copy-Item docs/RC7_SINGLE_SESSION_TEST.md candidate/stage/TEST.md
 
-          $asset = "kcd2-clean-pause-rc7-render-suppression-$env:GITHUB_SHA.zip"
+          $asset = "kcd2-clean-pause-rc7b-render-suppression-$env:GITHUB_SHA.zip"
           Compress-Archive -Path candidate/stage/* -DestinationPath "candidate/$asset" -CompressionLevel Optimal
           $hash = (Get-FileHash "candidate/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $asset" | Set-Content candidate/SHA256SUMS.txt -Encoding ascii -NoNewline
@@ -119,9 +129,9 @@ jobs:
       - name: Upload candidate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rc7-render-suppression-candidate
+          name: rc7b-render-suppression-candidate
           path: |
-            candidate/kcd2-clean-pause-rc7-render-suppression-*.zip
+            candidate/kcd2-clean-pause-rc7b-render-suppression-*.zip
             candidate/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 7
