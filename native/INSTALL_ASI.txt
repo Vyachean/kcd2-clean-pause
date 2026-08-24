@@ -1,0 +1,17 @@
+KCD2 Clean Pause — ASI installation
+
+Requires: Ultimate ASI Loader x64.
+
+1. Close Kingdom Come: Deliverance II.
+2. Install Ultimate ASI Loader x64 for KCD2, normally as dinput8.dll beside the game executable / WHGame.dll.
+3. Copy KCD2CleanPause.asi beside dinput8.dll.
+4. Start the game normally.
+
+Do not install this ASI package together with the standalone Clean Pause version.dll package. They contain the same mod and would load it twice.
+
+Multiple ASI mods may share one compatible ASI loader. Do not overwrite an existing dinput8.dll blindly; keep one loader installation and add KCD2CleanPause.asi alongside the other ASI plugins.
+
+The mod writes kcd2_clean_pause_native.log beside KCD2CleanPause.asi.
+
+Uninstall:
+Close KCD2 and remove KCD2CleanPause.asi and the optional kcd2_clean_pause_native.log. Remove dinput8.dll only if no other installed mod needs that ASI loader.
