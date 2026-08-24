@@ -21,7 +21,7 @@ The goal is to freeze gameplay, dialogue, in-engine cutscenes, audio, and subtit
 - Windows retail; PC Xbox Store / Xbox app / Game Pass is the primary tested storefront
 - Xbox controller; Escape behaves analogously for pause/menu entry
 
-Current prerelease candidate: **v0.1.0-rc.7d**.
+Current prerelease candidate: **v0.1.0-rc.7e**.
 
 Authoritative project state:
 
@@ -40,28 +40,34 @@ KCD2 itself remains the only pause owner.
 
 Retail rc7b testing confirmed this pauses world simulation and audio correctly. The strong vanilla pause depth-of-field blur is accepted and out of scope.
 
-## rc7d — dual HUD preservation
+## rc7e — preserve the real HUD child state
 
-Vanilla pause also hides HUD/subtitles. rc7c proved that one `IFlashUI::SetHudElementsVisible(true)` call is insufficient even though `hud@0` resolves and `ClearSubtitles` can be intercepted.
+rc7c/rc7d established that whole-HUD visibility is not the layer vanilla pause uses to remove gameplay HUD presentation:
 
-rc7d therefore holds both known visibility layers while pause acquisition/Clean Pause is active:
+- one-shot `IFlashUI::SetHudElementsVisible(true)` was insufficient;
+- persistent global HUD holding plus `hud@0::SetVisible(false)` suppression was also insufficient;
+- rc7d verified `hud@0::IsVisible()==true` while the user still saw no HUD.
 
-- suppress `IFlashUI::SetHudElementsVisible(false)` for the verified FlashUI;
-- suppress `IUIElement::SetVisible(false)` only for the verified `hud@0`;
-- forward all `true` calls and all unrelated objects;
-- explicitly enable the global HUD gate and set `hud@0` visible after vanilla pause acquisition;
-- require `hud@0::IsVisible() == true` before accepting Clean Pause presentation ownership;
-- suppress only `hud.ClearSubtitles` and `hud.HideNarrativeSubtitles` as a secondary subtitle-lifetime safeguard.
+KCD2 1.5.6 reverse engineering identifies the deeper mechanism: `C_UIHudMask` controls 28 named child movie clips inside the still-visible `hud` Flash movie according to active framework UI sources.
 
-If HUD presentation cannot be verified, the candidate fails open to ordinary visible vanilla pause.
+rc7e therefore removes the rejected root visibility hooks. Before forwarding pause it snapshots the actual visibility of all 28 children through verified Flash interfaces. Once vanilla pause is active, it restores the exact pre-pause bool for every child and briefly keeps that snapshot across late transition refreshes.
 
-## B resume
+It never forces normally-hidden widgets visible.
 
-Physical Xbox B is consumed while Clean Pause owns input so it cannot leak into `dialog_cancel`, `cutscene_skip`, or gameplay.
+The narrow subtitle-lifetime safeguard still blocks only:
 
-The candidate replays the exact physical pause press/release pair that opened vanilla pause through the original `PostInputEvent` route and accepts resume only if `Menu@0::IsVisible()` becomes false. Otherwise it fails open to ordinary visible vanilla pause.
+- `hud.ClearSubtitles`;
+- `hud.HideNarrativeSubtitles`.
 
-This direct B route remains retail-unverified because the rc7c test log contained no physical B attempt.
+## Xbox B resume
+
+The rc7d retail log exposed a separate ABI bug. The old code incorrectly assumed XInput ids were contiguous and compiled B as 523. Retail KCD2 reports:
+
+- Start = 516;
+- A = 526;
+- B = 527.
+
+rc7e names only these directly evidenced ids. Physical B is consumed while Clean Pause owns input and now can actually enter the captured-pause-key replay route for the first valid test.
 
 ## Key retail findings
 
@@ -72,8 +78,19 @@ This direct B route remains retail-unverified because the rc7c test log containe
 - rc.6: `only_ui` remains false even with visible vanilla pause — rejected as ownership evidence.
 - writable-section `S_GameContext` scan prevented startup; fixed libKCD2 WHGame RVAs are storefront-dependent — rejected.
 - rc7b: `Menu@0` render suppression is the accepted pause/menu foundation.
-- rc7c: a one-shot global HUD enable is insufficient — rejected as a complete solution.
-- rc7d: persistent global HUD hold + concrete `hud@0` hold is the active unverified presentation hypothesis.
+- rc7c: one-shot root HUD enable is insufficient.
+- rc7d: persistent root HUD visibility is still insufficient; `hud@0::IsVisible()` is not child-presentation proof.
+- rc7d also proved the retail controller ids and explained why B never entered the replay branch.
+- rc7e: active hypothesis is exact pre-pause visibility snapshot/restore of all 28 HUD child clips.
+
+## Verified interface ABI used by rc7e
+
+- `IUIElement::GetMovieClip(name)` = slot 71
+- `IFlashVariableObject::Release` = slot 0
+- `IFlashVariableObject::GetDisplayInfo` = slot 26
+- `IFlashVariableObject::SetVisible` = slot 33
+
+These are KCD2 1.5.6 interface slots, not fixed storefront-dependent WHGame RVAs.
 
 ## Safety constraints
 
@@ -84,14 +101,15 @@ Permanent rules include:
 - no action-map mutation or `Player.OnAction` replacement;
 - no fixed libKCD2 WHGame RVAs for production lookup;
 - never mutate `Menu@0` visibility;
-- global HUD hook may suppress only `SetHudElementsVisible(false)` while pending/clean;
-- concrete HUD hook may suppress only `hud@0::SetVisible(false)` while pending/clean;
-- all other calls forward;
+- do not retain rejected rc7d root-HUD visibility hooks;
+- preserve captured child visibility instead of forcing all HUD children visible;
+- release retained Flash child wrappers whenever Clean Pause ownership ends;
+- physical B must not leak to gameplay/dialog/cutscene while Clean Pause owns input;
 - unresolved runtime state fails open to vanilla behavior.
 
 ## Distribution
 
-**GitHub Releases are the canonical channel.** Candidate binaries are published as prereleases after the generated-source safety gate, MSVC x64 build, proxy/static-runtime validation, ZIP/checksum verification, and exact-tag binding succeed.
+**GitHub Releases are the canonical channel.** Candidate binaries are published as prereleases after the exact generated-source safety gate, MSVC x64 build, proxy/static-runtime validation, ZIP/checksum verification, and exact-tag binding succeed.
 
 Actions artifacts are CI evidence rather than the primary download surface.
 
@@ -101,6 +119,7 @@ For native candidates, remove the old `Documents\kingdomcome_mods\clean_pause` P
 
 - [docs/STATUS_AND_PLAN.md](docs/STATUS_AND_PLAN.md) — canonical current state and next gate
 - [docs/REJECTED_HYPOTHESES.md](docs/REJECTED_HYPOTHESES.md) — rejected/superseded approaches and evidence
+- [docs/RETAIL_EVIDENCE_RC7D.md](docs/RETAIL_EVIDENCE_RC7D.md) — latest retail evidence
 - [docs/RC7_SINGLE_SESSION_TEST.md](docs/RC7_SINGLE_SESSION_TEST.md) — one-session retail acceptance matrix
 - [docs/DESIGN.md](docs/DESIGN.md)
 - [docs/TESTING.md](docs/TESTING.md)
