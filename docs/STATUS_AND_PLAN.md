@@ -1,290 +1,198 @@
 # Current status and plan
 
-This is the canonical project-status document. Detailed rejected/superseded hypotheses are kept in `docs/REJECTED_HYPOTHESES.md`; retail evidence is kept in `docs/RETAIL_EVIDENCE_*.md`.
+Canonical project status for KCD2 Clean Pause.
 
 ## Target UX
 
-Primary target:
-
-- Kingdom Come: Deliverance II 1.5.6;
-- Windows retail, primarily PC Xbox Store / Xbox app / Game Pass;
-- Xbox controller, with keyboard Escape analogous to Xbox Menu / Start.
-
-Required behavior:
-
 ```text
 Running
-  Escape / Start -> Clean Pause
+  Escape / Xbox Start -> Clean Pause
 
 Clean Pause
   B              -> Running
   Escape / Start -> visible vanilla pause menu
 ```
 
-Clean Pause must stop gameplay, dialogue/in-engine-cutscene progression, relevant audio, and subtitle lifetime while leaving the current rendered frame unobscured. No replacement overlay.
+Target: KCD2 1.5.6 Windows retail, primarily PC Xbox Store / Xbox app, Xbox controller first.
 
-The strong depth-of-field blur applied by KCD2's vanilla pause is accepted and out of scope.
+Clean Pause must preserve vanilla KCD2 pause ownership so gameplay, dialogue/cutscene progression, relevant audio and subtitle lifetime stop while the current game frame remains unobscured. Vanilla depth-of-field blur is accepted.
 
 ## Accepted pause foundation
 
-KCD2 remains the **only pause owner**.
+Retail-proven:
 
-1. Forward the real physical Escape / Xbox Start event to vanilla KCD2.
-2. Resolve `Menu@0` through `IFlashUI`.
-3. Use `Menu@0::IsVisible()` as the retail-proven vanilla pause lifecycle signal.
-4. Never mutate Menu visibility while Clean Pause is active.
-5. Suppress only `Menu@0::Render()` to remove the visible pause menu.
-6. A second Escape/Start restores Menu rendering and reveals the already-open vanilla menu without an unpause/re-pause tick.
-7. Consume unrelated gameplay/dialog/cutscene input only while verified vanilla pause ownership exists.
-8. Any unresolved state fails open to ordinary visible vanilla pause/input behavior.
+- forward the real Escape/Start event to KCD2;
+- use `Menu@0::IsVisible()` as the independent vanilla-pause lifecycle signal;
+- never change `Menu@0` visibility;
+- suppress only `Menu@0::Render()` while Clean Pause owns presentation;
+- second Start/Escape reveals the already-open vanilla menu without an unpause/re-pause tick;
+- world simulation and audio pause correctly;
+- unresolved state fails open.
 
-This foundation was proven by rc7b and remained stable through rc7c/rc7d/rc7e.
+## Retail-proven HUD layer
 
-## Proven HUD presentation layer
+rc7c/rc7d proved root HUD visibility is insufficient.
 
-RC7d proved that root-level HUD visibility is not enough: `hud@0::IsVisible()==true` while HUD/subtitles are still visually absent.
+KCD2's `C_UIHudMask` controls 28 named child movie clips inside `hud@0`. rc7e preserved those children and produced the first confirmed positive result: **the subtitle at the bottom remained visible during Clean Pause**.
 
-libKCD2 1.5.6 reverse engineering identifies `C_UIHudMask` as the deeper layer. It controls **28 named child movie clips** inside the still-visible `hud` Flash movie according to active framework UI sources.
+Therefore the 28-child layer is accepted. Do not return to root-HUD visibility experiments.
 
-RC7e switched to those child clips and produced the first positive retail result: **the subtitle at the bottom of the screen was visible during Clean Pause**.
+## rc7e result
 
-Therefore:
+Sequence:
 
-- the 28-child HUD layer is now retail-proven relevant;
-- do not return to global/root-HUD visibility experiments;
-- the child-snapshot concept is retained, but the RC7e lifetime implementation is rejected as unsafe.
+1. Start -> Clean Pause;
+2. subtitle visible;
+3. second Start -> visible vanilla menu;
+4. B -> crash.
 
-## Latest retail result — rc7e
+The rc7e implementation retained raw movieclip pointers across frames, which was rejected as a stale/cross-thread lifetime risk. However, later evidence shows those pointers also must not simply be `Release()`d by the caller.
 
-User-visible sequence:
+## rc7f result — immediate first-pause crash
 
-1. Start -> Clean Pause without visible pause menu;
-2. subtitle remains visible at the bottom;
-3. Start again -> ordinary visible vanilla pause menu;
-4. B -> game crash.
+The game launched normally but crashed immediately when the first pause was attempted.
 
-No additional RC7e launch is useful.
-
-A code audit found two release-blocking RC7e lifecycle defects:
-
-### Long-lived Flash wrappers
-
-RC7e retained 28 engine-owned `IFlashVariableObject*` wrappers across frames in the HUD snapshot. `Menu@0::Render()` could still be using them while the second-Start input transition called `Release()` on all wrappers.
-
-This is an unsafe cross-thread lifetime and a plausible use-after-free/heap-corruption source. Without a native crash stack it is not claimed as the exact faulting instruction, but it is independently sufficient to reject RC7e.
-
-### Visible-menu HUD state was not restored exactly
-
-RC7e overwrote vanilla pause child visibility with the gameplay snapshot. On second Start it stopped maintaining the gameplay snapshot and freed wrappers, but did not restore the exact child state vanilla pause had established before the override.
-
-Thus the visible vanilla menu could inherit non-vanilla child state before B closed it.
-
-See `docs/RETAIL_EVIDENCE_RC7E.md`.
-
-## Active candidate — v0.1.0-rc.7f
-
-RC7f keeps the retail-proven 28-child presentation mechanism but removes long-lived engine pointer ownership and makes transitions symmetric.
-
-### Two bool-only snapshots
-
-RC7f stores only 28 visibility booleans per snapshot. It keeps **no `IFlashVariableObject*` between calls**.
-
-It captures:
-
-1. **gameplay HUD snapshot** immediately before the physical pause press is forwarded;
-2. **vanilla-pause HUD snapshot** after KCD2 has opened the real pause, but before Clean Pause restores gameplay presentation.
-
-Every child access follows this lifetime:
+Last native markers:
 
 ```text
-GetMovieClip(name)
-  -> read or SetVisible
-  -> Release()
+rc7f ... candidate active
+Menu@0 render hook active
+hud@0 subtitle-preservation hook active
+hud@0 main-thread Update hook active
+HUD visibility snapshot captured for all 28 clips (gameplay-pre-pause)
+Clean Pause subtitle freeze: suppressed hud.ClearSubtitles
 ```
 
-The fresh wrapper is released before the helper returns on both success and failure paths.
+No vanilla-pause snapshot or Clean Pause entry was reached.
 
-### Exact transitions
+This localizes the crash to the transition immediately after the complete gameplay snapshot.
 
-Running -> Clean Pause:
+See `docs/RETAIL_EVIDENCE_RC7F.md`.
 
-- capture gameplay snapshot;
-- forward real pause input;
-- verify vanilla pause through `Menu@0::IsVisible()`;
-- capture vanilla-pause snapshot;
-- restore gameplay snapshot;
-- suppress Menu render.
+## Corrected ownership conclusion
 
-Clean Pause -> second Start/Escape:
+RC7f introduced immediate `Release()` calls for every `IUIElement::GetMovieClip()` result.
 
-- restore vanilla-pause snapshot **before** dropping Menu render suppression;
-- reveal the already-open ordinary vanilla menu.
+That ownership assumption is unsupported and conflicts with CryEngine's documented IUIElement usage:
 
-Clean Pause -> B:
+- `IUIElement::GetMovieClip()` is shown as returning a pointer used directly, with no caller `Release()` requirement;
+- the documentation separately requires `Release()` for variable objects created through the raw `IFlashPlayer` interface;
+- libKCD2 confirms `IFlashVariableObject::Release()` is destructive (`delete this`).
 
-- restore vanilla-pause snapshot first;
-- replay the captured vanilla pause-key pair;
-- accept resume only if `Menu@0` closes;
-- physical B never leaks into gameplay/dialog/cutscene actions.
+The rc7f log is consistent with deleting movieclip wrappers owned/cached by the UI element and then crashing when the pause transition touches them.
 
-Fail-open while Menu remains active:
+## Active candidate — v0.1.0-rc.7g
 
-- best-effort restore vanilla-pause snapshot first;
-- show ordinary vanilla pause.
+RC7g uses the following ownership rule for `IUIElement::GetMovieClip()`:
 
-### Main-thread HUD maintenance
+- pointer is borrowed/cached;
+- use only during the current helper call;
+- never store in global/snapshot state;
+- never call `Release()`;
+- snapshot stores only visibility booleans.
 
-RC7e performed child mutation from `Menu::Render()`. RC7f forbids this.
+Thus rc7g avoids both rejected extremes:
 
-`Menu::Render()` is presentation-only again: suppress hidden Menu or forward original render.
+- rc7e: raw movieclip pointers retained across frames;
+- rc7f: borrowed movieclip pointers destructively released.
 
-RC7f hooks verified `IUIElement::Update(float)` slot 23 for resolved `hud@0`:
+## Dual bool-only HUD snapshots
 
-- original Update always runs first;
-- HUD child mutation is allowed only when `GetCurrentThreadId()` matches the validated KCD2 main-thread id;
-- late transition refresh is bounded to the first 750 ms;
-- refresh occurs at most every 75 ms, not every frame;
-- unsafe/unverified maintenance fails open to visible vanilla pause.
+RC7g retains the symmetric rc7f state model:
 
-### Subtitle lifetime safeguard
+1. capture gameplay child visibility before forwarding physical pause;
+2. after real vanilla pause opens, capture vanilla-pause child visibility;
+3. restore gameplay snapshot for Clean Pause;
+4. on second Start/Escape restore vanilla-pause snapshot before revealing Menu;
+5. on direct B restore vanilla-pause snapshot before replaying the vanilla pause toggle.
 
-Keep the narrow named HUD `CallFunction` guard that suppresses only:
+No child is blindly forced visible.
 
-- `ClearSubtitles`;
-- `HideNarrativeSubtitles`.
+## HUD maintenance and diagnostics
 
-RC7e's visible subtitle is positive evidence that this presentation/lifetime combination is worth retaining.
+`Menu@0::Render()` remains presentation-only.
 
-## Proven retail facts
+Verified `IUIElement::Update(float)` slot 23 on resolved `hud@0` performs bounded late snapshot maintenance only while Clean Pause is active and only on the validated main thread.
 
-On Xbox Store KCD2 1.5.6:
+RC7g adds one-shot diagnostic markers around the first Update trampoline:
 
-- native bootstrap and raw `IInput::PostInputEvent` hook work;
-- `Menu@0` resolves reliably;
-- `Menu@0::IsVisible()` tracks vanilla pause open/close;
-- suppressing only `Menu@0::Render()` creates a real hidden vanilla pause;
-- world simulation stops;
-- audio pauses like vanilla pause;
-- second Escape/Start reveals the already-open vanilla menu continuously;
-- `hud@0` resolves;
-- named HUD `CallFunction` interception works;
-- global/root HUD visibility alone is insufficient;
-- the 28-child HUD layer can restore a visible subtitle in Clean Pause;
-- Xbox retail ids are Start=516, A=526, B=527;
-- RC7e's long-lived Flash-wrapper snapshot lifecycle is unsafe and must not be reused.
+```text
+hud@0 Update hook first entry ...
+hud@0 Update original returned successfully
+```
 
-## Remaining retail gates
+If another crash occurs, one log distinguishes Update-hook/trampoline failure from snapshot logic without a separate diagnostic run.
 
-One normal RC7f session should cover all remaining high-value questions:
+## Input facts
 
-1. Do subtitles/HUD remain visible in Clean Pause?
-2. Does second Start reveal ordinary vanilla pause normally?
-3. Does B from that visible vanilla menu avoid the RC7e crash?
-4. Does direct B from Clean Pause enter the replay route and resume without menu flash/skip/cancel?
-5. Does the same subtitle remain visible beyond normal lifetime while speech/audio remain paused?
-6. Do several repeated pause cycles remain stable?
+Retail-proven Xbox ids:
 
-Do not request separate launches for individual items. Do not rerun RC7e.
+- Start = 516;
+- A = 526;
+- B = 527.
 
-## Rejected/superseded mechanisms
+Physical B is consumed while Clean Pause owns input; it must not leak into gameplay/dialog/cutscene actions.
 
-Do not reintroduce without new retail evidence:
+Direct B replay remains to be fully retail-proven.
 
-- rc.1/rc.2 profile/action routing as primary pause interception;
-- runtime partial action-map reload, persistent remapping, or `Player.OnAction` replacement;
-- rc.4 inferred native `PauseGame` ABI;
-- `CryAction.PauseGame`, `Action.PauseGame`, `Game.PauseGame`, or Lua/custom PauseGame as production pause owner;
-- `ActionMapManager.IsFilterEnabled("only_ui")` as pause ownership evidence;
-- mutating `Menu@0` visibility to hide the pause menu;
-- fixed libKCD2 WHGame RVAs for storefront-independent production lookup;
-- aggressive writable-section `S_GameContext` / `C_UIMenu` scanning;
-- one-shot or persistent root-HUD visibility as complete HUD restoration;
-- `hud@0::IsVisible()` as proof of child presentation;
-- blocking `hud.ClearSubtitles` alone as complete subtitle restoration;
-- forwarding physical B directly to hidden vanilla Menu;
-- contiguous inferred XInput key ids;
-- RC7e long-lived `IFlashVariableObject*` HUD snapshots;
-- HUD child mutation from `Menu::Render()`.
+## Permanent rejected paths
+
+Do not reintroduce without new direct evidence:
+
+- profile/action-map routing as primary pause interception;
+- action-map reload/remapping or `Player.OnAction` replacement;
+- inferred/custom/Lua `PauseGame` production ownership;
+- `only_ui` as vanilla pause evidence;
+- `Menu@0::SetVisible(false)`;
+- fixed storefront-dependent libKCD2 WHGame RVAs;
+- aggressive writable-section `S_GameContext` scanning;
+- root/global HUD visibility as complete child presentation;
+- contiguous inferred XInput ids;
+- raw `GetMovieClip()` pointers retained across frames;
+- `Release()` on `IUIElement::GetMovieClip()` results;
+- HUD child mutation from `Menu@0::Render()`.
 
 ## Active ABI facts
 
-For KCD2 1.5.6:
+- `IFlashUI::GetUIElementByInstanceStr` = 18
+- `IUIElement::Update(float)` = 23
+- `IUIElement::Render()` = 24
+- `IUIElement::SetVisible` = 28
+- `IUIElement::IsVisible` = 29
+- named `IUIElement::CallFunction` = 69
+- `IUIElement::GetMovieClip(name)` = 71
+- `IFlashVariableObject::GetDisplayInfo` = 26
+- `IFlashVariableObject::SetVisible` = 33
+- Xbox `XiStart=516`, `XiA=526`, `XiB=527`
 
-- `SSystemGlobalEnvironment + 0x98` = `IGame*`;
-- `SSystemGlobalEnvironment + 0x140` = `IFlashUI*`;
-- `IInput::PostInputEvent` raw input route = slot 13;
-- `IFlashUI::GetUIElementByInstanceStr` = slot 18;
-- `IUIElement::Update(float)` = slot 23;
-- `IUIElement::Render` = slot 24;
-- `IUIElement::SetVisible` = slot 28;
-- `IUIElement::IsVisible` = slot 29;
-- named `IUIElement::CallFunction` = slot 69;
-- `IUIElement::GetMovieClip(name)` = slot 71;
-- `IFlashVariableObject::Release` = slot 0;
-- `IFlashVariableObject::GetDisplayInfo` = slot 26;
-- `IFlashVariableObject::SetVisible` = slot 33;
-- retail `XiStart=516`, `XiA=526`, `XiB=527`.
+`IFlashVariableObject::Release` exists at slot 0 but is **not an ownership operation permitted on `IUIElement::GetMovieClip()` results in the active candidate**.
 
-Flash child slots are interface ABI from libKCD2 1.5.6, not fixed storefront-dependent WHGame RVAs.
+## RC7g single-session gate
 
-## Safety invariants
+Only after generated-source safety checks, MSVC x64 build, proxy/dependency checks and exact prerelease publication are green, use one retail session:
 
-Release blocking:
+1. first Start must not crash;
+2. subtitle/HUD should remain visible in Clean Pause;
+3. second Start -> visible vanilla menu -> B must be stable;
+4. direct B from Clean Pause should resume without visible menu flash/skip/cancel;
+5. repeat both transitions several times;
+6. if a spoken subtitle is naturally available, hold pause beyond its normal lifetime.
 
-- never call rejected/custom `PauseGame` routes;
-- never use `only_ui` as ownership evidence;
-- never mutate `Menu@0` visibility;
-- never use fixed libKCD2 WHGame RVAs for production discovery;
-- never retain `IFlashVariableObject*` child wrappers across helper calls/frames;
-- never perform child HUD acquisition/mutation/release from `Menu::Render()`;
-- Flash child mutation must be on validated main thread;
-- capture vanilla-pause HUD state before gameplay HUD is restored;
-- restore vanilla-pause HUD before revealing Menu or replaying B;
-- child snapshot must replay captured bools, not force all 28 visible;
-- physical B must not leak into gameplay/dialog/cutscene;
-- nested/synthetic input generated during vanilla dispatch must forward exactly once and must not be interpreted as physical input;
-- unresolved state must fail open.
-
-## Release process
-
-GitHub Releases are the canonical binary distribution channel.
-
-Every retail-test candidate is published as a GitHub **prerelease** only after:
-
-1. generating the exact final C++ used for compilation;
-2. running the static safety contract over that generated source and ABI header;
-3. building x64 Release with MSVC/static runtime;
-4. validating proxy exports/dependencies;
-5. packaging ZIP + `SHA256SUMS.txt`;
-6. verifying the CI artifact;
-7. publishing/updating the prerelease;
-8. binding the tag to the exact successful push SHA and verifying the remote tag.
-
-## Retail-test policy
-
-Game launches are expensive. Before asking for another launch:
-
-1. close everything possible by source review/reverse engineering/CI;
-2. combine compatible hypotheses into one fail-open candidate;
-3. instrument one session to distinguish remaining failure classes;
-4. publish a CI-green prerelease first;
-5. never request a retry of a crashing/rejected binary when code/static evidence already identifies a blocker.
+If anything crashes/fails, do not repeat the launch; one fresh native log is enough.
 
 ## Stable release gate
 
 Stable `v0.1.0` remains blocked until retail confirms:
 
-- first Start/Escape produces Clean Pause without pause menu;
-- HUD/hints/subtitles remain visible as appropriate;
-- current subtitle remains visible beyond normal lifetime;
-- dialogue/cutscene progression and audio pause coherently;
-- B resumes directly without menu flash/skip/cancel;
-- second Start/Escape reveals ordinary vanilla pause continuously;
-- B from visible vanilla pause is stable;
-- repeated use/load transitions/Alt-Tab/controller reconnect do not cause persistent input loss;
-- all failure paths remain fail-open;
-- installation/uninstallation and proxy-DLL conflict behavior are documented.
+- first pause stable;
+- subtitle/HUD retention;
+- dialogue/cutscene/audio pause coherence;
+- direct B resume;
+- visible vanilla menu transition and B stability;
+- repeated use stability;
+- fail-open behavior;
+- installation/uninstallation/proxy conflict documentation.
 
 ## Decision rule
 
-> Reuse vanilla KCD2 pause ownership, preserve exact gameplay and vanilla-pause HUD child states, and keep engine-owned Flash wrappers strictly call-local.
+> Reuse vanilla KCD2 pause ownership, preserve exact HUD child visibility as bool state, and treat `IUIElement::GetMovieClip()` pointers as call-local borrowed handles only.
