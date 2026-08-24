@@ -8,7 +8,7 @@ Primary target:
 
 - Kingdom Come: Deliverance II 1.5.6;
 - Windows retail, primarily PC Xbox Store / Xbox app / Game Pass;
-- Xbox controller, with keyboard Escape behaving analogously to Xbox Menu / Start.
+- Xbox controller, with keyboard Escape analogous to Xbox Menu / Start.
 
 Required behavior:
 
@@ -31,97 +31,129 @@ KCD2 remains the **only pause owner**.
 
 1. Forward the real physical Escape / Xbox Start event to vanilla KCD2.
 2. Resolve `Menu@0` through `IFlashUI`.
-3. Use `Menu@0::IsVisible()` as the independent retail-proven vanilla pause lifecycle signal.
+3. Use `Menu@0::IsVisible()` as the retail-proven vanilla pause lifecycle signal.
 4. Never mutate Menu visibility while Clean Pause is active.
 5. Suppress only `Menu@0::Render()` to remove the visible pause menu.
 6. A second Escape/Start restores Menu rendering and reveals the already-open vanilla menu without an unpause/re-pause tick.
 7. Consume unrelated gameplay/dialog/cutscene input only while verified vanilla pause ownership exists.
 8. Any unresolved state fails open to ordinary visible vanilla pause/input behavior.
 
-This foundation was proven repeatedly by rc7b and remained stable through rc7c/rc7d.
+This foundation was proven by rc7b and remained stable through rc7c/rc7d/rc7e.
 
-## Latest retail result — rc7d rejected as HUD solution
+## Proven HUD presentation layer
 
-The rc7d retail session reported no visible improvement over rc7c.
+RC7d proved that root-level HUD visibility is not enough: `hud@0::IsVisible()==true` while HUD/subtitles are still visually absent.
 
-Runtime evidence nevertheless proved that rc7d's intended root visibility mechanisms were active:
+libKCD2 1.5.6 reverse engineering identifies `C_UIHudMask` as the deeper layer. It controls **28 named child movie clips** inside the still-visible `hud` Flash movie according to active framework UI sources.
 
-- `hud@0` subtitle hook active;
-- concrete `hud@0::SetVisible` hook active;
-- global HUD visibility hook active;
-- `hud@0::IsVisible() == true` verified on every Clean Pause entry;
-- `Menu@0::Render()` suppression active.
+RC7e switched to those child clips and produced the first positive retail result: **the subtitle at the bottom of the screen was visible during Clean Pause**.
 
-The user still saw no HUD/hints/subtitles.
+Therefore:
 
-Therefore both of these are now rejected as HUD-restoration mechanisms:
+- the 28-child HUD layer is now retail-proven relevant;
+- do not return to global/root-HUD visibility experiments;
+- the child-snapshot concept is retained, but the RC7e lifetime implementation is rejected as unsafe.
 
-- persistently preventing `IFlashUI::SetHudElementsVisible(false)`;
-- persistently preventing `hud@0::SetVisible(false)` / forcing root `hud@0` visible.
+## Latest retail result — rc7e
 
-`hud@0::IsVisible() == true` is **not** evidence that gameplay HUD child clips are visually enabled.
+User-visible sequence:
 
-See `docs/RETAIL_EVIDENCE_RC7D.md`.
+1. Start -> Clean Pause without visible pause menu;
+2. subtitle remains visible at the bottom;
+3. Start again -> ordinary visible vanilla pause menu;
+4. B -> game crash.
 
-## Static explanation — KCD2 `C_UIHudMask`
+No additional RC7e launch is useful.
 
-Current libKCD2 1.5.6 reverse engineering identifies the missing layer.
+A code audit found two release-blocking RC7e lifecycle defects:
 
-KCD2 keeps one Flash movie named `hud`, but `C_UIHudMask` independently controls **28 named child movie clips** inside that still-visible root. It:
+### Long-lived Flash wrappers
 
-- tracks active framework UI sources (menus, dialogue, cutscenes, etc.);
-- evaluates a per-widget rule table;
-- stores a 28-bit current visibility set;
-- pushes each widget's `name + bool` to its child movie clip inside `hud`.
+RC7e retained 28 engine-owned `IFlashVariableObject*` wrappers across frames in the HUD snapshot. `Menu@0::Render()` could still be using them while the second-Start input transition called `Release()` on all wrappers.
 
-This directly explains rc7d: the root can be visible while every relevant child has been disabled by the pause-menu UI source.
+This is an unsafe cross-thread lifetime and a plausible use-after-free/heap-corruption source. Without a native crash stack it is not claimed as the exact faulting instruction, but it is independently sufficient to reject RC7e.
 
-Verified child ids/names include:
+### Visible-menu HUD state was not restored exactly
 
-- `Subtitles = 4`;
-- `Hints = 7`;
-- plus 26 other HUD widgets, for 28 total.
+RC7e overwrote vanilla pause child visibility with the gameplay snapshot. On second Start it stopped maintaining the gameplay snapshot and freed wrappers, but did not restore the exact child state vanilla pause had established before the override.
 
-No fixed `C_UIHudMask` global/RVA is used by the candidate because libKCD2 addresses differ across storefront builds.
+Thus the visible vanilla menu could inherit non-vanilla child state before B closed it.
 
-## Active candidate — v0.1.0-rc.7e
+See `docs/RETAIL_EVIDENCE_RC7E.md`.
 
-rc7e removes the rejected root HUD visibility hooks and works only through already-resolved `hud@0` plus verified interface vtables.
+## Active candidate — v0.1.0-rc.7f
 
-### Pre-pause HUD snapshot
+RC7f keeps the retail-proven 28-child presentation mechanism but removes long-lived engine pointer ownership and makes transitions symmetric.
 
-Before KCD2 receives the physical pause press:
+### Two bool-only snapshots
 
-1. resolve `hud@0`;
-2. resolve each of the 28 verified child names with `IUIElement::GetMovieClip(name)`;
-3. read the actual child display state with `IFlashVariableObject::GetDisplayInfo`;
-4. retain the engine-owned child wrappers for that Clean Pause attempt.
+RC7f stores only 28 visibility booleans per snapshot. It keeps **no `IFlashVariableObject*` between calls**.
 
-All 28 children must be captured successfully. Otherwise the candidate leaves vanilla behavior untouched.
+It captures:
 
-### Pause presentation
+1. **gameplay HUD snapshot** immediately before the physical pause press is forwarded;
+2. **vanilla-pause HUD snapshot** after KCD2 has opened the real pause, but before Clean Pause restores gameplay presentation.
 
-After vanilla pause ownership is verified:
+Every child access follows this lifetime:
 
-- restore exactly the **captured pre-pause visibility bool** for each child with `IFlashVariableObject::SetVisible`;
-- do not force normally-hidden widgets visible;
-- keep `hud@0` as the necessary parent container;
-- briefly re-apply the 28-value snapshot from the existing Menu render transition hook for 750 ms so a late `C_UIHudMask` source refresh cannot immediately overwrite it;
-- keep suppressing only `ClearSubtitles` and `HideNarrativeSubtitles` while Clean Pause owns presentation.
+```text
+GetMovieClip(name)
+  -> read or SetVisible
+  -> Release()
+```
 
-When Clean Pause ends, all retained `IFlashVariableObject` wrappers are released and normal KCD2 HUD rules resume.
+The fresh wrapper is released before the helper returns on both success and failure paths.
 
-### Xbox B root-cause fix
+### Exact transitions
 
-The rc7d log proves the retail controller ids:
+Running -> Clean Pause:
 
-- `xi_start = 516`;
-- `xi_a = 526`;
-- `xi_b = 527`.
+- capture gameplay snapshot;
+- forward real pause input;
+- verify vanilla pause through `Menu@0::IsVisible()`;
+- capture vanilla-pause snapshot;
+- restore gameplay snapshot;
+- suppress Menu render.
 
-The old enum incorrectly auto-incremented from 512 and compiled `XiA=522`, `XiB=523`. Thus physical B was logged and consumed, but **could never enter the B branch**. The absence of `B resume: replaying ...` in rc7d is fully explained by this enum error.
+Clean Pause -> second Start/Escape:
 
-rc7e uses explicit retail-proven ids only. The pause-key replay mechanism remains **unverified, not rejected**; rc7e is the first build in which real `xi_b=527` can reach it.
+- restore vanilla-pause snapshot **before** dropping Menu render suppression;
+- reveal the already-open ordinary vanilla menu.
+
+Clean Pause -> B:
+
+- restore vanilla-pause snapshot first;
+- replay the captured vanilla pause-key pair;
+- accept resume only if `Menu@0` closes;
+- physical B never leaks into gameplay/dialog/cutscene actions.
+
+Fail-open while Menu remains active:
+
+- best-effort restore vanilla-pause snapshot first;
+- show ordinary vanilla pause.
+
+### Main-thread HUD maintenance
+
+RC7e performed child mutation from `Menu::Render()`. RC7f forbids this.
+
+`Menu::Render()` is presentation-only again: suppress hidden Menu or forward original render.
+
+RC7f hooks verified `IUIElement::Update(float)` slot 23 for resolved `hud@0`:
+
+- original Update always runs first;
+- HUD child mutation is allowed only when `GetCurrentThreadId()` matches the validated KCD2 main-thread id;
+- late transition refresh is bounded to the first 750 ms;
+- refresh occurs at most every 75 ms, not every frame;
+- unsafe/unverified maintenance fails open to visible vanilla pause.
+
+### Subtitle lifetime safeguard
+
+Keep the narrow named HUD `CallFunction` guard that suppresses only:
+
+- `ClearSubtitles`;
+- `HideNarrativeSubtitles`.
+
+RC7e's visible subtitle is positive evidence that this presentation/lifetime combination is worth retaining.
 
 ## Proven retail facts
 
@@ -129,35 +161,34 @@ On Xbox Store KCD2 1.5.6:
 
 - native bootstrap and raw `IInput::PostInputEvent` hook work;
 - `Menu@0` resolves reliably;
-- `Menu@0::IsVisible()` tracks vanilla pause open/close correctly;
-- suppressing only `Menu@0::Render()` produces a real hidden vanilla pause;
+- `Menu@0::IsVisible()` tracks vanilla pause open/close;
+- suppressing only `Menu@0::Render()` creates a real hidden vanilla pause;
 - world simulation stops;
-- audio pauses like ordinary vanilla pause;
-- repeated Clean Pause entry works;
-- second Escape/Start reveals the already-open vanilla pause menu while keeping pause continuous;
+- audio pauses like vanilla pause;
+- second Escape/Start reveals the already-open vanilla menu continuously;
 - `hud@0` resolves;
 - named HUD `CallFunction` interception works;
-- `hud.ClearSubtitles` can be intercepted;
-- one-shot global HUD enable is insufficient;
-- persistent global/root `hud@0` visibility holding is also insufficient;
-- `hud@0::IsVisible()==true` does not imply visible child HUD presentation;
-- Xbox retail key ids Start=516, A=526, B=527.
+- global/root HUD visibility alone is insufficient;
+- the 28-child HUD layer can restore a visible subtitle in Clean Pause;
+- Xbox retail ids are Start=516, A=526, B=527;
+- RC7e's long-lived Flash-wrapper snapshot lifecycle is unsafe and must not be reused.
 
 ## Remaining retail gates
 
-One normal rc7e session should answer the remaining product questions:
+One normal RC7f session should cover all remaining high-value questions:
 
-1. Does the exact pre-pause 28-child snapshot preserve visible HUD/hints?
-2. During dialogue, does the same subtitle remain visible beyond its normal lifetime while speech/audio remain paused?
-3. Does physical Xbox B now enter the replay route and resume immediately without menu flash, skip, or cancel?
-4. Does second Start/Escape still reveal ordinary vanilla pause continuously?
-5. Does repeated use remain stable in the same session?
+1. Do subtitles/HUD remain visible in Clean Pause?
+2. Does second Start reveal ordinary vanilla pause normally?
+3. Does B from that visible vanilla menu avoid the RC7e crash?
+4. Does direct B from Clean Pause enter the replay route and resume without menu flash/skip/cancel?
+5. Does the same subtitle remain visible beyond normal lifetime while speech/audio remain paused?
+6. Do several repeated pause cycles remain stable?
 
-Do not request a separate launch for each item.
+Do not request separate launches for individual items. Do not rerun RC7e.
 
 ## Rejected/superseded mechanisms
 
-Do not reintroduce these without new retail evidence that directly invalidates the recorded result:
+Do not reintroduce without new retail evidence:
 
 - rc.1/rc.2 profile/action routing as primary pause interception;
 - runtime partial action-map reload, persistent remapping, or `Player.OnAction` replacement;
@@ -167,14 +198,13 @@ Do not reintroduce these without new retail evidence that directly invalidates t
 - mutating `Menu@0` visibility to hide the pause menu;
 - fixed libKCD2 WHGame RVAs for storefront-independent production lookup;
 - aggressive writable-section `S_GameContext` / `C_UIMenu` scanning;
-- one-shot `IFlashUI::SetHudElementsVisible(true)` as complete HUD restoration;
-- persistent whole-HUD/global + `hud@0` root visibility holding as complete HUD restoration;
-- `hud@0::IsVisible()` as proof of child HUD presentation;
-- blocking `hud.ClearSubtitles` by itself as complete subtitle restoration;
-- forwarding physical B directly to the hidden vanilla Menu as direct-resume solution;
-- assuming KCD2 XInput `KeyId` values form one contiguous auto-incremented range.
-
-See `docs/REJECTED_HYPOTHESES.md` for the detailed evidence.
+- one-shot or persistent root-HUD visibility as complete HUD restoration;
+- `hud@0::IsVisible()` as proof of child presentation;
+- blocking `hud.ClearSubtitles` alone as complete subtitle restoration;
+- forwarding physical B directly to hidden vanilla Menu;
+- contiguous inferred XInput key ids;
+- RC7e long-lived `IFlashVariableObject*` HUD snapshots;
+- HUD child mutation from `Menu::Render()`.
 
 ## Active ABI facts
 
@@ -182,8 +212,9 @@ For KCD2 1.5.6:
 
 - `SSystemGlobalEnvironment + 0x98` = `IGame*`;
 - `SSystemGlobalEnvironment + 0x140` = `IFlashUI*`;
-- `IInput::PostInputEvent` is the raw input route;
+- `IInput::PostInputEvent` raw input route = slot 13;
 - `IFlashUI::GetUIElementByInstanceStr` = slot 18;
+- `IUIElement::Update(float)` = slot 23;
 - `IUIElement::Render` = slot 24;
 - `IUIElement::SetVisible` = slot 28;
 - `IUIElement::IsVisible` = slot 29;
@@ -194,7 +225,7 @@ For KCD2 1.5.6:
 - `IFlashVariableObject::SetVisible` = slot 33;
 - retail `XiStart=516`, `XiA=526`, `XiB=527`.
 
-The Flash child slots above are verified interface ABI from libKCD2 1.5.6, not fixed WHGame RVAs.
+Flash child slots are interface ABI from libKCD2 1.5.6, not fixed storefront-dependent WHGame RVAs.
 
 ## Safety invariants
 
@@ -202,12 +233,15 @@ Release blocking:
 
 - never call rejected/custom `PauseGame` routes;
 - never use `only_ui` as ownership evidence;
-- never mutate `Menu@0` visibility in the active architecture;
+- never mutate `Menu@0` visibility;
 - never use fixed libKCD2 WHGame RVAs for production discovery;
-- do not retain rc7d root HUD visibility hooks in rc7e;
-- child snapshot must capture and replay pre-pause visibility rather than force all 28 children visible;
-- all retained Flash variable wrappers must be released when ownership ends;
-- physical B must not leak into gameplay/dialog/cutscene while Clean Pause owns input;
+- never retain `IFlashVariableObject*` child wrappers across helper calls/frames;
+- never perform child HUD acquisition/mutation/release from `Menu::Render()`;
+- Flash child mutation must be on validated main thread;
+- capture vanilla-pause HUD state before gameplay HUD is restored;
+- restore vanilla-pause HUD before revealing Menu or replaying B;
+- child snapshot must replay captured bools, not force all 28 visible;
+- physical B must not leak into gameplay/dialog/cutscene;
 - nested/synthetic input generated during vanilla dispatch must forward exactly once and must not be interpreted as physical input;
 - unresolved state must fail open.
 
@@ -215,43 +249,42 @@ Release blocking:
 
 GitHub Releases are the canonical binary distribution channel.
 
-Every retail-test candidate is published as a GitHub **prerelease** immediately after its push build passes:
+Every retail-test candidate is published as a GitHub **prerelease** only after:
 
-1. generate the exact final C++ used for compilation;
-2. run the static safety contract over that generated source and active ABI header;
-3. build x64 Release with MSVC/static runtime;
-4. validate proxy exports/dependencies;
-5. package ZIP and `SHA256SUMS.txt`;
-6. verify the downloaded CI artifact;
-7. publish/update the prerelease;
-8. bind the candidate tag to the exact successful push `GITHUB_SHA` and verify the remote tag.
-
-Branch-level `cancel-in-progress` prevents an obsolete intermediate push from publishing after a newer one. Actions artifacts remain CI evidence, not the primary user-facing download surface.
+1. generating the exact final C++ used for compilation;
+2. running the static safety contract over that generated source and ABI header;
+3. building x64 Release with MSVC/static runtime;
+4. validating proxy exports/dependencies;
+5. packaging ZIP + `SHA256SUMS.txt`;
+6. verifying the CI artifact;
+7. publishing/updating the prerelease;
+8. binding the tag to the exact successful push SHA and verifying the remote tag.
 
 ## Retail-test policy
 
 Game launches are expensive. Before asking for another launch:
 
-1. close everything possible by source review/reverse engineering;
-2. combine compatible hypotheses into one fail-open functional candidate;
-3. instrument that candidate so one session distinguishes the remaining failure classes;
-4. run CI and publish the GitHub prerelease first;
-5. request one normal gameplay session, with dialogue/cutscene checks only if naturally available.
+1. close everything possible by source review/reverse engineering/CI;
+2. combine compatible hypotheses into one fail-open candidate;
+3. instrument one session to distinguish remaining failure classes;
+4. publish a CI-green prerelease first;
+5. never request a retry of a crashing/rejected binary when code/static evidence already identifies a blocker.
 
 ## Stable release gate
 
 Stable `v0.1.0` remains blocked until retail confirms:
 
-- first Start/Escape produces Clean Pause without the pause menu;
-- HUD/hints remain visible;
+- first Start/Escape produces Clean Pause without pause menu;
+- HUD/hints/subtitles remain visible as appropriate;
 - current subtitle remains visible beyond normal lifetime;
 - dialogue/cutscene progression and audio pause coherently;
 - B resumes directly without menu flash/skip/cancel;
 - second Start/Escape reveals ordinary vanilla pause continuously;
+- B from visible vanilla pause is stable;
 - repeated use/load transitions/Alt-Tab/controller reconnect do not cause persistent input loss;
 - all failure paths remain fail-open;
 - installation/uninstallation and proxy-DLL conflict behavior are documented.
 
 ## Decision rule
 
-> Reuse vanilla KCD2 pause ownership and preserve the exact pre-pause HUD child presentation while removing only the vanilla pause-menu render.
+> Reuse vanilla KCD2 pause ownership, preserve exact gameplay and vanilla-pause HUD child states, and keep engine-owned Flash wrappers strictly call-local.
