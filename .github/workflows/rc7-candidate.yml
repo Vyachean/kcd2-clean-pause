@@ -1,0 +1,127 @@
+name: RC7 render-suppression candidate
+
+on:
+  pull_request:
+    paths:
+      - native/candidate/rc7/**
+      - native/src/clean_pause_native.h
+      - native/src/kcd2_abi.h
+      - native/src/version_proxy.cpp
+      - native/src/version.def
+      - docs/RC7_SINGLE_SESSION_TEST.md
+      - .github/workflows/rc7-candidate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-candidate:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify candidate safety contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          source = Path("native/candidate/rc7/clean_pause_candidate.cpp").read_text(encoding="utf-8")
+
+          forbidden = (
+              "PauseGame(",
+              "SetVisibleFn",
+              "kUIElementSetVisibleSlot",
+              'IsFilterEnabled("only_ui")',
+              "ActionMapManager.InitActionMaps(",
+              "ActionMapManager.LoadFromXML(",
+              "ActionMapManager.EnableActionFilter(",
+              "Player.OnAction =",
+              "0x492D7F8",
+              "0x549D388",
+          )
+          for needle in forbidden:
+              if needle in source:
+                  raise SystemExit(f"Forbidden rc7 candidate path: {needle}")
+
+          required = (
+              'getElement(g_flashUI, "Menu@0")',
+              "kUIElementRenderSlot = 24",
+              "kUIElementIsVisibleSlot",
+              "HookMenuRender",
+              "g_renderSuppressionObserved",
+              "g_forwardDepth",
+              "if (g_forwardDepth != 0)",
+              "Running -> Clean Pause candidate",
+              "Clean Pause -> running via vanilla B/back",
+              "second Escape/Start consumed; Render restored",
+          )
+          for needle in required:
+              if needle not in source:
+                  raise SystemExit(f"Missing rc7 candidate contract: {needle}")
+
+          # Render suppression must be presentation-only: the hook may skip only
+          # Menu@0's original Render call while hidden.
+          hook = source[source.index("void __fastcall HookMenuRender"):source.index("bool EnsureMenuRenderHook")]
+          if "g_originalRender(element);" not in hook:
+              raise SystemExit("Render hook must forward non-Menu/non-hidden renders")
+          if "return;" not in hook:
+              raise SystemExit("Render hook does not contain suppression path")
+
+          print("rc7 safety contract passed")
+
+      - name: Configure x64 Release
+        run: cmake -S native/candidate/rc7 -B native/candidate/rc7/build -A x64
+
+      - name: Build x64 Release
+        run: cmake --build native/candidate/rc7/build --config Release --parallel
+
+      - name: Validate and package candidate
+        shell: pwsh
+        run: |
+          $dll = "native/candidate/rc7/build/Release/version.dll"
+          if (-not (Test-Path $dll)) { throw "Missing $dll" }
+          if ((Get-Item $dll).Length -lt 10240) { throw "version.dll is unexpectedly small" }
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
+          $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          if (-not $vs) { throw "MSVC installation not found" }
+          $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $dumpbin) { throw "dumpbin.exe not found" }
+
+          $exports = & $dumpbin /nologo /exports $dll | Out-String
+          foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
+            if ($exports -notmatch [regex]::Escape($name)) {
+              throw "version.dll proxy export missing: $name"
+            }
+          }
+
+          $deps = & $dumpbin /nologo /dependents $dll | Out-String
+          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") {
+            throw "Candidate DLL unexpectedly depends on dynamic MSVC runtime"
+          }
+
+          New-Item -ItemType Directory -Force candidate/stage | Out-Null
+          Copy-Item $dll candidate/stage/version.dll
+          Copy-Item docs/RC7_SINGLE_SESSION_TEST.md candidate/stage/TEST.md
+
+          $asset = "kcd2-clean-pause-rc7-render-suppression-$env:GITHUB_SHA.zip"
+          Compress-Archive -Path candidate/stage/* -DestinationPath "candidate/$asset" -CompressionLevel Optimal
+          $hash = (Get-FileHash "candidate/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $asset" | Set-Content candidate/SHA256SUMS.txt -Encoding ascii -NoNewline
+
+      - name: Upload candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc7-render-suppression-candidate
+          path: |
+            candidate/kcd2-clean-pause-rc7-render-suppression-*.zip
+            candidate/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
