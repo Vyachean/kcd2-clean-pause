@@ -33,26 +33,40 @@ jobs:
         run: cmake -S native -B native/build -A x64
       - name: Build x64 Release
         run: cmake --build native/build --config Release --parallel
-      - name: Validate version proxy artifact
+      - name: Validate both native artifacts
         shell: pwsh
         run: |
-          $dll = "native/build/Release/version.dll"
-          if (-not (Test-Path $dll)) { throw "Missing $dll" }
-          if ((Get-Item $dll).Length -lt 10240) { throw "version.dll is unexpectedly small" }
+          $versionDll = "native/build/Release/version.dll"
+          $asi = "native/build/Release/KCD2CleanPause.asi"
+          foreach ($artifact in @($versionDll, $asi)) {
+            if (-not (Test-Path $artifact)) { throw "Missing $artifact" }
+            if ((Get-Item $artifact).Length -lt 10240) { throw "$artifact is unexpectedly small" }
+          }
+
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
           if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
           $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
           $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
           if (-not $dumpbin) { throw "dumpbin.exe not found" }
-          $exports = & $dumpbin /nologo /exports $dll | Out-String
+
+          $exports = & $dumpbin /nologo /exports $versionDll | Out-String
           foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
             if ($exports -notmatch [regex]::Escape($name)) { throw "version.dll proxy export missing: $name" }
           }
-          $deps = & $dumpbin /nologo /dependents $dll | Out-String
-          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") { throw "Release DLL unexpectedly depends on dynamic MSVC runtime" }
+
+          foreach ($artifact in @($versionDll, $asi)) {
+            $headers = & $dumpbin /nologo /headers $artifact | Out-String
+            if ($headers -notmatch "machine \(x64\)") { throw "$artifact is not an x64 image" }
+            $deps = & $dumpbin /nologo /dependents $artifact | Out-String
+            if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") {
+              throw "$artifact unexpectedly depends on dynamic MSVC runtime"
+            }
+          }
       - uses: actions/upload-artifact@v4
         with:
-          name: native-version-dll
-          path: native/build/Release/version.dll
+          name: native-editions
+          path: |
+            native/build/Release/version.dll
+            native/build/Release/KCD2CleanPause.asi
           if-no-files-found: error
           retention-days: 7
