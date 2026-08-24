@@ -9,7 +9,8 @@ implementation PR
   -> release PR changes VERSION
   -> Validate CI
   -> merge to main
-  -> GitHub Actions builds tagged native artifact
+  -> Windows build/validate/package job
+  -> Linux verify/publish job
   -> GitHub Release + ZIP + SHA256SUMS.txt
 ```
 
@@ -53,26 +54,32 @@ The native build statically links the MSVC runtime and pins MinHook to `v1.3.4` 
 
 ## Publication
 
-`.github/workflows/release.yml` runs on a `VERSION` change reaching `main` or a matching `v*` tag. It:
+`.github/workflows/release.yml` runs when `VERSION` reaches `main`, on a matching `v*` tag, and when the release workflow itself changes. The workflow-file trigger makes publication-pipeline fixes able to retry an unpublished current `VERSION` without inventing a new version number.
 
-1. resolves `VERSION` and requires matching `v<VERSION>`;
-2. runs source contract/tests;
-3. builds native x64 Release on a Windows GitHub runner;
-4. validates the produced `version.dll` exports/dependencies;
-5. creates a ZIP containing only:
+Publication is deliberately split across two operating systems:
+
+1. **Windows build job**
+   - resolves `VERSION` and `v<VERSION>`;
+   - runs source contract/tests;
+   - builds native x64 Release with MSVC;
+   - validates the produced `version.dll` exports/dependencies;
+   - creates a ZIP containing only:
 
 ```text
 version.dll
 INSTALL.txt
 ```
 
-6. writes `SHA256SUMS.txt`;
-7. uploads the exact release files as a GitHub Actions artifact;
-8. refuses to overwrite an existing Release;
-9. creates/verifies the tag on the validated merge commit;
-10. publishes the GitHub Release.
+   - writes `SHA256SUMS.txt`;
+   - uploads those exact files as an Actions artifact.
+2. **Linux publish job**
+   - downloads the Windows-produced artifact;
+   - verifies `SHA256SUMS.txt`;
+   - runs `unzip -t` on the exact ZIP that will be published;
+   - creates or verifies the tag on the workflow commit;
+   - publishes the GitHub Release with the verified ZIP and checksum file.
 
-A version containing `-` is marked prerelease. A plain semantic version such as `0.1.0` is stable.
+If a Release for the same tag already exists, a workflow-only retry leaves it unchanged instead of overwriting assets. A version containing `-` is marked prerelease. A plain semantic version such as `0.1.0` is stable.
 
 ## Release assets
 
