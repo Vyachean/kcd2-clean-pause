@@ -1,13 +1,25 @@
-# rc.5 native diagnostic — Xbox Store / Game Pass 1.5.6
+# Hidden vanilla pause candidate — Xbox Store / Game Pass 1.5.6
 
 ## Superseded / failed prereleases
 
 - `v0.1.0-rc.1` — Escape/Start broken;
 - `v0.1.0-rc.2` — Escape/Start still broken;
 - `v0.1.0-rc.3` — safe F10 profile diagnostic; proved Lua command routing works but tested only unavailable `Game.PauseGame`;
-- `v0.1.0-rc.4` — native ABI failure: Escape/Start made input unresponsive while gameplay continued. Root cause: gEnv `+0x98` is `IGame*`, not `IGameFramework*`; slot 13 was `IGame::GetName()`, not PauseGame.
+- `v0.1.0-rc.4` — native ABI failure: Escape/Start made input unresponsive while gameplay continued. Root cause: gEnv `+0x98` is `IGame*`, not `IGameFramework*`; slot 13 was `IGame::GetName()`, not PauseGame;
+- `v0.1.0-rc.5` — safe Lua-pause diagnostic. Retail test proved the pause binding freezes world simulation, but audio/UI continue and subtitles expire. It is therefore a partial simulation freeze, not the full pause lifecycle required by Clean Pause.
 
-`rc.5` is intentionally a **safe diagnostic**, not the final Start/Menu behavior.
+## Current architecture under test
+
+The candidate does **not** call any custom pause primitive.
+
+On first Escape/Xbox Start:
+
+1. check that a player exists and `only_ui` is not already active;
+2. forward the physical event to KCD2 unchanged;
+3. verify that vanilla KCD2 enabled `only_ui`;
+4. hide only the retail `Menu@0` Flash element.
+
+This keeps the actual pause/audio/dialog/cutscene state entirely vanilla.
 
 ## Install isolation
 
@@ -18,13 +30,13 @@
 %USERPROFILE%\Documents\kingdomcome_mods\clean_pause
 ```
 
-3. Extract the `rc.5` native prerelease ZIP.
-4. Replace the previous Clean Pause `version.dll` beside `KingdomCome.exe` / `WHGame.dll` with the `rc.5` file.
+3. Extract the native prerelease ZIP.
+4. Replace the previous Clean Pause `version.dll` beside `KingdomCome.exe` / `WHGame.dll`.
 5. Start KCD2 normally.
 
 Do **not** overwrite an unrelated mod's `version.dll`. Do **not** take ownership of `WindowsApps` or weaken Windows permissions just for this test.
 
-The diagnostic writes:
+The build writes:
 
 ```text
 kcd2_clean_pause_native.log
@@ -36,85 +48,123 @@ beside `version.dll`.
 
 At the title menu:
 
-- Xbox controller navigation must remain normal;
-- keyboard/mouse must remain normal;
-- no unexpected pause or input loss.
+- Xbox controller navigation remains normal;
+- keyboard/mouse remain normal;
+- no unexpected pause/input loss.
 
-Load a save and verify:
+Load a save. Before testing the mod behavior, ordinary gameplay controls must be normal.
 
-- **Escape opens the normal KCD2 pause menu**;
-- **Xbox Start/Menu opens the normal KCD2 pause menu**.
-
-This is a hard rc.5 contract. The hook contains no Start/Escape special case; only F10 is reserved. If Escape/Start are not vanilla, stop and attach the native log.
-
-Expected bootstrap log contains a line beginning:
+Expected bootstrap log begins with:
 
 ```text
-rc5 diagnostic hook active;
+hidden-vanilla-pause hook active;
 ```
 
-and identifies `game(IGame*)=...` rather than `framework=...`.
+## 2. First Escape / Start — Clean Pause
 
-## 2. F10 pause primitive probe
-
-Return to normal gameplay with no vanilla menu open, then press **F10 once**.
-
-Desired diagnostic result:
-
-- gameplay/world freezes;
-- dialogue/cutscene progression freezes if tested there;
-- no vanilla pause overlay appears;
-- the current rendered frame remains visible.
-
-Regardless of whether the pause succeeds, **other controls must not become permanently unresponsive**. rc.5 has no global input-swallow state.
-
-The important log line is:
-
-```text
-Lua pause probe paused=true available=<true|false> route=<CryAction.PauseGame|Action.PauseGame|Game.PauseGame|none> pcall=<true|false>
-```
-
-The probe tries bindings in this order:
-
-1. `CryAction.PauseGame(true)`;
-2. `Action.PauseGame(true)`;
-3. `Game.PauseGame(true)`.
-
-## 3. F10 resume probe
-
-If the first F10 actually paused the game, press **F10 again**.
+In normal exploration press **Escape** or **Xbox Start/Menu** once.
 
 Expected:
 
-- gameplay resumes;
-- log contains the same route with:
+- world/simulation stops;
+- audio follows the normal KCD2 pause behavior rather than continuing as in rc.5;
+- no visible pause-menu UI covers the frame;
+- controls other than the defined Clean Pause controls do nothing;
+- log contains:
 
 ```text
-Lua pause probe paused=false ... pcall=true
-F10 probe: requested resume through retail Lua pause binding
+Running -> Clean Pause: vanilla pause retained, Menu@0 hidden (...)
 ```
 
-## 4. Minimal dialogue/subtitle probe
+Hard failure conditions:
 
-Only if F10 pause/resume works in exploration:
+- gameplay continues while input becomes unresponsive;
+- ordinary visible pause menu appears and remains despite a successful hide log;
+- game crashes;
+- sound/UI continue exactly like the rc.5 partial freeze.
 
-1. enter dialogue with a visible subtitle;
-2. press F10 during the line;
-3. wait longer than the subtitle would normally remain;
-4. note whether the exact subtitle stays visible and speech/progression stop;
-5. press F10 again to resume.
+If vanilla pause opens visibly instead, this is a safe fail-open; keep the log because it should explain whether `only_ui` verification or Menu hiding failed.
 
-This establishes whether the retail pause primitive satisfies the actual Clean Pause goal before Start/Menu interception is reintroduced.
+## 3. B resume
+
+While Clean Paused press **Xbox B**.
+
+Expected:
+
+- vanilla pause closes;
+- gameplay/audio resume;
+- B does not leak into gameplay/dialogue/cutscene;
+- no visible pause-menu frame flashes;
+- log contains:
+
+```text
+Clean Pause -> running via vanilla B/back
+```
+
+## 4. Second Escape / Start
+
+Enter Clean Pause again, then press **Escape/Start** a second time.
+
+Expected:
+
+- the already-open normal KCD2 pause menu becomes visible;
+- gameplay remains paused continuously;
+- there is no intermediate simulation/audio tick;
+- the second physical Escape/Start is consumed rather than closing the menu;
+- log contains:
+
+```text
+Clean Pause -> visible vanilla pause menu (second Escape/Start consumed)
+```
+
+Close the visible vanilla menu normally and confirm gameplay returns to normal.
+
+## 5. Dialogue/subtitle acceptance test
+
+1. Enter dialogue with a visible subtitle.
+2. Press Escape/Start during the spoken line.
+3. Wait longer than the subtitle would normally remain.
+4. Check separately:
+   - speech remains paused;
+   - dialogue progression remains paused;
+   - the **same subtitle remains visible**;
+   - no new UI hint/state appears because of hidden-menu navigation.
+5. Press B and confirm the dialogue resumes without skip/cancel/duplicate.
+
+Subtitle retention is a key acceptance gate. A full vanilla pause may still hide HUD/subtitle presentation even when `Menu@0` is hidden; if that happens, report it exactly rather than treating the pause itself as failed.
+
+## 6. In-engine cutscene
+
+Repeat the first-pause / wait / B-resume sequence in an in-engine cutscene if practical.
+
+Expected:
+
+- cutscene progression and audio pause together;
+- no skip/cancel action leaks;
+- B resumes rather than skipping.
+
+## 7. Robustness
+
+Repeat several times across:
+
+- exploration;
+- dialogue;
+- in-engine cutscene;
+- after loading a save;
+- Alt-Tab / return;
+- controller reconnect if convenient.
+
+At no point should a failed runtime assumption leave gameplay running with input swallowed. Failure must degrade to ordinary vanilla input/pause behavior.
 
 ## Evidence to report
 
-Report the visible results for:
+Report visible behavior for:
 
-- Escape;
-- Start/Menu;
-- first F10;
-- second F10 if the first paused.
+- first Escape;
+- first Start/Menu;
+- B resume;
+- second Escape/Start;
+- dialogue subtitle retention;
+- audio behavior.
 
-Also attach `kcd2_clean_pause_native.log`, especially the `Lua pause probe ...` lines.
-
-Do not test B/second-Start Clean Pause semantics in rc.5; they are deliberately disabled until the pause primitive is proven.
+Attach `kcd2_clean_pause_native.log` if any result differs from the expectations above.
