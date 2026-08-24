@@ -42,8 +42,9 @@ jobs:
 
           source = out.read_text(encoding='utf-8')
           replacements = {
-              'rc7g borrowed-movieclip HUD candidate active': 'KCD2 Clean Pause v0.1.0 active',
-              'native bootstrap started; target=KCD2 1.5.6 Windows retail; rc7g borrowed-movieclip HUD candidate':
+              'rc7g borrowed-movieclip child-HUD-snapshot candidate active':
+                  'KCD2 Clean Pause v0.1.0 active',
+              'native bootstrap started; target=KCD2 1.5.6 Windows retail; rc7g borrowed-movieclip child-HUD-snapshot candidate':
                   'native bootstrap started; target=KCD2 1.5.6 Windows retail; KCD2 Clean Pause v0.1.0',
           }
           for old, new in replacements.items():
@@ -72,7 +73,7 @@ jobs:
               'HideVerifiedVanillaPause(',
               'ReleaseFlashVariable',
               'snapshot.clip',
-              'rc7g borrowed-movieclip HUD candidate active',
+              'rc7g borrowed-movieclip child-HUD-snapshot candidate active',
           )
           for needle in forbidden:
               if needle in source:
