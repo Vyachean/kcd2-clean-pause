@@ -1,6 +1,6 @@
 # Current status and plan
 
-This is the canonical project-status document. Historical prototype documents remain for context, but they must not override the decisions recorded here. Rejected hypotheses are tracked in `docs/REJECTED_HYPOTHESES.md` and retail-session evidence may be recorded in dedicated `RETAIL_EVIDENCE_*.md` files.
+This is the canonical project-status document. Historical prototype documents remain for context, but they must not override the decisions recorded here. Rejected hypotheses are tracked in `docs/REJECTED_HYPOTHESES.md`; retail-session evidence may be recorded in dedicated `RETAIL_EVIDENCE_*.md` files.
 
 ## Target
 
@@ -23,7 +23,7 @@ Clean Pause
 
 Clean Pause must stop gameplay, dialogue/in-engine-cutscene progression, relevant audio, and subtitle lifetime while keeping the current rendered frame unobscured. It must not draw a replacement overlay.
 
-The strong depth-of-field blur applied by KCD2's vanilla pause is accepted and is intentionally out of scope.
+The strong depth-of-field blur applied by KCD2's vanilla pause is accepted and intentionally out of scope.
 
 ## Current accepted architecture
 
@@ -40,7 +40,24 @@ KCD2 remains the **only pause owner**.
 
 This foundation was proven repeatedly by rc7b and remained stable in rc7c.
 
-## Current state — after rc7c retail test
+## Current candidate — v0.1.0-rc.7d
+
+rc7d is the active functional candidate. It adds **concrete `hud@0` visibility preservation** to the accepted render-suppression foundation.
+
+Before forwarding the physical pause event, rc7d installs a narrow hook on the generic `IUIElement::SetVisible` implementation. While vanilla pause acquisition is pending or Clean Pause is active it suppresses `SetVisible(false)` only when `this ==` the already-verified `hud@0` object. Every visibility call for Menu and every other UI element is forwarded unchanged.
+
+After vanilla pause acquisition rc7d:
+
+- enables the verified global HUD visibility gate;
+- explicitly sets `hud@0` visible;
+- requires `hud@0::IsVisible() == true` before accepting Clean Pause presentation ownership;
+- keeps the two-name subtitle lifetime guard (`ClearSubtitles`, `HideNarrativeSubtitles`).
+
+When switching to the ordinary visible vanilla pause menu, rc7d relinquishes Clean Pause first and restores the normal HUD-hidden vanilla pause presentation.
+
+The candidate is built by CI and published as a GitHub prerelease after the safety contract, MSVC x64 build, proxy/static-runtime validation, and checksum validation succeed.
+
+## State before rc7d retail acceptance
 
 ### Proven working
 
@@ -59,14 +76,9 @@ On Xbox Store KCD2 1.5.6:
 
 ### Still unresolved
 
-1. **HUD / subtitles are still hidden during Clean Pause.**
-   rc7c called the verified `IFlashUI::SetHudElementsVisible(true)` after pause acquisition and suppressed `hud.ClearSubtitles`, but the user observed no visible difference from rc7b. Therefore the global HUD visibility gate is insufficient.
-
-2. **Direct B resume is not yet retail-proven.**
-   rc7c contains a route that consumes physical Xbox B and replays the captured vanilla pause key pair through the original `PostInputEvent`, but the supplied rc7c session log contains Escape interactions only. No B-resume attempt appears in that log, so this mechanism remains unverified rather than accepted or rejected.
-
-3. **Subtitle retention cannot be accepted until the concrete HUD presentation remains visible.**
-   Blocking `ClearSubtitles` is only a secondary safeguard; it is not useful if the HUD element itself is hidden.
+1. **Concrete HUD/subtitle retention must be tested in rc7d.** rc7c proved the global HUD gate alone is insufficient.
+2. **Direct B resume is not yet retail-proven.** rc7c contains the route, but the supplied rc7c session log contains Escape interactions only; no physical B-resume attempt appears.
+3. **Subtitle retention cannot be accepted until the current visible subtitle survives a real rc7d pause longer than its normal lifetime.**
 
 ## Retail evidence ledger
 
@@ -127,49 +139,33 @@ See `docs/RETAIL_EVIDENCE_RC7C.md` and `docs/REJECTED_HYPOTHESES.md`.
 - `IUIElement::IsVisible` = slot 29;
 - named `IUIElement::CallFunction` = slot 69.
 
-The `IUIElement::SetVisible` ABI is not rejected globally: mutating **Menu** visibility is rejected because it destroys the independent pause lifecycle signal. The next candidate may use the verified visibility API specifically for the concrete `hud@0` element, with strict object identity checks.
+The `IUIElement::SetVisible` ABI is not rejected globally: mutating **Menu** visibility is rejected because it destroys the independent pause lifecycle signal. rc7d uses the verified visibility API only for the concrete `hud@0` element, with strict object identity checks.
 
-## Next candidate — rc7d concrete HUD visibility
+## B resume route
 
-The next functional candidate builds directly on rc7c and is intended to answer the remaining presentation issue in one normal retail session.
+rc7d retains rc7c's captured-pause-key replay route:
 
-### HUD presentation
+- physical Xbox B is consumed while Clean Pause owns input;
+- B is not forwarded to `dialog_cancel`, `cutscene_skip`, or gameplay;
+- the exact physical pause press/release pair captured on entry is replayed through the already-proven original `PostInputEvent` route;
+- resume is accepted only if `Menu@0::IsVisible()` becomes false;
+- otherwise the candidate restores ordinary visible vanilla pause presentation and fails open.
 
-Before forwarding the pause event, install a narrow hook on the concrete `hud@0` element's `SetVisible` implementation.
-
-While a vanilla pause acquisition is pending or Clean Pause is active:
-
-- suppress only `SetVisible(false)` calls where `this == verified hud@0`;
-- forward `SetVisible(true)` and every visibility call for every other UI element;
-- after vanilla pause acquisition, call the verified HUD global visibility gate and explicitly set `hud@0` visible;
-- verify `hud@0::IsVisible() == true` before accepting Clean Pause presentation ownership;
-- keep the existing narrow `ClearSubtitles` / `HideNarrativeSubtitles` suppression as a secondary subtitle-lifetime guard.
-
-If concrete HUD visibility cannot be verified, remove menu render suppression and leave ordinary visible vanilla pause.
-
-### B resume
-
-Keep rc7c's captured-pause-key replay route, but continue treating it as unverified until a retail B attempt appears in the log. Physical B must never leak to `dialog_cancel`, `cutscene_skip`, or gameplay while Clean Pause owns input.
-
-### Visible vanilla menu transition
-
-On second Escape/Start:
-
-- relinquish Clean Pause first;
-- restore ordinary vanilla pause HUD-hidden presentation;
-- restore Menu rendering;
-- consume the second physical pause press so the menu stays open continuously.
+This route remains **unverified**, not rejected, until retail evidence contains an actual physical B attempt.
 
 ## Release process
 
-Every retail-test candidate from rc7 onward must be published as a **GitHub prerelease immediately after CI succeeds**. Actions artifacts remain useful for CI evidence but are not the primary distribution surface.
+Every retail-test candidate from rc7 onward is published as a **GitHub prerelease immediately after CI succeeds**. Actions artifacts remain CI evidence but are not the primary distribution surface.
 
-Each candidate release must include:
+Candidate workflow requirements:
 
-- the candidate ZIP (`version.dll` + test/install notes);
-- SHA-256 checksum;
-- explicit known limitations / unverified behavior;
-- the exact commit used to build it.
+- branch-level `concurrency` with `cancel-in-progress` so an older candidate run cannot publish after a newer commit;
+- static safety contract over the final generated C++;
+- MSVC x64 build;
+- version.dll proxy export validation;
+- static MSVC runtime validation;
+- ZIP + SHA-256 verification;
+- prerelease notes with known limitations and the exact candidate tag.
 
 Stable `v0.1.0` remains blocked until all required retail behavior passes.
 
@@ -185,6 +181,7 @@ Release blocking:
 - never use `only_ui` as pause ownership evidence;
 - never mutate `Menu@0` visibility in the active architecture;
 - never use fixed libKCD2 WHGame RVAs as production runtime discovery;
+- the rc7d SetVisible hook may suppress only `false` for the verified `hud@0`; all other calls must forward;
 - never swallow unrelated input unless verified vanilla pause ownership already exists;
 - nested/synthetic input created during vanilla dispatch must be forwarded exactly once and never interpreted as another physical command;
 - unresolved state must fail open to vanilla pause/input behavior.
