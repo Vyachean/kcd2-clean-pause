@@ -16,14 +16,14 @@ namespace {
 using namespace kcd2;
 
 std::atomic_bool g_stopping{false};
-std::atomic_bool g_cleanPaused{false};
-std::atomic<std::uint32_t> g_swallowRelease{static_cast<std::uint32_t>(KeyId::None)};
+std::atomic_bool g_probePaused{false};
+std::atomic_bool g_swallowF10Release{false};
 
 HMODULE g_selfModule{};
 void* g_environment{};
 void* g_scriptSystem{};
 void* g_input{};
-void* g_gameFramework{};
+void* g_game{};
 DWORD g_mainThreadId{};
 PostInputEventFn g_originalPostInputEvent{};
 void* g_postInputEventTarget{};
@@ -168,7 +168,7 @@ struct RuntimeEnvironment {
     void* base{};
     void* scriptSystem{};
     void* input{};
-    void* gameFramework{};
+    void* game{};
     void* system{};
     DWORD mainThreadId{};
 };
@@ -183,24 +183,21 @@ bool ValidateEnvironmentCandidate(const std::uint8_t* candidate, RuntimeEnvironm
         value.base = const_cast<std::uint8_t*>(candidate);
         value.scriptSystem = *reinterpret_cast<void* const*>(candidate + kEnvScriptSystemOffset);
         value.input = *reinterpret_cast<void* const*>(candidate + kEnvInputOffset);
-        value.gameFramework = *reinterpret_cast<void* const*>(candidate + kEnvGameFrameworkOffset);
+        value.game = *reinterpret_cast<void* const*>(candidate + kEnvGameOffset);
         value.system = *reinterpret_cast<void* const*>(candidate + kEnvSystemOffset);
         value.mainThreadId = *reinterpret_cast<const DWORD*>(candidate + kEnvMainThreadIdOffset);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 
-    if (!value.scriptSystem || !value.input || !value.gameFramework || !value.system || value.mainThreadId == 0)
+    if (!value.scriptSystem || !value.input || !value.game || !value.system || value.mainThreadId == 0)
         return false;
 
     if (value.scriptSystem == value.input
-        || value.input == value.gameFramework
-        || value.gameFramework == value.system)
+        || value.input == value.game
+        || value.game == value.system)
         return false;
 
-    // Requiring exact executable vtable slots makes false-positive environment
-    // candidates extremely unlikely and fails open if a future KCD2 build moves
-    // the retail ABI. No fixed WHGame.dll RVA is needed for these objects.
     if (!ValidateObjectVtable(value.scriptSystem, {
             kScriptExecuteBufferSlot,
             kScriptReleaseAnySlot,
@@ -211,7 +208,9 @@ bool ValidateEnvironmentCandidate(const std::uint8_t* candidate, RuntimeEnvironm
     if (!ValidateObjectVtable(value.input, {kInputPostInputEventSlot}))
         return false;
 
-    if (!ValidateObjectVtable(value.gameFramework, {kGameFrameworkPauseGameSlot}))
+    // +0x98 is IGame*. These two executable slots are only used as a structural
+    // anchor while locating gEnv. We never invoke them.
+    if (!ValidateObjectVtable(value.game, {kGameGetLongNameSlot, kGameGetNameSlot}))
         return false;
 
     if (!ValidateObjectVtable(value.system, {0}))
@@ -323,95 +322,105 @@ bool ReadLuaBoolean(const char* name, bool& value)
     return ok;
 }
 
-bool CanEnterCleanPause()
+bool CanProbePause()
 {
     constexpr const char* probe = R"lua(
-__kcd2_clean_pause_native_can_enter =
+__kcd2_clean_pause_probe_can_enter =
     player ~= nil
     and ActionMapManager ~= nil
     and ActionMapManager.IsFilterEnabled ~= nil
     and not ActionMapManager.IsFilterEnabled("only_ui")
 )lua";
 
-    if (!ExecuteLua(probe, "@kcd2_clean_pause_native/probe"))
+    if (!ExecuteLua(probe, "@kcd2_clean_pause_native/probe_context"))
         return false;
 
     bool canEnter{};
-    if (!ReadLuaBoolean("__kcd2_clean_pause_native_can_enter", canEnter)) {
-        Log("could not read gameplay eligibility probe; forwarding vanilla input");
+    if (!ReadLuaBoolean("__kcd2_clean_pause_probe_can_enter", canEnter)) {
+        Log("could not read gameplay eligibility probe");
         return false;
     }
     return canEnter;
 }
 
-bool SetNativePause(bool paused)
+bool SetLuaPauseProbe(bool paused)
 {
-    if (!g_gameFramework) {
-        Log("IGameFramework unavailable; cannot change native pause state");
-        return false;
-    }
+    const char* code = paused ? R"lua(
+__kcd2_clean_pause_probe_available = false
+__kcd2_clean_pause_probe_ok = false
+__kcd2_clean_pause_probe_cryaction = false
+__kcd2_clean_pause_probe_action = false
+__kcd2_clean_pause_probe_game = false
 
-    if (g_mainThreadId && GetCurrentThreadId() != g_mainThreadId) {
-        Log("refusing IGameFramework::PauseGame off the KCD2 main thread");
-        return false;
-    }
+if CryAction ~= nil and CryAction.PauseGame ~= nil then
+    __kcd2_clean_pause_probe_available = true
+    __kcd2_clean_pause_probe_cryaction = true
+    __kcd2_clean_pause_probe_ok = pcall(function() CryAction.PauseGame(true) end)
+elseif Action ~= nil and Action.PauseGame ~= nil then
+    __kcd2_clean_pause_probe_available = true
+    __kcd2_clean_pause_probe_action = true
+    __kcd2_clean_pause_probe_ok = pcall(function() Action.PauseGame(true) end)
+elseif Game ~= nil and Game.PauseGame ~= nil then
+    __kcd2_clean_pause_probe_available = true
+    __kcd2_clean_pause_probe_game = true
+    __kcd2_clean_pause_probe_ok = pcall(function() Game.PauseGame(true) end)
+end
+)lua" : R"lua(
+__kcd2_clean_pause_probe_available = false
+__kcd2_clean_pause_probe_ok = false
+__kcd2_clean_pause_probe_cryaction = false
+__kcd2_clean_pause_probe_action = false
+__kcd2_clean_pause_probe_game = false
 
-    const auto pause = VFunc<PauseGameFn>(g_gameFramework, kGameFrameworkPauseGameSlot);
-    if (!pause || !IsExecutable(reinterpret_cast<const void*>(pause))) {
-        Log("IGameFramework::PauseGame vfunc is invalid");
-        return false;
-    }
-
-    bool ok = true;
-    __try {
-        // Matches the vanilla ingame-menu primitive: force=true, no fade.
-        pause(g_gameFramework, paused, true, 0);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        ok = false;
-    }
-
-    if (!ok) {
-        Log("IGameFramework::PauseGame(%s) raised an exception", paused ? "true" : "false");
-        return false;
-    }
-
-    Log("IGameFramework::PauseGame(%s, true, 0) invoked", paused ? "true" : "false");
-    return true;
-}
-
-bool OpenVanillaMenuWhilePaused()
-{
-    constexpr const char* openMenu = R"lua(
-__kcd2_clean_pause_native_menu_opened = false
-if UIAction ~= nil
-    and UIAction.CallFunction ~= nil
-    and ActionMapManager ~= nil
-    and ActionMapManager.IsFilterEnabled ~= nil then
-    local ok = pcall(function()
-        UIAction.CallFunction("MenuEvents", -1, "DisplayIngameMenu", true)
-    end)
-    __kcd2_clean_pause_native_menu_opened =
-        ok and ActionMapManager.IsFilterEnabled("only_ui") == true
+if CryAction ~= nil and CryAction.PauseGame ~= nil then
+    __kcd2_clean_pause_probe_available = true
+    __kcd2_clean_pause_probe_cryaction = true
+    __kcd2_clean_pause_probe_ok = pcall(function() CryAction.PauseGame(false) end)
+elseif Action ~= nil and Action.PauseGame ~= nil then
+    __kcd2_clean_pause_probe_available = true
+    __kcd2_clean_pause_probe_action = true
+    __kcd2_clean_pause_probe_ok = pcall(function() Action.PauseGame(false) end)
+elseif Game ~= nil and Game.PauseGame ~= nil then
+    __kcd2_clean_pause_probe_available = true
+    __kcd2_clean_pause_probe_game = true
+    __kcd2_clean_pause_probe_ok = pcall(function() Game.PauseGame(false) end)
 end
 )lua";
 
-    if (!ExecuteLua(openMenu, "@kcd2_clean_pause_native/open_vanilla_menu"))
+    if (!ExecuteLua(code, paused
+            ? "@kcd2_clean_pause_native/cryaction_pause_true"
+            : "@kcd2_clean_pause_native/cryaction_pause_false"))
         return false;
 
-    bool opened{};
-    if (!ReadLuaBoolean("__kcd2_clean_pause_native_menu_opened", opened)) {
-        Log("could not verify vanilla pause-menu handoff");
+    bool available{};
+    bool ok{};
+    bool cryAction{};
+    bool action{};
+    bool game{};
+    const bool readOk =
+        ReadLuaBoolean("__kcd2_clean_pause_probe_available", available)
+        && ReadLuaBoolean("__kcd2_clean_pause_probe_ok", ok)
+        && ReadLuaBoolean("__kcd2_clean_pause_probe_cryaction", cryAction)
+        && ReadLuaBoolean("__kcd2_clean_pause_probe_action", action)
+        && ReadLuaBoolean("__kcd2_clean_pause_probe_game", game);
+
+    if (!readOk) {
+        Log("could not read Lua pause probe result");
         return false;
     }
 
-    if (!opened)
-        Log("MenuEvents.DisplayIngameMenu(true) did not enable only_ui; retaining Clean Pause");
-    return opened;
-}
+    const char* route = cryAction ? "CryAction.PauseGame"
+        : action ? "Action.PauseGame"
+        : game ? "Game.PauseGame"
+        : "none";
+    Log(
+        "Lua pause probe paused=%s available=%s route=%s pcall=%s",
+        paused ? "true" : "false",
+        available ? "true" : "false",
+        route,
+        ok ? "true" : "false");
 
-bool IsPauseKey(KeyId key)
-{
-    return key == KeyId::XiStart || key == KeyId::Escape;
+    return available && ok;
 }
 
 void Forward(void* input, const InputEvent* event, bool force)
@@ -431,69 +440,50 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
     const bool pressed = (event->state & InputState::Pressed) != 0;
     const bool released = (event->state & InputState::Released) != 0;
 
-    const auto releaseToSwallow = static_cast<KeyId>(
-        g_swallowRelease.load(std::memory_order_relaxed));
-    if (released && releaseToSwallow == key) {
-        g_swallowRelease.store(static_cast<std::uint32_t>(KeyId::None), std::memory_order_relaxed);
+    // rc.5 is intentionally diagnostic and fail-open. Start/Escape/controller
+    // input are NEVER intercepted. Only F10 is reserved for the pause primitive
+    // probe, so a failed probe cannot make normal game input unresponsive.
+    if (key != KeyId::F10) {
+        Forward(input, event, force);
         return;
     }
 
-    if (g_cleanPaused.load(std::memory_order_acquire)) {
-        // While Clean Pause owns the game, no underlying gameplay/dialogue input
-        // is forwarded. B resumes; Start/Escape deliberately opens vanilla UI.
-        if (pressed && key == KeyId::XiB) {
-            if (SetNativePause(false)) {
-                g_cleanPaused.store(false, std::memory_order_release);
-                g_swallowRelease.store(static_cast<std::uint32_t>(KeyId::XiB), std::memory_order_relaxed);
-                Log("Clean Pause -> Running (B consumed)");
-            } else {
-                Log("resume failed; retaining Clean Pause and consuming B");
-            }
-            return;
-        }
-
-        if (pressed && IsPauseKey(key)) {
-            // Keep the simulation paused while the real menu acquires pause/UI
-            // ownership. This avoids the old prototype's unpause/re-pause tick.
-            if (OpenVanillaMenuWhilePaused()) {
-                g_cleanPaused.store(false, std::memory_order_release);
-                g_swallowRelease.store(static_cast<std::uint32_t>(key), std::memory_order_relaxed);
-                Log("Clean Pause -> vanilla pause menu (no intermediate unpause)");
-            }
-            return;
-        }
-
+    if (released && g_swallowF10Release.exchange(false, std::memory_order_acq_rel))
         return;
-    }
 
     if (!pressed) {
         Forward(input, event, force);
         return;
     }
 
-    if (!IsPauseKey(key)) {
+    if (g_probePaused.load(std::memory_order_acquire)) {
+        if (SetLuaPauseProbe(false)) {
+            g_probePaused.store(false, std::memory_order_release);
+            g_swallowF10Release.store(true, std::memory_order_release);
+            Log("F10 probe: requested resume through retail Lua pause binding");
+            return;
+        }
+
+        Log("F10 probe resume failed; forwarding F10 without changing other input routing");
         Forward(input, event, force);
         return;
     }
 
-    // Never take Start/Escape away from front-end or ordinary full-screen UI.
-    // This read-only probe is the only Lua dependency in first-pause routing.
-    if (!CanEnterCleanPause()) {
+    if (!CanProbePause()) {
+        Log("F10 probe ignored outside gameplay / while only_ui is active");
         Forward(input, event, force);
         return;
     }
 
-    if (!SetNativePause(true)) {
-        Log("clean-pause acquisition failed; forwarding vanilla pause input");
-        Forward(input, event, force);
+    if (SetLuaPauseProbe(true)) {
+        g_probePaused.store(true, std::memory_order_release);
+        g_swallowF10Release.store(true, std::memory_order_release);
+        Log("F10 probe: requested pause through retail Lua pause binding");
         return;
     }
 
-    g_cleanPaused.store(true, std::memory_order_release);
-    g_swallowRelease.store(static_cast<std::uint32_t>(key), std::memory_order_relaxed);
-    Log("Running -> Clean Pause (pause input consumed before ActionMapManager)");
-    // The vanilla pause action never sees this press, so no pause-menu frame is
-    // emitted by the normal input path.
+    Log("F10 pause probe failed; forwarding F10 and retaining completely vanilla input routing");
+    Forward(input, event, force);
 }
 
 bool InstallHook(const RuntimeEnvironment& environment)
@@ -501,13 +491,13 @@ bool InstallHook(const RuntimeEnvironment& environment)
     g_environment = environment.base;
     g_scriptSystem = environment.scriptSystem;
     g_input = environment.input;
-    g_gameFramework = environment.gameFramework;
+    g_game = environment.game;
     g_mainThreadId = environment.mainThreadId;
 
     g_postInputEventTarget = reinterpret_cast<void*>(
         VFunc<PostInputEventFn>(g_input, kInputPostInputEventSlot));
     if (!g_postInputEventTarget || !IsExecutable(g_postInputEventTarget)) {
-        Log("PostInputEvent vtable target is invalid; native hook not installed");
+        Log("PostInputEvent vtable target is invalid; diagnostic hook not installed");
         return false;
     }
 
@@ -533,11 +523,11 @@ bool InstallHook(const RuntimeEnvironment& environment)
     }
 
     Log(
-        "native hook active; env=%p script=%p input=%p framework=%p mainThread=%lu PostInputEvent=%p",
+        "rc5 diagnostic hook active; env=%p script=%p input=%p game(IGame*)=%p mainThread=%lu PostInputEvent=%p; Start/Escape always vanilla; F10 probes Lua PauseGame",
         g_environment,
         g_scriptSystem,
         g_input,
-        g_gameFramework,
+        g_game,
         static_cast<unsigned long>(g_mainThreadId),
         g_postInputEventTarget);
     return true;
@@ -545,7 +535,7 @@ bool InstallHook(const RuntimeEnvironment& environment)
 
 DWORD WINAPI BootstrapThread(void*)
 {
-    Log("native bootstrap started; target=KCD2 1.5.6 Windows retail");
+    Log("native bootstrap started; target=KCD2 1.5.6 Windows retail; rc5 Lua-pause diagnostic");
 
     HMODULE whGame{};
     for (DWORD elapsed = 0; elapsed < kWaitForWhGameMs && !g_stopping.load(); elapsed += kPollMs) {
@@ -556,7 +546,7 @@ DWORD WINAPI BootstrapThread(void*)
     }
 
     if (!whGame) {
-        Log("WHGame.dll not found; native Clean Pause disabled");
+        Log("WHGame.dll not found; diagnostic disabled");
         return 0;
     }
 
@@ -568,7 +558,7 @@ DWORD WINAPI BootstrapThread(void*)
     }
 
     if (!environment.base) {
-        Log("KCD2 1.5.6 runtime environment / PauseGame ABI could not be validated; no hook installed");
+        Log("KCD2 1.5.6 runtime environment could not be validated; no hook installed");
         return 0;
     }
 
