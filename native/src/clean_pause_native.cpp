@@ -23,10 +23,6 @@ std::atomic_bool g_swallowPauseRelease{false};
 std::atomic_bool g_swallowResumeRelease{false};
 std::atomic_bool g_pendingPauseAttempt{false};
 std::atomic_ullong g_pendingDeadlineMs{0};
-InputEvent g_pausePressTemplate{};
-InputEvent g_pauseReleaseTemplate{};
-bool g_havePausePressTemplate{};
-bool g_havePauseReleaseTemplate{};
 
 HMODULE g_selfModule{};
 void* g_environment{};
@@ -750,22 +746,6 @@ void ClearHiddenState(const char* reason)
         Log("Clean Pause ownership cleared: %s", reason);
 }
 
-bool ReplayVanillaPauseToggle(void* input, bool force)
-{
-    if (!g_havePausePressTemplate || !g_havePauseReleaseTemplate)
-        return false;
-
-    const InputEvent press = g_pausePressTemplate;
-    const InputEvent release = g_pauseReleaseTemplate;
-    Log("B resume: replaying vanilla pause key=%u press/release through original PostInputEvent",
-        static_cast<unsigned>(press.keyId));
-    Forward(input, &press, force);
-    Forward(input, &release, force);
-
-    bool visible{};
-    return ReadVerifiedMenuVisible(visible) && !visible;
-}
-
 void ArmPendingPauseAttempt()
 {
     g_pendingPauseAttempt.store(true, std::memory_order_release);
@@ -870,29 +850,17 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
         if (!pressed)
             return;
 
-        if (!RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-before-B")) {
-            g_cleanHidden.store(false, std::memory_order_release);
-            g_renderSuppressionObserved.store(false, std::memory_order_release);
-            g_cleanHiddenSinceMs.store(0, std::memory_order_release);
-            ResetHudSnapshots();
-            g_swallowResumeRelease.store(true, std::memory_order_release);
-            Log("B resume aborted: vanilla-pause HUD snapshot restore failed; showing ordinary pause menu (fail-open)");
-            return;
-        }
+        if (!RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu-via-B"))
+            Log("could not restore captured vanilla-pause HUD before showing Menu via B; continuing fail-open");
 
-        if (ReplayVanillaPauseToggle(input, force)) {
-            g_cleanHidden.store(false, std::memory_order_release);
-            g_renderSuppressionObserved.store(false, std::memory_order_release);
-            g_cleanHiddenSinceMs.store(0, std::memory_order_release);
-            g_pendingPauseAttempt.store(false, std::memory_order_release);
-            g_pendingDeadlineMs.store(0, std::memory_order_release);
-            ResetHudSnapshots();
-            g_swallowResumeRelease.store(true, std::memory_order_release);
-            Log("Clean Pause -> running via B using replayed vanilla pause toggle");
-            return;
-        }
-        ClearHiddenState("B resume toggle was not verified; showing ordinary vanilla pause menu (fail-open)");
+        g_cleanHidden.store(false, std::memory_order_release);
+        g_renderSuppressionObserved.store(false, std::memory_order_release);
+        g_cleanHiddenSinceMs.store(0, std::memory_order_release);
+        g_pendingPauseAttempt.store(false, std::memory_order_release);
+        g_pendingDeadlineMs.store(0, std::memory_order_release);
+        ResetHudSnapshots();
         g_swallowResumeRelease.store(true, std::memory_order_release);
+        Log("Clean Pause -> visible vanilla pause menu via B (v0.1.0 behavior)");
         return;
     }
 
@@ -919,19 +887,6 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
     const auto key = event->keyId;
     const bool pressed = (event->state & InputState::Pressed) != 0;
     const bool released = (event->state & InputState::Released) != 0;
-
-    if (IsPauseKey(key)) {
-        if (pressed) {
-            g_pausePressTemplate = *event;
-            g_havePausePressTemplate = true;
-            g_havePauseReleaseTemplate = false;
-        }
-        if (released && g_havePausePressTemplate
-            && g_pausePressTemplate.keyId == key) {
-            g_pauseReleaseTemplate = *event;
-            g_havePauseReleaseTemplate = true;
-        }
-    }
 
     if (g_cleanHidden.load(std::memory_order_acquire) && pressed)
         Log("Clean Pause physical input: key=%u name=%s state=0x%08x",
