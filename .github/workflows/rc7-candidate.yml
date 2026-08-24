@@ -28,7 +28,7 @@ jobs:
           ref: candidate/rc7-render-suppression
           fetch-depth: 0
 
-      - name: Materialize exact retail-proven source
+      - name: Materialize retail-proven source and apply v0.1.0 contract
         shell: python
         run: |
           from pathlib import Path
@@ -44,6 +44,7 @@ jobs:
           ], check=True)
 
           source = out.read_text(encoding='utf-8')
+
           replacements = {
               'rc7g borrowed-movieclip child-HUD-snapshot candidate active':
                   'KCD2 Clean Pause v0.1.0 active',
@@ -55,6 +56,31 @@ jobs:
                   raise SystemExit(f'missing expected runtime marker: {old}')
               source = source.replace(old, new)
 
+          for line in (
+              'InputEvent g_pausePressTemplate{};\n',
+              'InputEvent g_pauseReleaseTemplate{};\n',
+              'bool g_havePausePressTemplate{};\n',
+              'bool g_havePauseReleaseTemplate{};\n',
+          ):
+              if source.count(line) != 1:
+                  raise SystemExit(f'expected one replay-template declaration: {line!r}')
+              source = source.replace(line, '', 1)
+
+          replay_start = source.index('bool ReplayVanillaPauseToggle(void* input, bool force)\n{')
+          replay_end = source.index('void ArmPendingPauseAttempt()', replay_start)
+          source = source[:replay_start] + source[replay_end:]
+
+          old_b = '''    if (key == KeyId::XiB) {\n        if (released)\n            return;\n        if (!pressed)\n            return;\n\n        if (!RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-before-B")) {\n            g_cleanHidden.store(false, std::memory_order_release);\n            g_renderSuppressionObserved.store(false, std::memory_order_release);\n            g_cleanHiddenSinceMs.store(0, std::memory_order_release);\n            ResetHudSnapshots();\n            g_swallowResumeRelease.store(true, std::memory_order_release);\n            Log("B resume aborted: vanilla-pause HUD snapshot restore failed; showing ordinary pause menu (fail-open)");\n            return;\n        }\n\n        if (ReplayVanillaPauseToggle(input, force)) {\n            g_cleanHidden.store(false, std::memory_order_release);\n            g_renderSuppressionObserved.store(false, std::memory_order_release);\n            g_cleanHiddenSinceMs.store(0, std::memory_order_release);\n            g_pendingPauseAttempt.store(false, std::memory_order_release);\n            g_pendingDeadlineMs.store(0, std::memory_order_release);\n            ResetHudSnapshots();\n            g_swallowResumeRelease.store(true, std::memory_order_release);\n            Log("Clean Pause -> running via B using replayed vanilla pause toggle");\n            return;\n        }\n        ClearHiddenState("B resume toggle was not verified; showing ordinary vanilla pause menu (fail-open)");\n        g_swallowResumeRelease.store(true, std::memory_order_release);\n        return;\n    }\n'''
+          new_b = '''    if (key == KeyId::XiB) {\n        if (released)\n            return;\n        if (!pressed)\n            return;\n\n        if (!RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu-via-B"))\n            Log("could not restore captured vanilla-pause HUD before showing Menu via B; continuing fail-open");\n\n        g_cleanHidden.store(false, std::memory_order_release);\n        g_renderSuppressionObserved.store(false, std::memory_order_release);\n        g_cleanHiddenSinceMs.store(0, std::memory_order_release);\n        g_pendingPauseAttempt.store(false, std::memory_order_release);\n        g_pendingDeadlineMs.store(0, std::memory_order_release);\n        ResetHudSnapshots();\n        g_swallowResumeRelease.store(true, std::memory_order_release);\n        Log("Clean Pause -> visible vanilla pause menu via B (v0.1.0 behavior)");\n        return;\n    }\n'''
+          if source.count(old_b) != 1:
+              raise SystemExit('could not locate rc7g direct-B replay block')
+          source = source.replace(old_b, new_b, 1)
+
+          old_capture = '''    if (IsPauseKey(key)) {\n        if (pressed) {\n            g_pausePressTemplate = *event;\n            g_havePausePressTemplate = true;\n            g_havePauseReleaseTemplate = false;\n        }\n        if (released && g_havePausePressTemplate\n            && g_pausePressTemplate.keyId == key) {\n            g_pauseReleaseTemplate = *event;\n            g_havePauseReleaseTemplate = true;\n        }\n    }\n\n'''
+          if source.count(old_capture) != 1:
+              raise SystemExit('could not locate replay-template capture block')
+          source = source.replace(old_capture, '', 1)
+
           for needle in (
               'HookMenuRender',
               'HookHudUpdate',
@@ -62,7 +88,7 @@ jobs:
               'RestoreHudVisibilitySnapshot',
               'ClearSubtitles',
               'HideNarrativeSubtitles',
-              'ReplayVanillaPauseToggle',
+              'Clean Pause -> visible vanilla pause menu via B (v0.1.0 behavior)',
               'KCD2 Clean Pause v0.1.0 active',
           ):
               if needle not in source:
@@ -73,10 +99,15 @@ jobs:
               'HideVerifiedVanillaPause(',
               'ReleaseFlashVariable',
               'snapshot.clip',
+              'ReplayVanillaPauseToggle',
+              'g_pausePressTemplate',
+              'g_pauseReleaseTemplate',
+              'g_havePausePressTemplate',
+              'g_havePauseReleaseTemplate',
               'rc7g borrowed-movieclip child-HUD-snapshot candidate active',
           ):
               if needle in source:
-                  raise SystemExit(f'production source retained rejected path: {needle}')
+                  raise SystemExit(f'production source retained rejected/experimental path: {needle}')
 
           out.write_text(source, encoding='utf-8')
 
@@ -91,11 +122,11 @@ jobs:
         run: |
           set -euo pipefail
           if git diff --quiet -- native/src/clean_pause_native.cpp; then
-            echo 'Production source already materialized.'
+            echo 'Production source already matches the v0.1.0 contract.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add native/src/clean_pause_native.cpp
-          git commit -m 'feat(native): promote retail-proven clean pause implementation'
+          git commit -m 'refactor(native): finalize stable clean pause behavior'
           git push origin HEAD:candidate/rc7-render-suppression
