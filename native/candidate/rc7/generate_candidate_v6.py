@@ -17,6 +17,22 @@ if source.count(premature) != 1:
     raise SystemExit("rc7f wrapper expected exactly one premature legacy-symbol check")
 source = source.replace(premature, "", 1)
 
+# Each capture/restore loop has two legitimate syntactic release sites: one for a
+# non-null wrapper that fails validation, and one for the normal read/write path.
+# There is no third ownership path. Require both sites instead of the erroneous v5
+# threshold of three; CI repeats this check over the final generated source.
+old_capture_gate = '''if capture.count("ReleaseFlashVariable(clip)") < 3:\n    raise SystemExit("capture path does not visibly release fresh wrappers on all outcomes")'''
+new_capture_gate = '''if capture.count("ReleaseFlashVariable(clip)") < 2:\n    raise SystemExit("capture path must release fresh wrappers on validation-failure and normal paths")'''
+old_restore_gate = '''if restore.count("ReleaseFlashVariable(clip)") < 3:\n    raise SystemExit("restore path does not visibly release fresh wrappers on all outcomes")'''
+new_restore_gate = '''if restore.count("ReleaseFlashVariable(clip)") < 2:\n    raise SystemExit("restore path must release fresh wrappers on validation-failure and normal paths")'''
+for old, new, label in (
+    (old_capture_gate, new_capture_gate, "capture release gate"),
+    (old_restore_gate, new_restore_gate, "restore release gate"),
+):
+    if source.count(old) != 1:
+        raise SystemExit(f"rc7f wrapper expected exactly one {label}")
+    source = source.replace(old, new, 1)
+
 namespace = {
     "__file__": str(v5),
     "__name__": "__main__",
