@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - VERSION
+      - .github/workflows/release.yml
     tags:
       - "v*"
 
@@ -17,8 +18,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
     runs-on: windows-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      asset: ${{ steps.package.outputs.asset }}
 
     steps:
       - name: Checkout release source
@@ -27,6 +32,7 @@ jobs:
           fetch-depth: 0
 
       - name: Resolve and validate release version
+        id: meta
         shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
@@ -45,9 +51,8 @@ jobs:
           }
 
           $prerelease = if ($version.Contains("-")) { "true" } else { "false" }
-          "VERSION=$version" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "TAG=$tag" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          "PRERELEASE=$prerelease" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "tag=$tag" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "prerelease=$prerelease" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Release version: $version"
           Write-Host "Release tag: $tag"
 
@@ -91,6 +96,7 @@ jobs:
         run: cmake --build native/build --config Release --parallel
 
       - name: Validate and package native DLL
+        id: package
         shell: pwsh
         run: |
           $dll = "native/build/Release/version.dll"
@@ -120,60 +126,87 @@ jobs:
           Copy-Item $dll release/stage/version.dll
           Copy-Item native/INSTALL.txt release/stage/INSTALL.txt
 
-          $asset = "kcd2-clean-pause-$env:TAG.zip"
+          $asset = "kcd2-clean-pause-${{ steps.meta.outputs.tag }}.zip"
           $assetPath = "release/$asset"
           Compress-Archive -Path release/stage/* -DestinationPath $assetPath -CompressionLevel Optimal
 
           $hash = (Get-FileHash $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $asset" | Set-Content release/SHA256SUMS.txt -Encoding ascii -NoNewline
-          "ASSET=$asset" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "asset=$asset" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Packaged $asset ($((Get-Item $assetPath).Length) bytes)"
 
-      - name: Upload workflow artifact
+      - name: Upload verified release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.TAG }}
+          name: release-${{ steps.meta.outputs.tag }}
           path: |
-            release/${{ env.ASSET }}
+            release/${{ steps.package.outputs.asset }}
             release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
 
+  publish:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download verified release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.build.outputs.tag }}
+          path: release
+
+      - name: Verify downloaded release artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          test -f "${{ needs.build.outputs.asset }}"
+          test -f SHA256SUMS.txt
+          sha256sum -c SHA256SUMS.txt
+          unzip -t "${{ needs.build.outputs.asset }}"
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: pwsh
+          TAG: ${{ needs.build.outputs.tag }}
+          ASSET: ${{ needs.build.outputs.asset }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+        shell: bash
         run: |
-          & gh release view $env:TAG *> $null
-          if ($LASTEXITCODE -eq 0) {
-            throw "Release $env:TAG already exists; refusing to overwrite it"
-          }
+          set -euo pipefail
 
-          $remoteLine = (& git ls-remote --tags origin "refs/tags/$env:TAG" | Out-String).Trim()
-          $remoteTagSha = if ($remoteLine) { ($remoteLine -split '\s+')[0] } else { "" }
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; leaving it unchanged."
+            exit 0
+          fi
 
-          $args = @(
-            "release", "create", $env:TAG,
-            "release/$env:ASSET",
-            "release/SHA256SUMS.txt",
-            "--generate-notes",
-            "--title", "KCD2 Clean Pause $env:TAG"
+          remote_tag_sha="$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')"
+          args=(
+            "$TAG"
+            "release/$ASSET"
+            "release/SHA256SUMS.txt"
+            --generate-notes
+            --title "KCD2 Clean Pause $TAG"
           )
 
-          if ($remoteTagSha) {
-            if ($remoteTagSha -ne $env:GITHUB_SHA) {
-              throw "Existing tag $env:TAG points to $remoteTagSha, expected $env:GITHUB_SHA"
-            }
-            $args += "--verify-tag"
-          } else {
-            $args += @("--target", $env:GITHUB_SHA)
-          }
+          if [[ -n "$remote_tag_sha" ]]; then
+            if [[ "$remote_tag_sha" != "$GITHUB_SHA" ]]; then
+              echo "Existing tag $TAG points to $remote_tag_sha, expected $GITHUB_SHA" >&2
+              exit 1
+            fi
+            args+=(--verify-tag)
+          else
+            args+=(--target "$GITHUB_SHA")
+          fi
 
-          if ($env:PRERELEASE -eq "true") {
-            $args += "--prerelease"
-          }
+          if [[ "$PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
 
-          & gh @args
-          if ($LASTEXITCODE -ne 0) {
-            throw "gh release create failed with exit code $LASTEXITCODE"
-          }
+          gh release create "${args[@]}"
