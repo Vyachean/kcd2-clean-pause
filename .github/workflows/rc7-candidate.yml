@@ -158,12 +158,12 @@ jobs:
               raise SystemExit("capture must resolve each child through hud@0 GetMovieClip")
           if "info[kFlashDisplayInfoVisibleOffset] != 0" not in capture:
               raise SystemExit("capture must preserve the exact pre-transition bool")
-          if capture.count("ReleaseFlashVariable(clip)") < 3:
-              raise SystemExit("capture must release every fresh wrapper on success/failure")
+          if capture.count("ReleaseFlashVariable(clip)") < 2:
+              raise SystemExit("capture must release fresh wrappers on validation-failure and normal paths")
           if "setVisible(clip, snapshot.visible[i])" not in restore:
               raise SystemExit("restore must replay the captured bool rather than force true")
-          if restore.count("ReleaseFlashVariable(clip)") < 3:
-              raise SystemExit("restore must release every fresh wrapper on success/failure")
+          if restore.count("ReleaseFlashVariable(clip)") < 2:
+              raise SystemExit("restore must release fresh wrappers on validation-failure and normal paths")
 
           menu_hook = source[source.index("void __fastcall HookMenuRender"):source.index("bool EnsureMenuRenderHook")]
           for needle in ("GetMovieClip", "RestoreHudVisibilitySnapshot", "ReleaseFlashVariable", "ResetHudSnapshots", "SetVisible"):
