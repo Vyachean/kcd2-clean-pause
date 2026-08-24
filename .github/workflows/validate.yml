@@ -31,21 +31,16 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
 
-      - name: Safety checks
+      - name: Runtime safety checks
         shell: python
         run: |
           from pathlib import Path
 
           source = Path("src/Scripts/Mods/clean_pause.lua").read_text(encoding="utf-8")
-          executable_lines = []
-          for line in source.splitlines():
-              stripped = line.lstrip()
-              if stripped.startswith("--"):
-                  continue
-              executable_lines.append(line)
-          executable = "\n".join(executable_lines)
-
-          forbidden_runtime_calls = (
+          executable = "\n".join(
+              line for line in source.splitlines() if not line.lstrip().startswith("--")
+          )
+          forbidden = (
               "ActionMapManager.InitActionMaps(",
               "ActionMapManager.LoadFromXML(",
               "ActionMapManager.EnableActionFilter(",
@@ -53,94 +48,21 @@ jobs:
               "System.ExecuteCommand(\"bind ",
               "System.ExecuteCommand('bind ",
           )
-          for needle in forbidden_runtime_calls:
+          for needle in forbidden:
               if needle in executable:
                   raise SystemExit(f"Forbidden runtime input mutation found: {needle}")
 
           if source.count("__CLEAN_PAUSE_GAMEPLAY_COMMAND__") != 1:
-              raise SystemExit("Gameplay routed-command placeholder contract changed")
+              raise SystemExit("Gameplay command placeholder contract changed")
           if source.count("__CLEAN_PAUSE_PAUSE_COMMAND__") != 1:
-              raise SystemExit("Pause routed-command placeholder contract changed")
+              raise SystemExit("Pause-context command placeholder contract changed")
 
-          print("Input safety checks passed")
+          print("Runtime safety checks passed")
 
-      - name: Create synthetic IPL_GameData.pak
-        shell: python
-        run: |
-          from pathlib import Path
-          import zipfile
-
-          root = Path("ci-game/Data")
-          root.mkdir(parents=True, exist_ok=True)
-          fixture = Path("tests/fixtures/defaultProfile_minimal.xml").read_bytes()
-          with zipfile.ZipFile(root / "IPL_GameData.pak", "w", compression=zipfile.ZIP_STORED) as pak:
-              pak.writestr("Libs/Config/defaultProfile.xml", fixture)
-
-      - name: Exercise exact-profile development builder
-        run: python tools/build_from_game.py ci-game
-
-      - name: Validate generated fixture artifact
-        shell: python
-        run: |
-          from pathlib import Path
-          import xml.etree.ElementTree as ET
-          import zipfile
-
-          pak_path = Path("release/clean_pause/Data/clean_pause.pak")
-          with zipfile.ZipFile(pak_path) as pak:
-              expected = {
-                  "Libs/Config/defaultProfile.xml",
-                  "Scripts/Mods/clean_pause.lua",
-              }
-              if set(pak.namelist()) != expected:
-                  raise SystemExit(f"Unexpected PAK members: {pak.namelist()}")
-              if any(pak.getinfo(name).compress_type != zipfile.ZIP_STORED for name in expected):
-                  raise SystemExit("Game PAK entries must be stored")
-              profile = pak.read("Libs/Config/defaultProfile.xml").decode("utf-8")
-              lua = pak.read("Scripts/Mods/clean_pause.lua").decode("utf-8")
-
-          root = ET.fromstring(profile)
-          def action(map_name, action_name):
-              action_map = next(m for m in root.findall("actionmap") if m.get("name") == map_name)
-              return next(a for a in action_map.findall("action") if a.get("name") == action_name)
-
-          for map_name, original, entry in (
-              ("open_menu", "open_menu", "clean_pause_enter_gameplay"),
-              ("open_pause_menu", "open_pause_menu", "clean_pause_enter_pause_context"),
-          ):
-              fallback = action(map_name, original)
-              if fallback.get("onRelease") != "1" or fallback.get("onPress") is not None:
-                  raise SystemExit(f"{map_name}/{original} is not release-only fallback")
-              if fallback.get("consoleCMD") is not None or fallback.get("consoleCmd") is not None:
-                  raise SystemExit(f"{map_name}/{original} fallback became a console command")
-              custom = action(map_name, entry)
-              if custom.get("onPress") != "1" or custom.get("consoleCMD") != "1":
-                  raise SystemExit(f"{map_name}/{entry} is not a KCD2 press console command")
-              if custom.get("keyboard") != "escape" or custom.get("xboxpad") != "xi_start":
-                  raise SystemExit(f"{map_name}/{entry} lost Escape/Start bindings")
-
-          controls = next(m for m in root.findall("actionmap") if m.get("name") == "clean_pause_controls")
-          names = {a.get("name"): a for a in controls.findall("action")}
-          if names["clean_pause_block_start_release"].get("onRelease") != "1":
-              raise SystemExit("Clean Pause is missing the Start/Escape release sink")
-          if profile.count('consoleCMD="1"') != 4:
-              raise SystemExit("Generated profile must contain exactly four KCD2 consoleCMD actions")
-          if 'consoleCmd="1"' in profile:
-              raise SystemExit("Generated profile contains wrong-case consoleCmd attribute")
-
-          if 'local GAMEPLAY_COMMAND = "clean_pause_enter_gameplay"' not in lua:
-              raise SystemExit("Generated Lua gameplay command does not match fail-safe entry")
-          if 'local PAUSE_COMMAND = "clean_pause_enter_pause_context"' not in lua:
-              raise SystemExit("Generated Lua pause command does not match fail-safe entry")
-          if "__CLEAN_PAUSE_GAMEPLAY_COMMAND__" in lua or "__CLEAN_PAUSE_PAUSE_COMMAND__" in lua:
-              raise SystemExit("Generated Lua still contains routed-command placeholder")
-
-          print("Synthetic fail-safe exact-profile build validated")
-
-      - name: Exercise self-contained release builder
+      - name: Build exact diagnostic release package
         run: python tools/build_release.py
 
-      - name: Validate release ZIP
+      - name: Validate final diagnostic ZIP
         shell: python
         run: |
           from io import BytesIO
@@ -168,26 +90,44 @@ jobs:
               if any(pak.getinfo(name).compress_type != zipfile.ZIP_STORED for name in expected_pak):
                   raise SystemExit("Release PAK entries must be stored")
               profile = pak.read("Libs/Config/defaultProfile.xml").decode("utf-8")
+              lua = pak.read("Scripts/Mods/clean_pause.lua").decode("utf-8")
 
           root = ET.fromstring(profile)
-          for map_name, original, entry in (
-              ("open_menu", "open_menu", "clean_pause_enter_gameplay"),
-              ("open_pause_menu", "open_pause_menu", "clean_pause_enter_pause_context"),
+          for map_name, vanilla_name, probe_name in (
+              ("open_menu", "open_menu", "clean_pause_probe_gameplay"),
+              ("open_pause_menu", "open_pause_menu", "clean_pause_probe_pause_context"),
           ):
               action_map = next(m for m in root.findall("actionmap") if m.get("name") == map_name)
               actions = {a.get("name"): a for a in action_map.findall("action")}
-              if actions[original].get("onRelease") != "1" or actions[original].get("onPress") is not None:
-                  raise SystemExit(f"Release lost vanilla fallback {map_name}/{original}")
-              if actions[entry].get("onPress") != "1" or actions[entry].get("consoleCMD") != "1":
-                  raise SystemExit(f"Release lost custom entry {map_name}/{entry}")
 
-          if profile.count('consoleCMD="1"') != 4:
-              raise SystemExit("Release profile must contain exactly four KCD2 consoleCMD actions")
-          if 'consoleCmd="1"' in profile:
-              raise SystemExit("Release profile contains wrong-case consoleCmd attribute")
+              vanilla = actions[vanilla_name]
+              if vanilla.get("onPress") != "1" or vanilla.get("onRelease") != "1":
+                  raise SystemExit(f"Vanilla activation changed: {map_name}/{vanilla_name}")
+              if vanilla.get("keyboard") != "_keybinds_ref_" or vanilla.get("xboxpad") != "xi_start":
+                  raise SystemExit(f"Vanilla binding changed: {map_name}/{vanilla_name}")
+              if vanilla.get("consoleCMD") is not None or vanilla.get("consoleCmd") is not None:
+                  raise SystemExit(f"Vanilla pause became console command: {map_name}/{vanilla_name}")
 
-          print("Self-contained fail-safe release package validated")
+              probe = actions[probe_name]
+              if probe.get("onPress") != "1" or probe.get("onRelease") is not None:
+                  raise SystemExit(f"F10 probe activation invalid: {map_name}/{probe_name}")
+              if probe.get("keyboard") != "f10" or probe.get("consoleCMD") != "1":
+                  raise SystemExit(f"F10 probe command invalid: {map_name}/{probe_name}")
+              if probe.get("xboxpad") is not None or probe.get("pspad") is not None:
+                  raise SystemExit(f"F10 probe touches controller: {map_name}/{probe_name}")
 
-      # PR validation builds both synthetic proof and the real target package,
-      # but publishes neither. The release workflow publishes only after a
-      # VERSION change reaches main.
+          if 'local GAMEPLAY_COMMAND = "clean_pause_probe_gameplay"' not in lua:
+              raise SystemExit("Generated Lua does not register gameplay F10 probe")
+          if 'local PAUSE_COMMAND = "clean_pause_probe_pause_context"' not in lua:
+              raise SystemExit("Generated Lua does not register pause-context F10 probe")
+          if "__CLEAN_PAUSE_GAMEPLAY_COMMAND__" in lua or "__CLEAN_PAUSE_PAUSE_COMMAND__" in lua:
+              raise SystemExit("Generated Lua still contains placeholders")
+
+          controls = next(m for m in root.findall("actionmap") if m.get("name") == "clean_pause_controls")
+          if controls.get("priority") != "overlays" or controls.get("exclusivity") != "1":
+              raise SystemExit("Clean Pause controls map contract changed")
+
+          print("Diagnostic package validated: vanilla Esc/Start restored; F10 is keyboard-only")
+
+      # PR validation builds the same package that a VERSION release publishes,
+      # but does not upload it from pull requests.
