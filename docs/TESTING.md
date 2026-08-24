@@ -1,6 +1,6 @@
 # Testing
 
-This document describes the stable v0.1.0 smoke/compatibility test. Historical failed hypotheses are recorded in [REJECTED_HYPOTHESES.md](REJECTED_HYPOTHESES.md) and `RETAIL_EVIDENCE_*.md`.
+This document describes the stable Clean Pause smoke/compatibility test. Historical failed hypotheses are recorded in [REJECTED_HYPOTHESES.md](REJECTED_HYPOTHESES.md) and `RETAIL_EVIDENCE_*.md`.
 
 ## Supported test target
 
@@ -10,11 +10,26 @@ This document describes the stable v0.1.0 smoke/compatibility test. Historical f
 
 ## Install isolation
 
+Test exactly one Clean Pause edition at a time.
+
+### Standalone edition
+
 1. Close KCD2.
-2. Remove/disable old `Documents\kingdomcome_mods\clean_pause` prototype PAKs.
+2. Remove/disable old `Documents\kingdomcome_mods\clean_pause` prototype PAKs and any Clean Pause ASI.
 3. Install only the release `version.dll` beside the game executable / `WHGame.dll`.
 4. Do not overwrite another mod's unrelated `version.dll`.
 5. Optionally delete the old `kcd2_clean_pause_native.log` before testing.
+
+### ASI edition
+
+1. Close KCD2.
+2. Remove the Clean Pause standalone `version.dll` edition.
+3. Install one compatible x64 ASI loader, normally as `dinput8.dll` beside the game executable / `WHGame.dll`.
+4. Install only `KCD2CleanPause.asi` beside that loader.
+5. Do not overwrite an existing `dinput8.dll` blindly; preserve one compatible loader for all ASI plugins.
+6. Optionally delete the old `kcd2_clean_pause_native.log` before testing.
+
+The two Clean Pause editions must never be loaded together.
 
 ## Core smoke test
 
@@ -47,7 +62,7 @@ Close it normally and confirm gameplay resumes.
 
 Enter Clean Pause again and press Xbox B.
 
-Expected for **v0.1.0**: the ordinary vanilla pause menu becomes visible. This is intentional. B does not directly resume from Clean Pause.
+Expected under the current product contract: the ordinary vanilla pause menu becomes visible. B does not directly resume from Clean Pause.
 
 Use normal KCD2 menu controls to resume.
 
@@ -62,10 +77,16 @@ If naturally available in the same session:
 
 Do not create a separate game launch solely for a cutscene/subtitle edge case.
 
+## ASI edition acceptance
+
+The ASI package is a new loading path around the same runtime and requires one explicit retail-equivalence pass before stable release. Follow [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md).
+
+After standalone ASI acceptance, test coexistence with at least one other real KCD2 ASI plugin loaded through the same ASI loader. This validates file-level coexistence and exercises hook ordering, but it does not imply universal compatibility with every native mod.
+
 ## Robustness
 
 When convenient, exercise repeated pause cycles, load transitions, Alt-Tab, and controller reconnect. Any unresolved runtime assumption must degrade to ordinary visible vanilla pause rather than persistent input loss.
 
 ## CI
 
-Repository CI also builds the x64 MSVC DLL, validates version-proxy exports/static runtime dependencies, and runs `tools/validate_native_contract.py` to enforce the production architecture.
+Repository CI builds both x64 MSVC native images, validates standalone version-proxy exports, validates both images as x64/static-runtime builds, and runs `tools/validate_native_contract.py` plus the dual-package contract tests.
