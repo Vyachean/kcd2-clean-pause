@@ -1,29 +1,30 @@
-# Native retail test — Xbox Store / Game Pass 1.5.6
+# rc.5 native diagnostic — Xbox Store / Game Pass 1.5.6
 
-## Superseded prereleases
+## Superseded / failed prereleases
 
 - `v0.1.0-rc.1` — Escape/Start broken;
 - `v0.1.0-rc.2` — Escape/Start still broken;
-- `v0.1.0-rc.3` — safe F10 diagnostic; proved Lua command routing works but retail reports `Game.PauseGame unavailable`.
+- `v0.1.0-rc.3` — safe F10 profile diagnostic; proved Lua command routing works but tested only unavailable `Game.PauseGame`;
+- `v0.1.0-rc.4` — native ABI failure: Escape/Start made input unresponsive while gameplay continued. Root cause: gEnv `+0x98` is `IGame*`, not `IGameFramework*`; slot 13 was `IGame::GetName()`, not PauseGame.
 
-Do not install the old PAK together with the native candidate.
+`rc.5` is intentionally a **safe diagnostic**, not the final Start/Menu behavior.
 
 ## Install isolation
 
 1. Close KCD2.
-2. Delete/disable:
+2. Delete/disable the old profile mod if present:
 
 ```text
 %USERPROFILE%\Documents\kingdomcome_mods\clean_pause
 ```
 
-3. Extract the native prerelease ZIP.
-4. Put its `version.dll` in the same directory as `KingdomCome.exe` / `WHGame.dll`.
+3. Extract the `rc.5` native prerelease ZIP.
+4. Replace the previous Clean Pause `version.dll` beside `KingdomCome.exe` / `WHGame.dll` with the `rc.5` file.
 5. Start KCD2 normally.
 
-Do **not** take ownership of `WindowsApps` or weaken Windows permissions just to install this test. If the storefront installation does not permit placing the DLL beside the executable, report that as an installation result.
+Do **not** overwrite an unrelated mod's `version.dll`. Do **not** take ownership of `WindowsApps` or weaken Windows permissions just for this test.
 
-The native loader writes:
+The diagnostic writes:
 
 ```text
 kcd2_clean_pause_native.log
@@ -31,7 +32,7 @@ kcd2_clean_pause_native.log
 
 beside `version.dll`.
 
-## 1. Bootstrap safety
+## 1. Bootstrap / vanilla-input safety
 
 At the title menu:
 
@@ -39,115 +40,81 @@ At the title menu:
 - keyboard/mouse must remain normal;
 - no unexpected pause or input loss.
 
-If controller input is globally broken, remove `version.dll` and stop.
+Load a save and verify:
 
-Expected native log after successful initialization includes a line beginning:
+- **Escape opens the normal KCD2 pause menu**;
+- **Xbox Start/Menu opens the normal KCD2 pause menu**.
 
-```text
-native hook active;
-```
+This is a hard rc.5 contract. The hook contains no Start/Escape special case; only F10 is reserved. If Escape/Start are not vanilla, stop and attach the native log.
 
-If the hook cannot validate KCD2 1.5.6 runtime/slot 13, it must not install; vanilla input should remain functional.
-
-## 2. First Clean Pause
-
-Load a normal exploration save and press **Xbox Start/Menu**.
-
-Expected:
-
-- gameplay freezes immediately;
-- vanilla pause menu does not appear, even for one frame;
-- current rendered frame/HUD stays visible;
-- native log contains:
+Expected bootstrap log contains a line beginning:
 
 ```text
-IGameFramework::PauseGame(true, true, 0) invoked
-Running -> Clean Pause (pause input consumed before ActionMapManager)
+rc5 diagnostic hook active;
 ```
 
-Repeat with **Escape**.
+and identifies `game(IGame*)=...` rather than `framework=...`.
 
-If Start/Escape opens vanilla pause instead, attach the native log: fail-open probably occurred before or during pause acquisition.
+## 2. F10 pause primitive probe
 
-## 3. Input isolation
+Return to normal gameplay with no vanilla menu open, then press **F10 once**.
 
-While Clean Paused try:
+Desired diagnostic result:
 
-- A/X/Y;
-- D-pad;
-- shoulders/triggers;
-- sticks;
-- View/Back;
-- mouse/keyboard gameplay inputs.
+- gameplay/world freezes;
+- dialogue/cutscene progression freezes if tested there;
+- no vanilla pause overlay appears;
+- the current rendered frame remains visible.
 
-Expected: no gameplay/dialogue/camera action. Clean Pause consumes underlying input while it owns pause state.
+Regardless of whether the pause succeeds, **other controls must not become permanently unresponsive**. rc.5 has no global input-swallow state.
 
-## 4. B resume
+The important log line is:
 
-While Clean Paused press B once.
+```text
+Lua pause probe paused=true available=<true|false> route=<CryAction.PauseGame|Action.PauseGame|Game.PauseGame|none> pcall=<true|false>
+```
+
+The probe tries bindings in this order:
+
+1. `CryAction.PauseGame(true)`;
+2. `Action.PauseGame(true)`;
+3. `Game.PauseGame(true)`.
+
+## 3. F10 resume probe
+
+If the first F10 actually paused the game, press **F10 again**.
 
 Expected:
 
 - gameplay resumes;
-- B does not cause an underlying gameplay/dialogue action;
-- log contains:
+- log contains the same route with:
 
 ```text
-IGameFramework::PauseGame(false, true, 0) invoked
-Clean Pause -> Running (B consumed)
+Lua pause probe paused=false ... pcall=true
+F10 probe: requested resume through retail Lua pause binding
 ```
 
-## 5. Second Start -> vanilla pause
+## 4. Minimal dialogue/subtitle probe
 
-Enter Clean Pause again, then press Start (or Escape).
+Only if F10 pause/resume works in exploration:
 
-Expected:
+1. enter dialogue with a visible subtitle;
+2. press F10 during the line;
+3. wait longer than the subtitle would normally remain;
+4. note whether the exact subtitle stays visible and speech/progression stop;
+5. press F10 again to resume.
 
-- the normal KCD2 pause menu opens;
-- there is no intermediate gameplay/audio resume;
-- log contains:
+This establishes whether the retail pause primitive satisfies the actual Clean Pause goal before Start/Menu interception is reintroduced.
 
-```text
-Clean Pause -> vanilla pause menu (no intermediate unpause)
-```
+## Evidence to report
 
-If the normal menu does not open, Clean Pause should remain active and the log should report that `MenuEvents.DisplayIngameMenu(true)` did not establish `only_ui`.
+Report the visible results for:
 
-## 6. Subtitle/dialogue acceptance
+- Escape;
+- Start/Menu;
+- first F10;
+- second F10 if the first paused.
 
-1. Start dialogue with a visible subtitle.
-2. Press Start during the line.
-3. Wait longer than the subtitle would normally remain.
-4. Confirm the **same subtitle stays visible**.
-5. Confirm speech, animation/camera and scripted progression are stopped as expected.
-6. Resume with B.
-7. Confirm dialogue continues without skip/cancel/duplicate/desync.
+Also attach `kcd2_clean_pause_native.log`, especially the `Lua pause probe ...` lines.
 
-Repeat during an in-engine cutscene.
-
-## 7. Robustness
-
-After core behavior works, test:
-
-- repeated pause/resume;
-- combat;
-- mounted gameplay;
-- dialogue/cutscene transitions;
-- Clean Pause -> vanilla menu -> close menu;
-- save/load from vanilla menu;
-- death/game over;
-- controller reconnect;
-- Alt-Tab;
-- return to main menu.
-
-No path may leave the game stuck paused or leave input intercepted after Clean Pause relinquishes ownership.
-
-## Evidence to report on failure
-
-Attach `kcd2_clean_pause_native.log` and describe the visible result for:
-
-- first Start;
-- B while paused;
-- second Start.
-
-The old `kcd.log` F10 probe is no longer the primary diagnostic for native candidates.
+Do not test B/second-Start Clean Pause semantics in rc.5; they are deliberately disabled until the pause primitive is proven.
