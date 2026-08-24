@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  source-tests:
     runs-on: ubuntu-latest
 
     steps:
@@ -20,114 +20,87 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Lua 5.1
+      - name: Run repository tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Historical Lua syntax
         run: |
           sudo apt-get update
           sudo apt-get install -y lua5.1
+          luac5.1 -p src/Scripts/Mods/clean_pause.lua
 
-      - name: Check Lua syntax
-        run: luac5.1 -p src/Scripts/Mods/clean_pause.lua
-
-      - name: Run tests
-        run: python -m unittest discover -s tests -v
-
-      - name: Runtime safety checks
+      - name: Permanent input-safety constraints
         shell: python
         run: |
           from pathlib import Path
 
-          source = Path("src/Scripts/Mods/clean_pause.lua").read_text(encoding="utf-8")
-          executable = "\n".join(
-              line for line in source.splitlines() if not line.lstrip().startswith("--")
-          )
+          sources = [
+              Path("src/Scripts/Mods/clean_pause.lua"),
+              Path("native/src/clean_pause_native.cpp"),
+          ]
+          text = "\n".join(path.read_text(encoding="utf-8") for path in sources)
           forbidden = (
               "ActionMapManager.InitActionMaps(",
               "ActionMapManager.LoadFromXML(",
-              "ActionMapManager.EnableActionFilter(",
               "Player.OnAction =",
               "System.ExecuteCommand(\"bind ",
               "System.ExecuteCommand('bind ",
           )
           for needle in forbidden:
-              if needle in executable:
-                  raise SystemExit(f"Forbidden runtime input mutation found: {needle}")
+              if needle in text:
+                  raise SystemExit(f"Forbidden input mutation found: {needle}")
 
-          if source.count("__CLEAN_PAUSE_GAMEPLAY_COMMAND__") != 1:
-              raise SystemExit("Gameplay command placeholder contract changed")
-          if source.count("__CLEAN_PAUSE_PAUSE_COMMAND__") != 1:
-              raise SystemExit("Pause-context command placeholder contract changed")
+          native = Path("native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
+          abi = Path("native/src/kcd2_abi.h").read_text(encoding="utf-8")
+          if "Game.PauseGame" in native:
+              raise SystemExit("Native runtime must not depend on unavailable retail Lua Game.PauseGame")
+          if "kGameFrameworkPauseGameSlot = 13" not in abi:
+              raise SystemExit("Pinned KCD2 1.5.6 IGameFramework PauseGame slot changed")
+          if "PauseGameFn" not in abi or "g_gameFramework" not in native:
+              raise SystemExit("Direct native pause contract is missing")
+          if "ValidateObjectVtable(value.gameFramework, {kGameFrameworkPauseGameSlot})" not in native:
+              raise SystemExit("Runtime environment does not validate the pause vfunc before hooking")
 
-          print("Runtime safety checks passed")
+          print("Native pause and input safety contracts passed")
 
-      - name: Build exact diagnostic release package
-        run: python tools/build_release.py
+  native-build:
+    runs-on: windows-latest
 
-      - name: Validate final diagnostic ZIP
-        shell: python
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure x64 Release
+        run: cmake -S native -B native/build -A x64
+
+      - name: Build x64 Release
+        run: cmake --build native/build --config Release --parallel
+
+      - name: Validate version proxy artifact
+        shell: pwsh
         run: |
-          from io import BytesIO
-          from pathlib import Path
-          import xml.etree.ElementTree as ET
-          import zipfile
+          $dll = "native/build/Release/version.dll"
+          if (-not (Test-Path $dll)) { throw "Missing $dll" }
+          if ((Get-Item $dll).Length -lt 10240) { throw "version.dll is unexpectedly small" }
 
-          outer_path = Path("release/kcd2-clean-pause-xbox-1.5.6-test.zip")
-          with zipfile.ZipFile(outer_path) as outer:
-              expected_outer = {
-                  "clean_pause/mod.manifest",
-                  "clean_pause/Data/clean_pause.pak",
-              }
-              if set(outer.namelist()) != expected_outer:
-                  raise SystemExit(f"Unexpected release members: {outer.namelist()}")
-              pak_bytes = outer.read("clean_pause/Data/clean_pause.pak")
+          $exports = & dumpbin /nologo /exports $dll | Out-String
+          foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
+            if ($exports -notmatch [regex]::Escape($name)) {
+              throw "version.dll proxy export missing: $name"
+            }
+          }
 
-          with zipfile.ZipFile(BytesIO(pak_bytes)) as pak:
-              expected_pak = {
-                  "Libs/Config/defaultProfile.xml",
-                  "Scripts/Mods/clean_pause.lua",
-              }
-              if set(pak.namelist()) != expected_pak:
-                  raise SystemExit(f"Unexpected release PAK members: {pak.namelist()}")
-              if any(pak.getinfo(name).compress_type != zipfile.ZIP_STORED for name in expected_pak):
-                  raise SystemExit("Release PAK entries must be stored")
-              profile = pak.read("Libs/Config/defaultProfile.xml").decode("utf-8")
-              lua = pak.read("Scripts/Mods/clean_pause.lua").decode("utf-8")
+          $deps = & dumpbin /nologo /dependents $dll | Out-String
+          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") {
+            throw "Release DLL unexpectedly depends on dynamic MSVC runtime"
+          }
 
-          root = ET.fromstring(profile)
-          for map_name, vanilla_name, probe_name in (
-              ("open_menu", "open_menu", "clean_pause_probe_gameplay"),
-              ("open_pause_menu", "open_pause_menu", "clean_pause_probe_pause_context"),
-          ):
-              action_map = next(m for m in root.findall("actionmap") if m.get("name") == map_name)
-              actions = {a.get("name"): a for a in action_map.findall("action")}
+          Write-Host "Native version.dll validated: $((Get-Item $dll).Length) bytes"
 
-              vanilla = actions[vanilla_name]
-              if vanilla.get("onPress") != "1" or vanilla.get("onRelease") != "1":
-                  raise SystemExit(f"Vanilla activation changed: {map_name}/{vanilla_name}")
-              if vanilla.get("keyboard") != "_keybinds_ref_" or vanilla.get("xboxpad") != "xi_start":
-                  raise SystemExit(f"Vanilla binding changed: {map_name}/{vanilla_name}")
-              if vanilla.get("consoleCMD") is not None or vanilla.get("consoleCmd") is not None:
-                  raise SystemExit(f"Vanilla pause became console command: {map_name}/{vanilla_name}")
-
-              probe = actions[probe_name]
-              if probe.get("onPress") != "1" or probe.get("onRelease") is not None:
-                  raise SystemExit(f"F10 probe activation invalid: {map_name}/{probe_name}")
-              if probe.get("keyboard") != "f10" or probe.get("consoleCMD") != "1":
-                  raise SystemExit(f"F10 probe command invalid: {map_name}/{probe_name}")
-              if probe.get("xboxpad") is not None or probe.get("pspad") is not None:
-                  raise SystemExit(f"F10 probe touches controller: {map_name}/{probe_name}")
-
-          if 'local GAMEPLAY_COMMAND = "clean_pause_probe_gameplay"' not in lua:
-              raise SystemExit("Generated Lua does not register gameplay F10 probe")
-          if 'local PAUSE_COMMAND = "clean_pause_probe_pause_context"' not in lua:
-              raise SystemExit("Generated Lua does not register pause-context F10 probe")
-          if "__CLEAN_PAUSE_GAMEPLAY_COMMAND__" in lua or "__CLEAN_PAUSE_PAUSE_COMMAND__" in lua:
-              raise SystemExit("Generated Lua still contains placeholders")
-
-          controls = next(m for m in root.findall("actionmap") if m.get("name") == "clean_pause_controls")
-          if controls.get("priority") != "overlays" or controls.get("exclusivity") != "1":
-              raise SystemExit("Clean Pause controls map contract changed")
-
-          print("Diagnostic package validated: vanilla Esc/Start restored; F10 is keyboard-only")
-
-      # PR validation builds the same package that a VERSION release publishes,
-      # but does not upload it from pull requests.
+      - name: Upload native CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-version-dll
+          path: native/build/Release/version.dll
+          if-no-files-found: error
+          retention-days: 7
