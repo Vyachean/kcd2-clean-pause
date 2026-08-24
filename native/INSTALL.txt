@@ -1,25 +1,44 @@
-KCD2 Clean Pause — native retail candidate
+KCD2 Clean Pause — rc.5 Lua pause primitive diagnostic
 Target: Kingdom Come: Deliverance II 1.5.6, PC Xbox Store / Xbox app / Game Pass
 
+IMPORTANT
+rc.5 is a diagnostic prerelease, not the final Start/Menu implementation.
+It fixes the rc.4 safety bug: Escape and Xbox Start are never intercepted and must remain completely vanilla.
+Only F10 is reserved by this build.
+
 INSTALL
-1. Remove/disable the older Clean Pause folder from Documents\kingdomcome_mods before testing this native build.
+1. Remove/disable the older Clean Pause folder from Documents\kingdomcome_mods.
 2. Close KCD2 completely.
-3. Place version.dll in the same directory as KingdomCome.exe / WHGame.dll.
+3. Replace the previous Clean Pause version.dll with the rc.5 version.dll in the same directory as KingdomCome.exe / WHGame.dll.
 4. Start the game normally from Xbox / Microsoft Store.
 
 Do not replace, delete, or modify any game-owned DLL.
+If another unrelated mod already owns version.dll, do not overwrite it.
 If Windows does not allow writing to the game directory, do not change WindowsApps ownership or permissions just for this test.
 
 TEST
-- Confirm title-menu controller input is normal.
-- Load a save.
-- Press Escape or Xbox Start: first press should freeze the current frame without opening the vanilla pause overlay.
-- While Clean Paused, B should resume.
-- Enter Clean Pause again; a second Escape / Start should open the normal KCD2 pause menu without an intermediate unpause.
+1. Confirm title-menu keyboard/controller input is normal.
+2. Load a save.
+3. Press Escape: the normal KCD2 pause menu must open.
+4. Close it and press Xbox Start: the normal KCD2 pause menu must open.
+5. Back in gameplay, press F10 once.
+   - Desired diagnostic result: the current frame/world/dialogue freezes without opening the vanilla pause overlay.
+   - F10 must not make ordinary input permanently unresponsive if the pause probe fails.
+6. If F10 paused the game, press F10 again to request resume.
+
+WHAT F10 TESTS
+The probe tries the retail Lua pause bindings in this order:
+1. CryAction.PauseGame(bool)
+2. Action.PauseGame(bool)
+3. Game.PauseGame(bool)
+
+Warhorse ScriptBind documentation defines Action.PauseGame(bool), and a KCD2 retail Lua-state dump exposes CryAction.PauseGame. rc.3 tested only Game.PauseGame, which is unavailable in the tested retail build.
 
 LOG
 The native loader writes kcd2_clean_pause_native.log beside version.dll.
-On any failure, keep that log for diagnosis.
+After the F10 test, keep/send that log. The important line is:
+
+Lua pause probe paused=true available=<...> route=<...> pcall=<...>
 
 UNINSTALL
 Close KCD2 and delete only this mod's version.dll and kcd2_clean_pause_native.log from the game directory.

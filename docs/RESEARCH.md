@@ -18,10 +18,10 @@ with retail Escape/keybind and Xbox `xi_start` bindings.
 Permanent rules:
 
 - do not call `ActionMapManager.InitActionMaps()`; a previous prototype disabled controller input globally;
-- do not rely on a supplemental runtime Start map; it failed to intercept Start in two retail tests;
-- do not require a full `defaultProfile.xml` replacement for the active native implementation.
+- do not rely on a supplemental runtime Start map; it failed to intercept Start in retail testing;
+- do not require a full `defaultProfile.xml` replacement for the active native diagnostic implementation.
 
-## rc3 proved the Lua command chain
+## rc.3 proved the Lua command chain — but only tested Game.PauseGame
 
 `v0.1.0-rc.3` used a separate keyboard-only F10 `consoleCMD` probe while leaving vanilla Escape/Start untouched.
 
@@ -40,81 +40,118 @@ Therefore the following are confirmed on the target retail build:
 2. `Scripts/Mods/clean_pause.lua` executes;
 3. `System.AddCCommand` registration works;
 4. the F10 profile `consoleCMD` reaches the registered command;
-5. failure occurs specifically at the requested Lua pause primitive.
+5. that specific probe fails because `Game.PauseGame` is not present.
 
 F10 appearing to do nothing visually was **not** an input-routing failure.
 
-## Correction: `Game.PauseGame` is not a usable retail Lua API
+The previous project conclusion — "retail Lua has no pause primitive" — was too broad. The rc.3 test did not check the `CryAction` or `Action` tables.
 
-Earlier documentation treated generated ScriptBind method lists as proof that `Game.PauseGame` was callable in retail. The rc3 log falsifies that assumption.
+## Lua pause bindings worth testing
 
-Independent export data strengthens the runtime result:
+Warhorse ScriptBind documentation contains `CScriptBindAction::PauseGame(IFunctionHandler*, bool)` and documents its Lua syntax as:
 
-- the retail Lua-closure dump contains no `PauseGame` closure;
-- the crossmatch lists `CryAction.PauseGame` as `kcdrewrite_only`, not retail.
+```lua
+Action.PauseGame(pause)
+```
 
-Accordingly, the project must not ship another pure-profile/Lua candidate that depends on `Game.PauseGame`.
+with the description "Puts the game into pause mode" and `true`/`false` for pause/resume.
 
-## Confirmed native pause primitive
+A captured KCD2 Lua global-state dump separately lists:
 
-Reverse engineering for **WHGame.dll 1.5.6** identifies the KCD2 `IGameFramework` / `CCryAction` vtable and maps slot 13 to the game-framework pause method. The matching CryAction interface signature is:
+```text
+CryAction = {
+  ...
+  PauseGame()
+  ...
+}
+```
+
+Accordingly, `rc.5` probes the target retail runtime in this order:
+
+1. `CryAction.PauseGame(bool)`;
+2. `Action.PauseGame(bool)`;
+3. legacy `Game.PauseGame(bool)`.
+
+No Start/Escape interception is enabled while this is unresolved.
+
+## rc.4 native failure — corrected ABI facts
+
+`v0.1.0-rc.4` attempted to bypass Lua and call an inferred `IGameFramework::PauseGame` vfunc directly.
+
+Retail result:
+
+- Escape/Start were intercepted;
+- the simulation did not pause;
+- ordinary input then became unresponsive.
+
+The implementation error is now identified precisely.
+
+### gEnv +0x98 is IGame*, not IGameFramework*
+
+Current KCD2 1.5.6 reverse engineering of `SSystemGlobalEnvironment` verifies:
 
 ```cpp
-PauseGame(bool pause, bool force, unsigned int fadeOutInMs)
+Offsets::IGame* pGame; // +0x98
 ```
 
-The active native candidate therefore calls slot 13 directly as:
+The KCD2 `IGame` vtable verifies:
 
 ```text
-IGameFramework::PauseGame(paused, true, 0)
+slot 12 -> GetLongName() -> "Kingdom Come: Deliverance"
+slot 13 -> GetName()     -> "kcd2"
 ```
 
-The runtime does not use a fixed Xbox-Store address for `pGameFramework`: it locates `SSystemGlobalEnvironment`, validates its ScriptSystem/Input/System objects, and now additionally requires the slot-13 target to be executable before installing the input hook.
+rc.4 treated the +0x98 pointer as `IGameFramework*` and called slot 13 through a PauseGame-shaped function pointer. In practice that meant calling `IGame::GetName()` with extra arguments. Windows x64 calling convention allowed that call to return without an access violation, so the code falsely treated it as successful pause acquisition.
 
-If that validation fails, no hook is installed and KCD2 keeps vanilla input.
+### rc.4 had no pause-state confirmation
 
-## Native input architecture
+`SetNativePause()` returned success when the inferred call merely did not throw a structured exception. It did not verify that KCD2 actually entered a paused state.
 
-The existing narrow native prototype hooks `IInput::PostInputEvent` before `ActionMapManager`.
+The hook then set `g_cleanPaused=true` and consumed underlying gameplay/dialogue input. That exactly explains the retail symptom: the world kept running while controls appeared dead.
 
-Running:
+### IGameFramework slot 13 is not a proven KCD2 callable contract
+
+The latest reverse-engineered `IGameFramework` table annotates slot 13 as a 618-byte function corresponding to **KCD1 PauseGame**, but its exact KCD2 signature is not established. A KCD2 `I_UIMenu` callsite invokes framework `+0x68` (slot 13) with four explicit arguments and checks adjacent slot 14 with a `uint16_t id`, which already differs from the stock CryEngine signature rc.4 assumed.
+
+Therefore the project must not call slot 13 again until the exact KCD2 ABI, reason/id and state semantics are independently established.
+
+CI now rejects the old `kGameFrameworkPauseGameSlot`, `PauseGameFn`, `g_gameFramework`, `SetNativePause` and persistent `g_cleanPaused` contract.
+
+## rc.5 diagnostic architecture
+
+The native `version.dll` still uses the proven raw `IInput::PostInputEvent` hook and runtime gEnv locator, but only for a safe F10 diagnostic.
+
+The locator now models +0x98 correctly as `IGame*` and uses `IGame` slots 12/13 only as executable structural anchors; it never invokes them.
+
+Input behavior:
 
 ```text
-Escape / Xbox Start press
-  -> read-only Lua eligibility check (player exists; only_ui is false)
-  -> direct native PauseGame(true, true, 0)
-  -> consume physical press before vanilla pause action
+Escape / Xbox Start / every non-F10 input
+  -> always forward directly to KCD2
+
+F10 press in gameplay
+  -> read-only context check
+  -> probe CryAction.PauseGame / Action.PauseGame / Game.PauseGame
+  -> log route + pcall result
+
+second F10 after a successful Lua call
+  -> request resume through the same discovery order
 ```
 
-Clean Paused:
-
-```text
-B
-  -> native PauseGame(false, true, 0)
-  -> consume B press/release
-
-Escape / Start
-  -> call MenuEvents.DisplayIngameMenu(true)
-  -> verify only_ui became active
-  -> leave native pause active during handoff
-```
-
-All other KCD2 input events are consumed while Clean Pause owns the pause state.
-
-Lua is no longer responsible for pausing. It is used only for read-only context checks and the UI handoff because those retail APIs were independently observed/available.
+There is no global input-swallow mode in rc.5. Even if a Lua pause binding is absent or unexpectedly ineffective, normal Start/Escape and all unrelated controls remain vanilla.
 
 ## Remaining retail questions
 
-The next native prerelease must establish:
+The next retail test must establish only a narrow set of facts:
 
-1. whether the `version.dll` proxy loads on this exact Microsoft Store installation;
-2. whether runtime environment / slot-13 validation succeeds;
-3. whether first Escape/Start freezes the game without a vanilla-menu frame;
-4. whether current HUD/subtitle remains visible;
-5. whether dialogue audio and in-engine cutscene progression stop coherently;
-6. whether B resumes without leaking an underlying action;
-7. whether unrelated input is inert while paused;
-8. whether `MenuEvents.DisplayIngameMenu(true)` successfully performs second-Start handoff without an intermediate unpause;
-9. whether repeated pause/resume, loading, death, Alt-Tab and controller reconnect leave no stuck state.
+1. Escape remains ordinary vanilla pause under rc.5;
+2. Xbox Start remains ordinary vanilla pause under rc.5;
+3. which Lua pause binding, if any, exists on Xbox Store 1.5.6;
+4. whether F10 through that binding actually freezes world simulation;
+5. whether dialogue/cutscene audio/progression freezes coherently;
+6. whether current HUD/subtitle remains visible;
+7. whether a second F10 resumes cleanly.
 
-These cannot be established by CI; CI only proves compilation, packaging and static ABI/safety contracts.
+Only after those points are proven should Start/Escape interception, B resume and second-Start vanilla-menu handoff be restored.
+
+Compilation/CI cannot establish the actual runtime pause effect; it can only prove the fail-open input contract, Windows build, packaging and known ABI guards.

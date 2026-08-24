@@ -74,19 +74,42 @@ jobs:
 
           native = Path("native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
           abi = Path("native/src/kcd2_abi.h").read_text(encoding="utf-8")
-          forbidden = (
-              "Game.PauseGame",
+
+          for needle in (
               "ActionMapManager.InitActionMaps(",
               "ActionMapManager.LoadFromXML(",
               "Player.OnAction =",
-          )
-          for needle in forbidden:
+          ):
               if needle in native:
                   raise SystemExit(f"Forbidden native runtime dependency: {needle}")
-          if "kGameFrameworkPauseGameSlot = 13" not in abi:
-              raise SystemExit("KCD2 1.5.6 native PauseGame slot contract changed")
-          if "ValidateObjectVtable(value.gameFramework, {kGameFrameworkPauseGameSlot})" not in native:
-              raise SystemExit("Native runtime no longer validates PauseGame before hook installation")
+
+          # rc.4's direct ABI call was invalid: gEnv+0x98 is IGame*, not
+          # IGameFramework*. The diagnostic release must not resurrect it.
+          for needle in (
+              "kGameFrameworkPauseGameSlot",
+              "PauseGameFn",
+              "g_gameFramework",
+              "g_cleanPaused",
+              "SetNativePause(",
+          ):
+              if needle in native or needle in abi:
+                  raise SystemExit(f"Rejected rc.4 inferred native pause contract: {needle}")
+
+          for needle in ("kEnvGameOffset = 0x98", "F10 = 67"):
+              if needle not in abi:
+                  raise SystemExit(f"Missing corrected KCD2 ABI fact: {needle}")
+
+          for needle in (
+              "CryAction.PauseGame(true)",
+              "CryAction.PauseGame(false)",
+              "key != KeyId::F10",
+          ):
+              if needle not in native:
+                  raise SystemExit(f"Missing rc.5 Lua pause probe contract: {needle}")
+
+          for needle in ("KeyId::XiStart", "KeyId::Escape"):
+              if needle in native:
+                  raise SystemExit(f"rc.5 must leave vanilla pause input untouched: {needle}")
 
       - name: Configure x64 Release
         run: cmake -S native -B native/build -A x64
