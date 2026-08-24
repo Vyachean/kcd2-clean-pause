@@ -1,4 +1,4 @@
-name: RC7d concrete HUD candidate
+name: RC7d dual HUD candidate
 
 on:
   push:
@@ -35,7 +35,7 @@ permissions:
 
 env:
   CANDIDATE_TAG: v0.1.0-rc.7d
-  CANDIDATE_SLUG: rc7d-concrete-hud
+  CANDIDATE_ASSET: kcd2-clean-pause-v0.1.0-rc.7d.zip
 
 jobs:
   build-candidate:
@@ -82,6 +82,11 @@ jobs:
               "kUIElementIsVisibleSlot",
               "HookMenuRender",
               "kFlashUISetHudElementsVisibleSlot = 28",
+              "HookGlobalHudVisibility",
+              "EnsureGlobalHudVisibilityHook",
+              "flashUI == g_flashUI && !visible && ShouldHoldConcreteHudVisible()",
+              "suppressed IFlashUI::SetHudElementsVisible(false)",
+              "g_originalSetHudElementsVisible(flashUI, visible)",
               'getElement(g_flashUI, "hud@0")',
               "kHudElementSetVisibleSlot = 28",
               "HookHudSetVisible",
@@ -108,13 +113,19 @@ jobs:
           if "g_originalRender(element);" not in menu_hook or "return;" not in menu_hook:
               raise SystemExit("Menu Render hook must suppress only hidden Menu@0 and forward all other renders")
 
+          global_hook = source[source.index("void __fastcall HookGlobalHudVisibility"):source.index("bool EnsureGlobalHudVisibilityHook")]
+          if "flashUI == g_flashUI" not in global_hook or "!visible" not in global_hook:
+              raise SystemExit("Global HUD hook must be verified-object- and false-only gated")
+          if "g_originalSetHudElementsVisible(flashUI, visible);" not in global_hook:
+              raise SystemExit("Global HUD hook must forward every non-suppressed call")
+
           visibility_hook = source[source.index("void __fastcall HookHudSetVisible"):source.index("bool EnsureHudVisibilityHook")]
           if "element == g_hudElement" not in visibility_hook or "!visible" not in visibility_hook:
-              raise SystemExit("HUD visibility suppression must be object-identity- and false-only gated")
+              raise SystemExit("Concrete HUD suppression must be object-identity- and false-only gated")
           if "g_originalHudSetVisible(element, visible);" not in visibility_hook:
-              raise SystemExit("HUD visibility hook must forward every non-suppressed call")
+              raise SystemExit("Concrete HUD hook must forward every non-suppressed call")
           if "g_menuElement" in visibility_hook:
-              raise SystemExit("HUD visibility hook must never special-case or mutate Menu@0")
+              raise SystemExit("Concrete HUD hook must never special-case or mutate Menu@0")
 
           freeze_fn = source[source.index("bool ShouldFreezeHudFunction"):source.index("bool __fastcall HookHudCallFunction")]
           if freeze_fn.count("std::strcmp(") != 2:
@@ -135,7 +146,7 @@ jobs:
           if "Forward(input, event, force);" in b_block:
               raise SystemExit("Physical B must not leak to gameplay/dialog/cutscene while Clean Pause owns input")
 
-          print("rc7d safety contract passed")
+          print("rc7d dual-HUD safety contract passed")
 
       - name: Configure x64 Release
         run: cmake -S native/candidate/rc7 -B native/candidate/rc7/build -A x64
@@ -175,7 +186,7 @@ jobs:
           Copy-Item $dll candidate/stage/version.dll
           Copy-Item docs/RC7_SINGLE_SESSION_TEST.md candidate/stage/TEST.md
 
-          $asset = "kcd2-clean-pause-$env:CANDIDATE_SLUG-$env:GITHUB_SHA.zip"
+          $asset = $env:CANDIDATE_ASSET
           Compress-Archive -Path candidate/stage/* -DestinationPath "candidate/$asset" -CompressionLevel Optimal
           $hash = (Get-FileHash "candidate/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $asset" | Set-Content candidate/SHA256SUMS.txt -Encoding ascii -NoNewline
@@ -183,9 +194,9 @@ jobs:
       - name: Upload candidate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rc7d-concrete-hud-candidate
+          name: rc7d-dual-hud-candidate
           path: |
-            candidate/kcd2-clean-pause-rc7d-concrete-hud-*.zip
+            candidate/${{ env.CANDIDATE_ASSET }}
             candidate/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
@@ -207,7 +218,7 @@ jobs:
       - name: Download verified candidate
         uses: actions/download-artifact@v4
         with:
-          name: rc7d-concrete-hud-candidate
+          name: rc7d-dual-hud-candidate
           path: release-artifact
 
       - name: Verify checksum
@@ -216,29 +227,37 @@ jobs:
           set -euo pipefail
           cd release-artifact
           sha256sum --check SHA256SUMS.txt
+          test -f "$CANDIDATE_ASSET"
           test "$(find . -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 1
 
-      - name: Publish GitHub prerelease and bind tag to verified commit
+      - name: Publish canonical GitHub prerelease and bind exact tag
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          asset="$(find release-artifact -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          asset="release-artifact/$CANDIDATE_ASSET"
           checksum="release-artifact/SHA256SUMS.txt"
           expected_tag="v$(tr -d '\r\n' < VERSION)"
           test "$expected_tag" = "$CANDIDATE_TAG"
 
           if gh release view "$CANDIDATE_TAG" >/dev/null 2>&1; then
+            while IFS= read -r old_asset; do
+              [[ -z "$old_asset" ]] && continue
+              if [[ "$old_asset" == *.zip && "$old_asset" != "$CANDIDATE_ASSET" ]]; then
+                gh release delete-asset "$CANDIDATE_TAG" "$old_asset" --yes
+              fi
+            done < <(gh release view "$CANDIDATE_TAG" --json assets --jq '.assets[].name')
+
             gh release upload "$CANDIDATE_TAG" "$asset" "$checksum" --clobber
             gh release edit "$CANDIDATE_TAG" \
-              --title "$CANDIDATE_TAG — concrete HUD candidate" \
+              --title "$CANDIDATE_TAG — dual HUD candidate" \
               --notes-file docs/RELEASE_RC7D.md \
               --prerelease
           else
             gh release create "$CANDIDATE_TAG" "$asset" "$checksum" \
               --target "$GITHUB_SHA" \
-              --title "$CANDIDATE_TAG — concrete HUD candidate" \
+              --title "$CANDIDATE_TAG — dual HUD candidate" \
               --notes-file docs/RELEASE_RC7D.md \
               --prerelease
           fi
@@ -250,4 +269,10 @@ jobs:
 
           remote_sha="$(git ls-remote --tags origin "refs/tags/$CANDIDATE_TAG" | awk '{print $1}')"
           test "$remote_sha" = "$GITHUB_SHA"
-          echo "Verified $CANDIDATE_TAG -> $GITHUB_SHA"
+
+          assets="$(gh release view "$CANDIDATE_TAG" --json assets --jq '.assets[].name')"
+          test "$(printf '%s\n' "$assets" | grep -Fx "$CANDIDATE_ASSET" | wc -l)" -eq 1
+          test "$(printf '%s\n' "$assets" | grep -Fx 'SHA256SUMS.txt' | wc -l)" -eq 1
+          test "$(printf '%s\n' "$assets" | grep -E '\.zip$' | wc -l)" -eq 1
+
+          echo "Verified canonical prerelease $CANDIDATE_TAG -> $GITHUB_SHA"
