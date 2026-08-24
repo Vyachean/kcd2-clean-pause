@@ -83,33 +83,46 @@ jobs:
               if needle in native:
                   raise SystemExit(f"Forbidden native runtime dependency: {needle}")
 
-          # rc.4's direct ABI call was invalid: gEnv+0x98 is IGame*, not
-          # IGameFramework*. The diagnostic release must not resurrect it.
+          # Retail rc.4 proved the inferred native PauseGame ABI wrong; rc.5 proved
+          # the Lua PauseGame route is only a partial simulation freeze. Releases
+          # must use KCD2's own pause lifecycle and alter visibility only.
           for needle in (
               "kGameFrameworkPauseGameSlot",
               "PauseGameFn",
               "g_gameFramework",
-              "g_cleanPaused",
               "SetNativePause(",
+              "CryAction.PauseGame(",
+              "Action.PauseGame(",
+              "Game.PauseGame(",
           ):
               if needle in native or needle in abi:
-                  raise SystemExit(f"Rejected rc.4 inferred native pause contract: {needle}")
-
-          for needle in ("kEnvGameOffset = 0x98", "F10 = 67"):
-              if needle not in abi:
-                  raise SystemExit(f"Missing corrected KCD2 ABI fact: {needle}")
+                  raise SystemExit(f"Rejected non-vanilla pause primitive: {needle}")
 
           for needle in (
-              "CryAction.PauseGame(true)",
-              "CryAction.PauseGame(false)",
-              "key != KeyId::F10",
+              "kEnvGameOffset = 0x98",
+              "kEnvFlashUIOffset = 0x140",
+              "kFlashUIGetElementByInstanceStrSlot = 18",
+              "kUIElementSetVisibleSlot = 28",
+              "kUIElementIsVisibleSlot = 29",
+          ):
+              if needle not in abi:
+                  raise SystemExit(f"Missing verified KCD2 ABI fact: {needle}")
+
+          for needle in (
+              "KeyId::XiStart",
+              "KeyId::Escape",
+              "ActionMapManager.IsFilterEnabled(\"only_ui\")",
+              "getElement(g_flashUI, \"Menu@0\")",
+              "HideVerifiedVanillaPause(",
+              "g_cleanHidden",
           ):
               if needle not in native:
-                  raise SystemExit(f"Missing rc.5 Lua pause probe contract: {needle}")
+                  raise SystemExit(f"Missing hidden-vanilla-pause release contract: {needle}")
 
-          for needle in ("KeyId::XiStart", "KeyId::Escape"):
-              if needle in native:
-                  raise SystemExit(f"rc.5 must leave vanilla pause input untouched: {needle}")
+          forward_pos = native.find("Forward(input, event, force);", native.find("const bool eligible"))
+          hide_pos = native.find('HideVerifiedVanillaPause("Escape/Start press")')
+          if forward_pos == -1 or hide_pos == -1 or forward_pos > hide_pos:
+              raise SystemExit("Release must forward vanilla pause input before hiding Menu")
 
       - name: Configure x64 Release
         run: cmake -S native -B native/build -A x64
