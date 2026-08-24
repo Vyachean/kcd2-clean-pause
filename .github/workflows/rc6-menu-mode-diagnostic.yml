@@ -1,0 +1,122 @@
+name: RC6 menu-mode diagnostic
+
+on:
+  pull_request:
+    paths:
+      - native/diagnostic/menu_mode/**
+      - native/src/clean_pause_native.h
+      - native/src/kcd2_abi.h
+      - native/src/version_proxy.cpp
+      - native/src/version.def
+      - docs/RC6_MENU_MODE_DIAGNOSTIC.md
+      - .github/workflows/rc6-menu-mode-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-diagnostic:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify read-only diagnostic contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          source = Path("native/diagnostic/menu_mode/menu_mode_probe.cpp").read_text(encoding="utf-8")
+
+          forbidden = (
+              "PauseGame(",
+              "SetVisibleFn",
+              "kUIElementSetVisibleSlot",
+              "ActionMapManager.InitActionMaps(",
+              "ActionMapManager.LoadFromXML(",
+              "ActionMapManager.EnableActionFilter(",
+              "Player.OnAction =",
+              "MH_CreateHook",
+              "MH_EnableHook",
+              "PostInputEventFn",
+          )
+          for needle in forbidden:
+              if needle in source:
+                  raise SystemExit(f"Menu-mode diagnostic must remain read-only: {needle}")
+
+          required = (
+              'getElement(g_flashUI, "Menu@0")',
+              "kUIElementIsVisibleSlot",
+              "kGameContextGuiModuleOffset = 0xE8",
+              "kGuiUiElementsOffset = 0x40",
+              "kUiFlashElementOffset = 0x48",
+              "kUiMenuInterfaceOffset = 0x58",
+              "kUiMenuStateOffset = 0xA0",
+              "kUiMenuGetStateSlot = 9",
+              'std::strcmp(name, "GUIModule")',
+              "apiState != memoryState",
+              "vanilla input/UI untouched",
+          )
+          for needle in required:
+              if needle not in source:
+                  raise SystemExit(f"Missing menu-mode diagnostic contract: {needle}")
+
+          print("read-only C_UIMenu state diagnostic contract passed")
+
+      - name: Configure x64 Release
+        run: cmake -S native/diagnostic/menu_mode -B native/diagnostic/menu_mode/build -A x64
+
+      - name: Build x64 Release
+        run: cmake --build native/diagnostic/menu_mode/build --config Release --parallel
+
+      - name: Validate and package diagnostic
+        shell: pwsh
+        run: |
+          $dll = "native/diagnostic/menu_mode/build/Release/version.dll"
+          if (-not (Test-Path $dll)) { throw "Missing $dll" }
+          if ((Get-Item $dll).Length -lt 10240) { throw "version.dll is unexpectedly small" }
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
+          $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          if (-not $vs) { throw "MSVC installation not found" }
+          $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC/*/bin/Hostx64/x64/dumpbin.exe") |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $dumpbin) { throw "dumpbin.exe not found" }
+
+          $exports = & $dumpbin /nologo /exports $dll | Out-String
+          foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
+            if ($exports -notmatch [regex]::Escape($name)) {
+              throw "version.dll proxy export missing: $name"
+            }
+          }
+
+          $deps = & $dumpbin /nologo /dependents $dll | Out-String
+          if ($deps -match "VCRUNTIME[0-9]+\.dll" -or $deps -match "MSVCP[0-9]+\.dll") {
+            throw "Diagnostic DLL unexpectedly depends on dynamic MSVC runtime"
+          }
+
+          New-Item -ItemType Directory -Force diagnostic-menu-mode/stage | Out-Null
+          Copy-Item $dll diagnostic-menu-mode/stage/version.dll
+          Copy-Item docs/RC6_MENU_MODE_DIAGNOSTIC.md diagnostic-menu-mode/stage/TEST.md
+
+          $asset = "kcd2-clean-pause-rc6-menu-mode-diagnostic-$env:GITHUB_SHA.zip"
+          Compress-Archive -Path diagnostic-menu-mode/stage/* -DestinationPath "diagnostic-menu-mode/$asset" -CompressionLevel Optimal
+          $hash = (Get-FileHash "diagnostic-menu-mode/$asset" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $asset" | Set-Content diagnostic-menu-mode/SHA256SUMS.txt -Encoding ascii -NoNewline
+
+          Write-Host "Packaged diagnostic-menu-mode/$asset"
+
+      - name: Upload diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc6-menu-mode-diagnostic
+          path: |
+            diagnostic-menu-mode/kcd2-clean-pause-rc6-menu-mode-diagnostic-*.zip
+            diagnostic-menu-mode/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
