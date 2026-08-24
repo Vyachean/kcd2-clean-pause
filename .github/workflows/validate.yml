@@ -53,41 +53,55 @@ jobs:
           native = Path("native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
           abi = Path("native/src/kcd2_abi.h").read_text(encoding="utf-8")
 
-          # rc.4 failed because gEnv+0x98 was incorrectly treated as IGameFramework*;
-          # KCD2 1.5.6 reverse engineering identifies it as IGame*.
+          # Never call an inferred or partial pause primitive. Retail rc.4 proved
+          # the direct ABI assumption wrong; retail rc.5 proved the Lua primitive
+          # only freezes simulation and does not own the full pause lifecycle.
           for needle in (
               "kGameFrameworkPauseGameSlot",
               "PauseGameFn",
               "g_gameFramework",
-              "g_cleanPaused",
               "SetNativePause(",
+              "CryAction.PauseGame(",
+              "Action.PauseGame(",
+              "Game.PauseGame(",
           ):
               if needle in native or needle in abi:
-                  raise SystemExit(f"Rejected rc.4 inferred native pause contract: {needle}")
+                  raise SystemExit(f"Rejected non-vanilla pause primitive: {needle}")
 
-          required = (
+          required_abi = (
               "kEnvGameOffset = 0x98",
-              "F10 = 67",
+              "kEnvFlashUIOffset = 0x140",
+              "kFlashUIGetElementByInstanceStrSlot = 18",
+              "kUIElementSetVisibleSlot = 28",
+              "kUIElementIsVisibleSlot = 29",
           )
-          for needle in required:
+          for needle in required_abi:
               if needle not in abi:
-                  raise SystemExit(f"Missing corrected KCD2 ABI fact: {needle}")
+                  raise SystemExit(f"Missing verified KCD2 ABI fact: {needle}")
 
-          for needle in (
-              "CryAction.PauseGame(true)",
-              "CryAction.PauseGame(false)",
-              "key != KeyId::F10",
-              "g_probePaused",
-          ):
+          required_runtime = (
+              "KeyId::XiStart",
+              "KeyId::Escape",
+              "Forward(input, event, force);",
+              "ActionMapManager.IsFilterEnabled(\"only_ui\")",
+              "getElement(g_flashUI, \"Menu@0\")",
+              "SetMenuVisible(false)",
+              "SetMenuVisible(true)",
+              "HideVerifiedVanillaPause(",
+              "g_cleanHidden",
+          )
+          for needle in required_runtime:
               if needle not in native:
-                  raise SystemExit(f"Missing rc.5 diagnostic probe contract: {needle}")
+                  raise SystemExit(f"Missing hidden-vanilla-pause contract: {needle}")
 
-          # Start/Escape must be completely vanilla in this diagnostic release.
-          for needle in ("KeyId::XiStart", "KeyId::Escape"):
-              if needle in native:
-                  raise SystemExit(f"rc.5 must not intercept vanilla pause input: {needle}")
+          # First pause must be fail-open: the physical event is forwarded before
+          # Menu is hidden. Hidden state is entered only after only_ui verification.
+          forward_pos = native.find("Forward(input, event, force);", native.find("const bool eligible"))
+          hide_pos = native.find('HideVerifiedVanillaPause("Escape/Start press")')
+          if forward_pos == -1 or hide_pos == -1 or forward_pos > hide_pos:
+              raise SystemExit("Pause input must reach vanilla KCD2 before UI hiding")
 
-          print("rc.5 fail-open Lua pause probe and input safety contracts passed")
+          print("hidden vanilla pause and fail-open input contracts passed")
 
   native-build:
     runs-on: windows-latest

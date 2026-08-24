@@ -1,15 +1,16 @@
-KCD2 Clean Pause — rc.5 Lua pause primitive diagnostic
+KCD2 Clean Pause — hidden vanilla pause candidate
 Target: Kingdom Come: Deliverance II 1.5.6, PC Xbox Store / Xbox app / Game Pass
 
-IMPORTANT
-rc.5 is a diagnostic prerelease, not the final Start/Menu implementation.
-It fixes the rc.4 safety bug: Escape and Xbox Start are never intercepted and must remain completely vanilla.
-Only F10 is reserved by this build.
+ARCHITECTURE
+This build does not call a custom PauseGame primitive.
+Escape / Xbox Start first goes to KCD2 unchanged so the game creates its normal full pause.
+Only after vanilla `only_ui` is verified does the mod hide the `Menu@0` Flash element.
+If hiding fails, the ordinary visible KCD2 pause menu remains.
 
 INSTALL
 1. Remove/disable the older Clean Pause folder from Documents\kingdomcome_mods.
 2. Close KCD2 completely.
-3. Replace the previous Clean Pause version.dll with the rc.5 version.dll in the same directory as KingdomCome.exe / WHGame.dll.
+3. Replace the previous Clean Pause version.dll with this version.dll in the same directory as KingdomCome.exe / WHGame.dll.
 4. Start the game normally from Xbox / Microsoft Store.
 
 Do not replace, delete, or modify any game-owned DLL.
@@ -19,26 +20,33 @@ If Windows does not allow writing to the game directory, do not change WindowsAp
 TEST
 1. Confirm title-menu keyboard/controller input is normal.
 2. Load a save.
-3. Press Escape: the normal KCD2 pause menu must open.
-4. Close it and press Xbox Start: the normal KCD2 pause menu must open.
-5. Back in gameplay, press F10 once.
-   - Desired diagnostic result: the current frame/world/dialogue freezes without opening the vanilla pause overlay.
-   - F10 must not make ordinary input permanently unresponsive if the pause probe fails.
-6. If F10 paused the game, press F10 again to request resume.
+3. In normal exploration press Escape or Xbox Start once.
+   Expected: gameplay/audio pause as with vanilla pause, but the pause menu itself is not visible.
+4. While Clean Paused, wait and verify world/audio really remain stopped.
+5. Press Xbox B.
+   Expected: gameplay resumes; B does not leak into gameplay/dialogue.
+6. Enter Clean Pause again and press Escape/Start a second time.
+   Expected: the already-open ordinary KCD2 pause menu becomes visible without an intermediate gameplay tick.
+7. Test dialogue with a visible subtitle:
+   - press Escape/Start during the subtitle;
+   - wait longer than the subtitle would normally remain;
+   - verify speech/progression stay paused and whether the same subtitle remains visible;
+   - press B to resume.
+8. Repeat once in an in-engine cutscene if practical.
 
-WHAT F10 TESTS
-The probe tries the retail Lua pause bindings in this order:
-1. CryAction.PauseGame(bool)
-2. Action.PauseGame(bool)
-3. Game.PauseGame(bool)
-
-Warhorse ScriptBind documentation defines Action.PauseGame(bool), and a KCD2 retail Lua-state dump exposes CryAction.PauseGame. rc.3 tested only Game.PauseGame, which is unavailable in the tested retail build.
+FAIL-OPEN EXPECTATION
+If the mod cannot verify vanilla `only_ui`, find `Menu@0`, or change Menu visibility, it must leave the normal visible KCD2 pause menu/input behavior rather than trapping input.
 
 LOG
 The native loader writes kcd2_clean_pause_native.log beside version.dll.
-After the F10 test, keep/send that log. The important line is:
+Useful lines include:
 
-Lua pause probe paused=true available=<...> route=<...> pcall=<...>
+hidden-vanilla-pause hook active; ...
+Running -> Clean Pause: vanilla pause retained, Menu@0 hidden (...)
+Clean Pause -> running via vanilla B/back
+Clean Pause -> visible vanilla pause menu (second Escape/Start consumed)
+
+If behavior differs, keep/send this log.
 
 UNINSTALL
 Close KCD2 and delete only this mod's version.dll and kcd2_clean_pause_native.log from the game directory.
