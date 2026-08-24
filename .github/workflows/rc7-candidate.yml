@@ -1,4 +1,4 @@
-name: RC7d dual HUD candidate
+name: RC7e HUD child snapshot candidate
 
 on:
   push:
@@ -10,8 +10,10 @@ on:
       - native/src/kcd2_abi.h
       - native/src/version_proxy.cpp
       - native/src/version.def
+      - VERSION
       - docs/RC7_SINGLE_SESSION_TEST.md
-      - docs/RELEASE_RC7D.md
+      - docs/RELEASE_RC7E.md
+      - docs/RETAIL_EVIDENCE_RC7D.md
       - docs/STATUS_AND_PLAN.md
       - docs/REJECTED_HYPOTHESES.md
       - .github/workflows/rc7-candidate.yml
@@ -22,7 +24,12 @@ on:
       - native/src/kcd2_abi.h
       - native/src/version_proxy.cpp
       - native/src/version.def
+      - VERSION
       - docs/RC7_SINGLE_SESSION_TEST.md
+      - docs/RELEASE_RC7E.md
+      - docs/RETAIL_EVIDENCE_RC7D.md
+      - docs/STATUS_AND_PLAN.md
+      - docs/REJECTED_HYPOTHESES.md
       - .github/workflows/rc7-candidate.yml
   workflow_dispatch:
 
@@ -34,8 +41,8 @@ permissions:
   contents: read
 
 env:
-  CANDIDATE_TAG: v0.1.0-rc.7d
-  CANDIDATE_ASSET: kcd2-clean-pause-v0.1.0-rc.7d.zip
+  CANDIDATE_TAG: v0.1.0-rc.7e
+  CANDIDATE_ASSET: kcd2-clean-pause-v0.1.0-rc.7e.zip
 
 jobs:
   build-candidate:
@@ -53,14 +60,15 @@ jobs:
           import subprocess
           import sys
 
-          generated = Path("native/candidate/rc7/clean_pause_candidate_rc7d.ci.cpp")
+          generated = Path("native/candidate/rc7/clean_pause_candidate_rc7e.ci.cpp")
           subprocess.run([
               sys.executable,
-              "native/candidate/rc7/generate_candidate_v3.py",
+              "native/candidate/rc7/generate_candidate_v4.py",
               "native/candidate/rc7/clean_pause_candidate.cpp",
               str(generated),
           ], check=True)
           source = generated.read_text(encoding="utf-8")
+          abi = Path("native/src/kcd2_abi.h").read_text(encoding="utf-8")
 
           forbidden = (
               "PauseGame(",
@@ -71,61 +79,84 @@ jobs:
               "Player.OnAction =",
               "0x492D7F8",
               "0x549D388",
+              "SetHudGateVisible",
+              "g_hudGateForcedVisible",
+              "HookHudSetVisible",
+              "HookGlobalHudVisibility",
+              "EnsureGlobalHudVisibilityHook",
+              "kHudElementSetVisibleSlot",
           )
           for needle in forbidden:
               if needle in source:
-                  raise SystemExit(f"Forbidden rc7d candidate path: {needle}")
+                  raise SystemExit(f"Forbidden rc7e candidate path: {needle}")
 
           required = (
               'getElement(g_flashUI, "Menu@0")',
               "kUIElementRenderSlot = 24",
               "kUIElementIsVisibleSlot",
               "HookMenuRender",
-              "kFlashUISetHudElementsVisibleSlot = 28",
-              "HookGlobalHudVisibility",
-              "EnsureGlobalHudVisibilityHook",
-              "flashUI == g_flashUI && !visible && ShouldHoldConcreteHudVisible()",
-              "suppressed IFlashUI::SetHudElementsVisible(false)",
-              "g_originalSetHudElementsVisible(flashUI, visible)",
               'getElement(g_flashUI, "hud@0")',
-              "kHudElementSetVisibleSlot = 28",
-              "HookHudSetVisible",
-              "element == g_hudElement && !visible && ShouldHoldConcreteHudVisible()",
-              "suppressed hud@0 SetVisible(false)",
-              "SetConcreteHudVisibleAndVerify(true, false)",
-              "Clean Pause HUD presentation verified: hud@0 visible=true",
-              "RestoreVisibleVanillaPausePresentation",
               "kUIElementCallFunctionByNameSlot = 69",
               "HookHudCallFunction",
               'std::strcmp(name, "ClearSubtitles") == 0',
               'std::strcmp(name, "HideNarrativeSubtitles") == 0',
+              "kHudClipCount = 28",
+              '"Subtitles"',
+              '"Hints"',
+              "kUIElementGetMovieClipByNameSlot",
+              "kFlashVariableGetDisplayInfoSlot",
+              "kFlashVariableSetVisibleSlot",
+              "CaptureHudClipSnapshot",
+              "RestoreHudClipSnapshot",
+              "ReleaseHudClipSnapshot",
+              "HUD child visibility snapshot captured for all 28 clips",
+              "Clean Pause HUD child snapshot restored across all 28 clips",
+              "kHudSnapshotHoldMs = 750",
               "ReplayVanillaPauseToggle",
               "Clean Pause -> running via B using replayed vanilla pause toggle",
               "g_forwardDepth",
               "if (g_forwardDepth != 0)",
-              "rc7d concrete-HUD render-suppression candidate active",
+              "rc7e child-HUD-snapshot render-suppression candidate active",
           )
           for needle in required:
               if needle not in source:
-                  raise SystemExit(f"Missing rc7d candidate contract: {needle}")
+                  raise SystemExit(f"Missing rc7e candidate contract: {needle}")
+
+          for needle in (
+              "XiStart = 516",
+              "XiA = 526",
+              "XiB = 527",
+              "kUIElementGetMovieClipByNameSlot = 71",
+              "kFlashVariableReleaseSlot = 0",
+              "kFlashVariableGetDisplayInfoSlot = 26",
+              "kFlashVariableSetVisibleSlot = 33",
+          ):
+              if needle not in abi:
+                  raise SystemExit(f"Missing retail/RE-proven ABI contract: {needle}")
+
+          # The 28-name table must be a complete one-to-one snapshot, not a small
+          # whitelist that could accidentally preserve subtitles while losing hints.
+          table_start = source.index("const char* const kHudClipNames")
+          table_end = source.index("};", table_start)
+          table = source[table_start:table_end]
+          if table.count('"') != 56:
+              raise SystemExit("HUD child snapshot must name exactly 28 clips")
+
+          capture = source[source.index("bool CaptureHudClipSnapshot"):source.index("bool RestoreHudClipSnapshot")]
+          if "getMovieClip(hud, kHudClipNames[i], nullptr)" not in capture:
+              raise SystemExit("HUD snapshot must resolve each child through hud@0 GetMovieClip")
+          if "info[kFlashDisplayInfoVisibleOffset] != 0" not in capture:
+              raise SystemExit("HUD snapshot must preserve pre-pause child visibility")
+
+          restore = source[source.index("bool RestoreHudClipSnapshot"):source.index("void __fastcall HookMenuRender")]
+          if "setVisible(snapshot.clip, snapshot.visible)" not in restore:
+              raise SystemExit("HUD restore must replay captured visibility, not force every child visible")
 
           menu_hook = source[source.index("void __fastcall HookMenuRender"):source.index("bool EnsureMenuRenderHook")]
-          if "g_originalRender(element);" not in menu_hook or "return;" not in menu_hook:
-              raise SystemExit("Menu Render hook must suppress only hidden Menu@0 and forward all other renders")
-
-          global_hook = source[source.index("void __fastcall HookGlobalHudVisibility"):source.index("bool EnsureGlobalHudVisibilityHook")]
-          if "flashUI == g_flashUI" not in global_hook or "!visible" not in global_hook:
-              raise SystemExit("Global HUD hook must be verified-object- and false-only gated")
-          if "g_originalSetHudElementsVisible(flashUI, visible);" not in global_hook:
-              raise SystemExit("Global HUD hook must forward every non-suppressed call")
-
-          visibility_hook = source[source.index("void __fastcall HookHudSetVisible"):source.index("bool EnsureHudVisibilityHook")]
-          if "element == g_hudElement" not in visibility_hook or "!visible" not in visibility_hook:
-              raise SystemExit("Concrete HUD suppression must be object-identity- and false-only gated")
-          if "g_originalHudSetVisible(element, visible);" not in visibility_hook:
-              raise SystemExit("Concrete HUD hook must forward every non-suppressed call")
-          if "g_menuElement" in visibility_hook:
-              raise SystemExit("Concrete HUD hook must never special-case or mutate Menu@0")
+          if "RestoreHudClipSnapshot()" not in menu_hook:
+              raise SystemExit("Menu render transition must hold the child snapshot across late HUD refreshes")
+          if "g_originalRender(element);" not in menu_hook:
+              raise SystemExit("Menu render hook must fail open / forward when not suppressing")
 
           freeze_fn = source[source.index("bool ShouldFreezeHudFunction"):source.index("bool __fastcall HookHudCallFunction")]
           if freeze_fn.count("std::strcmp(") != 2:
@@ -133,10 +164,6 @@ jobs:
           for allowed in ("ClearSubtitles", "HideNarrativeSubtitles"):
               if allowed not in freeze_fn:
                   raise SystemExit(f"Subtitle freeze whitelist missing {allowed}")
-
-          hud_call_hook = source[source.index("bool __fastcall HookHudCallFunction"):source.index("bool EnsureHudSubtitleHook")]
-          if "g_originalHudCallFunction" not in hud_call_hook:
-              raise SystemExit("HUD CallFunction hook must forward non-subtitle calls")
 
           b_start = source.index("if (key == KeyId::XiB) {", source.index("void HandleHiddenInput"))
           b_end = source.index("// Once a real Menu@0 render", b_start)
@@ -146,7 +173,7 @@ jobs:
           if "Forward(input, event, force);" in b_block:
               raise SystemExit("Physical B must not leak to gameplay/dialog/cutscene while Clean Pause owns input")
 
-          print("rc7d dual-HUD safety contract passed")
+          print("rc7e child-HUD snapshot safety contract passed")
 
       - name: Configure x64 Release
         run: cmake -S native/candidate/rc7 -B native/candidate/rc7/build -A x64
@@ -194,7 +221,7 @@ jobs:
       - name: Upload candidate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rc7d-dual-hud-candidate
+          name: rc7e-child-hud-snapshot-candidate
           path: |
             candidate/${{ env.CANDIDATE_ASSET }}
             candidate/SHA256SUMS.txt
@@ -218,7 +245,7 @@ jobs:
       - name: Download verified candidate
         uses: actions/download-artifact@v4
         with:
-          name: rc7d-dual-hud-candidate
+          name: rc7e-child-hud-snapshot-candidate
           path: release-artifact
 
       - name: Verify checksum
@@ -251,14 +278,14 @@ jobs:
 
             gh release upload "$CANDIDATE_TAG" "$asset" "$checksum" --clobber
             gh release edit "$CANDIDATE_TAG" \
-              --title "$CANDIDATE_TAG — dual HUD candidate" \
-              --notes-file docs/RELEASE_RC7D.md \
+              --title "$CANDIDATE_TAG — HUD child snapshot candidate" \
+              --notes-file docs/RELEASE_RC7E.md \
               --prerelease
           else
             gh release create "$CANDIDATE_TAG" "$asset" "$checksum" \
               --target "$GITHUB_SHA" \
-              --title "$CANDIDATE_TAG — dual HUD candidate" \
-              --notes-file docs/RELEASE_RC7D.md \
+              --title "$CANDIDATE_TAG — HUD child snapshot candidate" \
+              --notes-file docs/RELEASE_RC7E.md \
               --prerelease
           fi
 
