@@ -1,16 +1,16 @@
 # Current status and plan
 
-This is the canonical project-status document. Historical prototype documents remain for context, but they must not override the decisions recorded here.
+This is the canonical project-status document. Historical prototype documents remain for context, but they must not override the decisions recorded here. Rejected hypotheses are tracked in `docs/REJECTED_HYPOTHESES.md` and retail-session evidence may be recorded in dedicated `RETAIL_EVIDENCE_*.md` files.
 
 ## Target
 
 Primary target:
 
 - Kingdom Come: Deliverance II 1.5.6;
-- PC Xbox Store / Xbox app / Game Pass;
-- Xbox controller, with Escape behaving analogously to Xbox Menu / Start.
+- Windows retail, with PC Xbox Store / Xbox app / Game Pass as the primary storefront;
+- Xbox controller, with keyboard Escape behaving analogously to Xbox Menu / Start.
 
-Product behavior:
+Required product behavior:
 
 ```text
 Running
@@ -23,226 +23,201 @@ Clean Pause
 
 Clean Pause must stop gameplay, dialogue/in-engine-cutscene progression, relevant audio, and subtitle lifetime while keeping the current rendered frame unobscured. It must not draw a replacement overlay.
 
-## Current candidate
+The strong depth-of-field blur applied by KCD2's vanilla pause is accepted and is intentionally out of scope.
 
-Current prerelease: **v0.1.0-rc.6**.
+## Current accepted architecture
 
-rc.6 uses a **hidden vanilla pause** architecture. It does not call a custom pause primitive. KCD2 itself creates and owns the real pause; Clean Pause changes only presentation and input isolation after that vanilla pause is verified.
+KCD2 remains the **only pause owner**.
 
-Retail acceptance of rc.6 is the next gate.
+1. Forward the real physical Escape / Xbox Start event to vanilla KCD2.
+2. Resolve `Menu@0` through `IFlashUI`.
+3. Use `Menu@0::IsVisible()` as the independent retail-proven signal that the vanilla pause/menu lifecycle is active.
+4. Leave `Menu@0` logically visible to KCD2.
+5. Suppress only `Menu@0::Render()` while Clean Pause is active.
+6. A second Escape/Start stops render suppression and reveals the already-open vanilla menu without an unpause/re-pause cycle.
+7. Unrelated gameplay/dialog/cutscene input is consumed only while verified vanilla pause ownership is active.
+8. Any unresolved condition fails open to ordinary visible vanilla pause behavior.
+
+This foundation was proven repeatedly by rc7b and remained stable in rc7c.
+
+## Current state — after rc7c retail test
+
+### Proven working
+
+On Xbox Store KCD2 1.5.6:
+
+- native bootstrap and raw `IInput::PostInputEvent` hook work;
+- `Menu@0` resolves reliably;
+- `Menu@0::IsVisible()` tracks vanilla pause lifecycle correctly;
+- suppressing only `Menu@0::Render()` produces a real Clean Pause;
+- world simulation stops;
+- audio pauses exactly as with ordinary vanilla pause;
+- repeated Clean Pause entry works;
+- second Escape/Start reveals the already-open vanilla pause menu while keeping pause continuous;
+- `hud@0` resolves;
+- the named HUD `CallFunction` hook works and can intercept `ClearSubtitles`.
+
+### Still unresolved
+
+1. **HUD / subtitles are still hidden during Clean Pause.**
+   rc7c called the verified `IFlashUI::SetHudElementsVisible(true)` after pause acquisition and suppressed `hud.ClearSubtitles`, but the user observed no visible difference from rc7b. Therefore the global HUD visibility gate is insufficient.
+
+2. **Direct B resume is not yet retail-proven.**
+   rc7c contains a route that consumes physical Xbox B and replays the captured vanilla pause key pair through the original `PostInputEvent`, but the supplied rc7c session log contains Escape interactions only. No B-resume attempt appears in that log, so this mechanism remains unverified rather than accepted or rejected.
+
+3. **Subtitle retention cannot be accepted until the concrete HUD presentation remains visible.**
+   Blocking `ClearSubtitles` is only a secondary safeguard; it is not useful if the HUD element itself is hidden.
 
 ## Retail evidence ledger
 
-### rc.1 / rc.2 — profile routing rejected
+### rc.1 / rc.2 — profile/action routing rejected
 
-Both candidates modified the retail pause actions. Retail testing showed Escape and Xbox Start could be lost entirely.
+Retail tests could lose Escape/Xbox Start entirely. Primary pause ownership must not depend on replacing the vanilla action-map route. Runtime action-map reload, persistent remapping, full profile replacement, and `Player.OnAction` replacement remain forbidden production mechanisms.
 
-Conclusions:
+### rc.3 — official PAK/Lua/bootstrap chain proven
 
-- never replace the only vanilla pause route with an unproven custom route;
-- exact action-map/profile edits are too risky for the primary implementation;
-- `ActionMapManager.InitActionMaps()` remains permanently forbidden because an earlier prototype destroyed controller input globally.
+The PAK, Lua bootstrap, `System.AddCCommand`, and profile `consoleCMD` path were proven on retail. `Game.PauseGame` was unavailable.
 
-### rc.3 — PAK/Lua/consoleCMD chain proven
+### rc.4 — inferred native PauseGame ABI rejected
 
-The safe F10 diagnostic proved on Xbox Store 1.5.6 that:
+`SSystemGlobalEnvironment + 0x98` is `IGame*`, not `IGameFramework*`. KCD2 `IGame` slot 13 is `GetName()` and returns `"kcd2"`. rc.4 called the wrong method through a guessed PauseGame-shaped ABI and then incorrectly treated "did not crash" as proof of pause ownership.
 
-- the mod PAK loads;
-- `Scripts/Mods/clean_pause.lua` executes;
-- `System.AddCCommand` works;
-- a profile `consoleCMD` can reach the registered command.
+Permanent rule: never infer engine state from an unknown call merely returning.
 
-The tested `Game.PauseGame` binding was unavailable. Therefore F10 doing nothing visually in rc.3 was a pause-API failure, not an input-routing failure.
+### rc.5 — Lua/custom PauseGame rejected for production
 
-### rc.4 — invalid native ABI, exact root cause
+The retail-safe Lua pause route freezes world simulation but does not reproduce the full vanilla lifecycle: audio/UI continue and subtitle lifetime is not preserved correctly. `CryAction.PauseGame`, `Action.PauseGame`, `Game.PauseGame`, and inferred native PauseGame remain forbidden production pause owners.
 
-Retail result:
+### rc.6 — `only_ui` ownership signal rejected
 
-```text
-Escape / Start
-  -> hook fires
-  -> gameplay continues
-  -> subsequent gameplay input is swallowed
-```
+Retail diagnostics showed `ActionMapManager.IsFilterEnabled("only_ui") == false` even while the ordinary pause menu was visibly open. At the same time `Menu@0` resolved and its visibility correctly tracked vanilla pause open/close.
 
-The native log showed the hook declaring pause success immediately before entering its own Clean Pause state:
+Conclusion: `only_ui` is not a valid pause-ownership invariant on Xbox Store KCD2 1.5.6.
 
-```text
-IGameFramework::PauseGame(true, true, 0) invoked
-Running -> Clean Pause (pause input consumed before ActionMapManager)
-```
+### rejected C_UIMenu/S_GameContext diagnostic
 
-Two implementation errors caused this:
+A later read-only diagnostic attempted aggressive writable-section scanning for game-context/menu ownership state and prevented normal startup. That startup mechanism is rejected. Fixed reverse-engineered WHGame RVAs are also rejected for production because Xbox Store retail addresses do not match the libKCD2 reference build.
 
-1. `SSystemGlobalEnvironment + 0x98` was interpreted as `IGameFramework*`. Current KCD2 1.5.6 reverse engineering identifies it as `IGame*` (`wh::game::C_Game`). KCD2 `IGame` slot 13 is `GetName()` and returns `"kcd2"`; rc.4 therefore called the wrong object's method through a PauseGame-shaped function pointer.
-2. `SetNativePause()` treated "the call returned without an access violation" as proof of success. It did not verify an actual engine pause state before setting `g_cleanPaused=true` and swallowing input.
+### rc7b — render suppression foundation accepted
 
-This explains the observed failure without requiring any speculative input bug.
+Retail test proved:
 
-Permanent conclusion: **never infer pause ownership from a call merely returning successfully.**
+- vanilla pause acquisition via `Menu@0::IsVisible()`;
+- real pause with world/audio stopped;
+- pause menu invisible when only `Menu@0::Render()` is suppressed;
+- second Escape/Start reveals ordinary vanilla pause without an unpause tick;
+- vanilla pause also hides HUD/subtitles;
+- forwarding physical B to the hidden menu does not provide the desired direct-resume UX.
 
-### rc.5 — custom Lua pause primitive rejected for production
+### rc7c — global HUD gate hypothesis rejected
 
-The safe F10 diagnostic kept Escape/Start vanilla and probed the retail Lua pause route. Retail testing established that the route can freeze world simulation, but it does not reproduce the complete vanilla pause lifecycle required by this mod: audio/UI continue and subtitle lifetime is not retained correctly.
+Retail test proved the rc7c HUD hook was installed and actually suppressed a `hud.ClearSubtitles` call, but the user saw no visible difference from rc7b. `IFlashUI::SetHudElementsVisible(true)` is therefore not sufficient by itself.
 
-Conclusion: a custom `CryAction` / `Action` / `Game.PauseGame` call is not the production pause mechanism.
+See `docs/RETAIL_EVIDENCE_RC7C.md` and `docs/REJECTED_HYPOTHESES.md`.
 
-## Corrected KCD2 1.5.6 ABI facts
+## Corrected KCD2 1.5.6 ABI facts in active use
 
-The active architecture relies only on ABI facts that have current reverse-engineering support:
-
-- `SSystemGlobalEnvironment + 0x98` = `IGame*`, not `IGameFramework*`;
+- `SSystemGlobalEnvironment + 0x98` = `IGame*`;
 - `SSystemGlobalEnvironment + 0x140` = `IFlashUI*`;
-- KCD2 `IGame` slot 12 = `GetLongName()`;
-- KCD2 `IGame` slot 13 = `GetName()`;
+- `IInput::PostInputEvent` is the raw input route used by the candidate;
 - `IFlashUI::GetUIElementByInstanceStr` = slot 18;
+- `IFlashUI::SetHudElementsVisible` = slot 28;
+- `IUIElement::Render` = slot 24;
 - `IUIElement::SetVisible` = slot 28;
 - `IUIElement::IsVisible` = slot 29;
-- the raw input hook is `IInput::PostInputEvent` before ActionMapManager.
+- named `IUIElement::CallFunction` = slot 69.
 
-The project does **not** currently have a sufficiently proven KCD2 callable contract for `IGameFramework` slot 13. Reverse engineering only identifies it as corresponding to KCD1 `PauseGame`; KCD2 callsites differ from the old stock CryEngine interface. It is therefore forbidden as a production primitive.
+The `IUIElement::SetVisible` ABI is not rejected globally: mutating **Menu** visibility is rejected because it destroys the independent pause lifecycle signal. The next candidate may use the verified visibility API specifically for the concrete `hud@0` element, with strict object identity checks.
 
-## Current architecture — rc.6 hidden vanilla pause
+## Next candidate — rc7d concrete HUD visibility
 
-### Running -> Clean Pause
+The next functional candidate builds directly on rc7c and is intended to answer the remaining presentation issue in one normal retail session.
 
-On first Escape / Xbox Start:
+### HUD presentation
 
-1. Perform only read-only eligibility checks. If the game is already in `only_ui` or the context cannot be verified, forward the event and do nothing else.
-2. Forward the physical Escape/Start event to KCD2 unchanged.
-3. After vanilla processing, verify that KCD2 enabled the `only_ui` filter. This is the evidence that the real vanilla pause/menu path acquired ownership.
-4. Resolve the retail `Menu@0` Flash element through `IFlashUI`.
-5. Hide only that Menu element with `IUIElement::SetVisible(false)`.
-6. Verify the resulting state before entering the mod's hidden-pause state.
+Before forwarding the pause event, install a narrow hook on the concrete `hud@0` element's `SetVisible` implementation.
 
-If any step after forwarding fails, the result must be the ordinary visible vanilla pause menu. That is a successful fail-open outcome, not a reason to swallow gameplay input.
+While a vanilla pause acquisition is pending or Clean Pause is active:
 
-### Hidden vanilla pause -> Running via B
+- suppress only `SetVisible(false)` calls where `this == verified hud@0`;
+- forward `SetVisible(true)` and every visibility call for every other UI element;
+- after vanilla pause acquisition, call the verified HUD global visibility gate and explicitly set `hud@0` visible;
+- verify `hud@0::IsVisible() == true` before accepting Clean Pause presentation ownership;
+- keep the existing narrow `ClearSubtitles` / `HideNarrativeSubtitles` suppression as a secondary subtitle-lifetime guard.
 
-While the hidden vanilla pause is verified:
+If concrete HUD visibility cannot be verified, remove menu render suppression and leave ordinary visible vanilla pause.
 
-1. reveal `Menu@0` inside the same input dispatch;
-2. forward B to vanilla KCD2 so normal Back/Resume owns the close/unpause operation;
-3. re-check `only_ui`;
-4. if `only_ui` is gone, return to Running;
-5. if vanilla remains paused, re-hide the Menu only if the element can still be verified.
+### B resume
 
-No custom unpause primitive is used.
+Keep rc7c's captured-pause-key replay route, but continue treating it as unverified until a retail B attempt appears in the log. Physical B must never leak to `dialog_cancel`, `cutscene_skip`, or gameplay while Clean Pause owns input.
 
-### Hidden vanilla pause -> visible vanilla menu
+### Visible vanilla menu transition
 
-On a second Escape / Start:
+On second Escape/Start:
 
-1. reveal the already-open `Menu@0`;
-2. leave KCD2's vanilla pause state intact;
-3. consume the second physical pause input so it does not immediately close the menu;
-4. relinquish Clean Pause presentation ownership.
+- relinquish Clean Pause first;
+- restore ordinary vanilla pause HUD-hidden presentation;
+- restore Menu rendering;
+- consume the second physical pause press so the menu stays open continuously.
 
-This avoids an explicit unpause/re-pause cycle and therefore avoids an intermediate simulation/audio tick.
+## Release process
+
+Every retail-test candidate from rc7 onward must be published as a **GitHub prerelease immediately after CI succeeds**. Actions artifacts remain useful for CI evidence but are not the primary distribution surface.
+
+Each candidate release must include:
+
+- the candidate ZIP (`version.dll` + test/install notes);
+- SHA-256 checksum;
+- explicit known limitations / unverified behavior;
+- the exact commit used to build it.
+
+Stable `v0.1.0` remains blocked until all required retail behavior passes.
 
 ## Safety invariants
 
-These are release-blocking requirements:
+Release blocking:
 
 - never call `ActionMapManager.InitActionMaps()`;
 - never replace `Player.OnAction`;
 - never persistently remap Start/B/Escape;
-- never depend on a complete replacement `defaultProfile.xml` for the active implementation;
-- never call the rejected rc.4 inferred `IGameFramework::PauseGame` ABI;
-- never use `CryAction.PauseGame`, `Action.PauseGame`, or `Game.PauseGame` as the production pause owner;
-- never set a Clean Pause/input-swallow state merely because a call did not crash;
-- unrelated input may be swallowed only while a **verified vanilla pause** is already active and the menu is successfully hidden;
-- any unresolved runtime condition must fail open to vanilla input/pause behavior.
+- never depend on full `defaultProfile.xml` replacement for the active implementation;
+- never call rejected inferred/custom PauseGame routes;
+- never use `only_ui` as pause ownership evidence;
+- never mutate `Menu@0` visibility in the active architecture;
+- never use fixed libKCD2 WHGame RVAs as production runtime discovery;
+- never swallow unrelated input unless verified vanilla pause ownership already exists;
+- nested/synthetic input created during vanilla dispatch must be forwarded exactly once and never interpreted as another physical command;
+- unresolved state must fail open to vanilla pause/input behavior.
 
-## Plan
+## Retail test policy
 
-### Stage 1 — retail acceptance of rc.6
+Game launches are expensive. Do not request one launch per hypothesis.
 
-Test rc.6 unchanged before further implementation work.
+Before producing a candidate:
 
-Required observations:
+1. close everything possible through reverse engineering, source review, static safety checks, and MSVC CI;
+2. combine compatible remaining hypotheses into one fail-open functional candidate;
+3. instrument that candidate so one retail session distinguishes the remaining failure classes;
+4. request only a normal one-session acceptance matrix, with optional dialogue/cutscene checks if naturally available.
 
-1. title/front-end controller and keyboard behavior remain normal;
-2. first Escape in gameplay pauses the complete vanilla lifecycle while leaving no visible pause menu;
-3. first Xbox Start behaves identically;
-4. B resumes through vanilla behavior without leaking a dialogue/cutscene cancel/skip;
-5. a second Escape/Start reveals the already-open vanilla pause menu without an intermediate unpause tick;
-6. dialogue speech/progression stops;
-7. the same subtitle remains visible longer than its normal lifetime;
-8. in-engine cutscene progression/audio stop coherently;
-9. repeated entry/resume, save loads, Alt-Tab and controller reconnect do not leave a hidden/inert input state.
+Do not request a restart solely to reach an optional test case.
 
-Always keep `kcd2_clean_pause_native.log` from any failure.
+## Stable release gate
 
-### Stage 2 — classify any rc.6 failure before changing architecture
+Stable `v0.1.0` requires retail confirmation that:
 
-Do not patch multiple layers at once. Classify the failure into one of these buckets.
+- first Start/Escape produces Clean Pause without visible pause menu;
+- existing HUD/hints remain visible;
+- the current subtitle remains visible beyond its normal lifetime;
+- dialogue/cutscene progression and audio stop coherently;
+- B resumes directly without menu flash, skip, or cancel;
+- second Start/Escape reveals ordinary vanilla pause continuously;
+- repeated use, load transitions, Alt-Tab/controller reconnect do not produce persistent input loss;
+- failure paths remain vanilla/fail-open;
+- installation/uninstallation and proxy-DLL conflict behavior are documented.
 
-#### A. Vanilla pause works, but Menu cannot be hidden
-
-Investigate only UI resolution/timing:
-
-- exact `Menu` instance id/name;
-- whether the first input dispatch is too early to resolve `Menu@0`;
-- whether another UI element is the visible pause surface;
-- whether visibility is changed again later in the same frame.
-
-Keep vanilla pause ownership intact. Prefer a presentation hook/visibility observation over a custom pause primitive.
-
-#### B. Menu hides, but HUD/subtitle also disappears or expires
-
-Determine whether the subtitle/HUD loss comes from:
-
-- the Menu Flash element itself;
-- another vanilla pause UI element;
-- the vanilla pause lifecycle changing HUD/subtitle visibility;
-- subtitle timers continuing despite full simulation pause.
-
-The likely next direction is to suppress only the pause-menu presentation path after vanilla state acquisition, or restore the affected HUD/subtitle element while leaving vanilla pause counters/audio/dialog state untouched.
-
-Do **not** return to rc.5-style simulation-only pause.
-
-#### C. B does not resume correctly
-
-Keep the pause owner vanilla. Diagnose the normal Back action path and event timing. The fix should forward/emit vanilla Back semantics, not call a custom unpause primitive.
-
-#### D. Second Escape/Start closes the pause or causes a simulation tick
-
-Adjust only the reveal/consume ordering. The target remains: reveal an already-open vanilla menu while retaining vanilla pause ownership continuously.
-
-#### E. Runtime verification fails
-
-Fail open. Improve the verification/locator only if the exact retail evidence supports it. Never compensate by swallowing input earlier.
-
-### Stage 3 — hardening after functional acceptance
-
-Only after the core retail scenarios pass:
-
-- verify repeated pause/resume state transitions;
-- verify dialogue and cutscene B/Start isolation;
-- verify load/death/front-end transitions;
-- verify controller reconnect and Alt-Tab;
-- strengthen CI against every previously observed regression;
-- ensure the release ZIP remains only `version.dll` + `INSTALL.txt` and passes checksum/integrity checks.
-
-### Stage 4 — stable release gate
-
-A stable `v0.1.0` is blocked until all of the following are true on Xbox Store KCD2 1.5.6:
-
-- complete pause lifecycle is confirmed;
-- current subtitle retention is confirmed;
-- first pause has no visible menu flash considered unacceptable in normal play;
-- B resume is reliable;
-- second Start/Escape opens vanilla pause reliably;
-- no persistent input loss occurs under failure/repetition/transitions;
-- installation/uninstallation is documented and does not conflict silently with an existing unrelated `version.dll` proxy.
-
-Until then, releases remain prereleases.
-
-## Decision rule for future implementation
-
-The guiding rule is:
+## Decision rule
 
 > Reuse vanilla KCD2 pause ownership and remove only the visual obstruction.
 
-A new custom pause primitive is considered only if retail evidence proves the vanilla pause lifecycle itself cannot satisfy subtitle/frame requirements and there is a separately verified engine API that reproduces all required pause subsystems. Current evidence does not support such a primitive.
+No custom pause primitive is considered unless new retail evidence proves the vanilla pause lifecycle itself cannot satisfy the product requirements and a separately verified engine API reproduces all required pause subsystems.
