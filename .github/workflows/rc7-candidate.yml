@@ -89,10 +89,16 @@ jobs:
           if "g_originalRender(element);" not in menu_hook or "return;" not in menu_hook:
               raise SystemExit("Menu Render hook must suppress only hidden Menu@0 and forward all other renders")
 
-          hud_hook = source[source.index("bool __fastcall HookHudCallFunction"):source.index("bool EnsureHudSubtitleHook")]
+          freeze_fn = source[source.index("bool ShouldFreezeHudFunction"):source.index("bool __fastcall HookHudCallFunction")]
           for allowed in ("ClearSubtitles", "HideNarrativeSubtitles"):
-              if allowed not in hud_hook:
-                  raise SystemExit(f"HUD hook must explicitly cover {allowed}")
+              if allowed not in freeze_fn:
+                  raise SystemExit(f"Subtitle freeze whitelist missing {allowed}")
+          if freeze_fn.count("std::strcmp(") != 2:
+              raise SystemExit("Subtitle freeze whitelist must contain exactly two function-name comparisons")
+
+          hud_hook = source[source.index("bool __fastcall HookHudCallFunction"):source.index("bool EnsureHudSubtitleHook")]
+          if "ShouldFreezeHudFunction(functionName)" not in hud_hook:
+              raise SystemExit("HUD hook must delegate suppression to the exact subtitle whitelist")
           if "g_originalHudCallFunction" not in hud_hook:
               raise SystemExit("HUD hook must forward non-subtitle Flash calls")
 
