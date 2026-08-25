@@ -40,9 +40,13 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
-          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$') { throw "Invalid VERSION: $version" }
+          if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.[1-9][0-9]*)?$') {
+            throw "Invalid VERSION: $version. Expected SemVer X.Y.Z or X.Y.Z-(alpha|beta|rc).N"
+          }
           $expectedTag = "v$version"
-          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne $expectedTag) { throw "Tag $env:GITHUB_REF_NAME does not match VERSION $version" }
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Tag $env:GITHUB_REF_NAME does not match VERSION $version"
+          }
           $tag = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME } else { $expectedTag }
           $prerelease = if ($version.Contains("-")) { "true" } else { "false" }
           "tag=$tag" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -120,7 +124,7 @@ jobs:
           retention-days: 30
 
   publish:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -160,12 +164,8 @@ jobs:
             exit 0
           fi
           remote_tag_sha="$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')"
-          args=("$TAG" "release/$ASI_ASSET" "release/$VERSION_ASSET" "release/SHA256SUMS.txt" --title "KCD2 Clean Pause $TAG" --notes-file docs/RELEASE_NOTES.md)
-          if [[ -n "$remote_tag_sha" ]]; then
-            [[ "$remote_tag_sha" == "$GITHUB_SHA" ]] || { echo "Existing tag points elsewhere" >&2; exit 1; }
-            args+=(--verify-tag)
-          else
-            args+=(--target "$GITHUB_SHA")
-          fi
+          [[ -n "$remote_tag_sha" ]] || { echo "Release publication requires an existing tag" >&2; exit 1; }
+          [[ "$remote_tag_sha" == "$GITHUB_SHA" ]] || { echo "Tag points to $remote_tag_sha, workflow commit is $GITHUB_SHA" >&2; exit 1; }
+          args=("$TAG" "release/$ASI_ASSET" "release/$VERSION_ASSET" "release/SHA256SUMS.txt" --title "KCD2 Clean Pause $TAG" --notes-file docs/RELEASE_NOTES.md --verify-tag)
           [[ "$PRERELEASE" == "true" ]] && args+=(--prerelease)
           gh release create "${args[@]}"
