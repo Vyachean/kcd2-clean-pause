@@ -52,7 +52,7 @@ Expected:
 
 The implementation temporarily disables `wh_cl_NearDof` and `r_DepthOfField` only while Clean Pause owns presentation. It must preserve the values that were active before entering Clean Pause.
 
-**Retail evidence:** v0.1.1-rc.3 is confirmed on the primary Xbox Store KCD2 1.5.6 target to enter Clean Pause from Xbox Start and retain a sharp, blur-free frame.
+**Retail evidence:** the `v0.2.0-rc.1` feature set is confirmed on the primary Xbox Store KCD2 1.5.6 target to enter Clean Pause from Xbox Start and retain a sharp, blur-free frame.
 
 ### 3. Reveal vanilla menu
 
@@ -66,7 +66,7 @@ Expected:
 
 Close it normally and confirm gameplay resumes with the same graphics behavior that existed before Clean Pause.
 
-The DoF restoration handoff still needs an explicit retail observation before stable promotion.
+The DoF restoration handoff still needs an explicit retail observation before stable `v0.2.0` promotion.
 
 ### 4. B behavior
 
@@ -86,7 +86,7 @@ If naturally available in the same session:
 - confirm speech/audio/progression stop with the vanilla pause;
 - reveal the normal menu with Start or B, then resume normally.
 
-### 6. NPC overhead subtitle / speech bubble — rc.4 acceptance
+### 6. NPC overhead subtitle / speech bubble
 
 While an NPC has a currently visible overhead chatter subtitle (the in-world speech bubble above/near the character), press Xbox Start once.
 
@@ -105,7 +105,7 @@ Expected after resume:
 - the preserved line is not permanently stuck on screen;
 - subsequent NPC overhead chatter appears and disappears normally.
 
-The rc.4 bubble controller is optional/fail-open. If runtime RTTI/listener discovery cannot validate `C_UIHudBubbles`, the existing Clean Pause path must still work; only overhead-bubble preservation may be absent.
+The overhead-bubble controller is optional/fail-open. If runtime RTTI/listener discovery cannot validate `C_UIHudBubbles`, the existing Clean Pause path must still work; only overhead-bubble preservation may be absent.
 
 Do not create a separate game launch solely for a cutscene/subtitle edge case. The overhead-bubble check can be performed whenever a suitable NPC line occurs in the same session.
 
