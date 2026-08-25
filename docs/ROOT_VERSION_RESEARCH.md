@@ -1,57 +1,48 @@
 # KCD2 keybind profile version research
 
-## What is confirmed
+> **Status: historical research.** This file documents why the discarded runtime action-map/profile prototype treated XML versioning as a safety boundary. The current native implementation does not load a custom action profile. See [DESIGN.md](DESIGN.md).
 
-KCD2 keybind tooling reads the retail `Libs/Config/defaultProfile.xml` directly from the game's PAK and preserves that document when merging mod actions.
+## Evidence collected
 
-The open-source KCD2 Keybinder parses action maps as direct children of the document root and, when it must create a new map, uses:
+KCD2 keybind tooling reads the retail `Libs/Config/defaultProfile.xml` from the game's PAK and preserves that document when merging mod actions.
+
+The open-source KCD2 Keybinder parses action maps as direct children of the document root and, when it must create a new map, uses structures such as:
 
 ```xml
 <actionmap name="..." priority="pure_include" exclusivity="0">
 ```
 
-It also emits console-command actions using the same attributes used by working KCD2 keybind mods.
+It also emits console-command actions using attributes seen in working KCD2 controller mods.
 
-Source:
+Reference:
 
 - https://github.com/Destuur/KCD2Keybinder/blob/main/KCD2Keybinder.Core/Services/KeybindService.cs
 
-Working KCD2 controller mods demonstrate actions such as:
+Working controller mods also demonstrated custom actions bound to inputs such as `xi_start`, confirming that custom profile actions were technically possible in some contexts.
 
-```xml
-<action
-  name="MagusQuickSaveController"
-  onHold="1"
-  holdTriggerDelay="0.3"
-  holdRepeatDelay="-1"
-  xboxpad="xi_start"
-  pspad="pad_start"
-  consoleCmd="1" />
-```
+## Historical version-22 hypothesis
 
-and other current mods package custom controller actions under `Libs/Config/defaultProfile.xml` / custom profile files.
-
-## Version 22 evidence
-
-CryEngine/KCD profiles use action-map version `22`; public modding examples also show:
+CryEngine/KCD profile examples use action-map version `22`, and public modding examples showed structures such as:
 
 ```xml
 <actionmap name="default" version="22">
 ```
 
-This is strong evidence but not yet a direct extraction of the current KCD2 retail root document.
+That was useful evidence for a prototype, but it was never accepted as a production contract merely by analogy.
 
-## Why the root version matters for `LoadFromXML`
+## Why the root version mattered
 
-`CActionMapManager::LoadFromXML` requires a `version` attribute on the root XML node and assigns it to the manager's current version before loading action maps/filters.
+The historical `CActionMapManager::LoadFromXML` investigation indicated that the root XML `version` participates in manager/profile loading. An incorrect value therefore could not safely be guessed in a release candidate that depended on runtime-loaded action maps.
 
-Therefore an incorrect root version is not something to silently guess in a release.
+The prototype policy was consequently fail-open: if the custom profile could not be proven to load safely, vanilla controls had to remain untouched.
 
-## Prototype policy
+## Current relevance
 
-For an experimental runtime-loaded profile, `22` may be used only with explicit logging and a retail safety test. It must not be called proven until one of the following is obtained:
+The current Clean Pause implementation no longer uses this path:
 
-1. a direct current KCD2 `defaultProfile.xml` extraction showing the root version; or
-2. a known-working current KCD2 mod whose standalone profile is loaded by `ActionMapManager.LoadFromXML` and whose root version is inspectable.
+- it does not load a custom action profile;
+- it does not replace `defaultProfile.xml`;
+- it does not call `InitActionMaps`;
+- it forwards the real Escape/Start input and reuses KCD2's own pause lifecycle.
 
-If the profile fails to load/enable in retail, the prototype must fail back to vanilla controls rather than attempting `InitActionMaps` or replacing the complete vanilla profile.
+This file is retained only as evidence behind the decision to reject profile/action-map ownership.
