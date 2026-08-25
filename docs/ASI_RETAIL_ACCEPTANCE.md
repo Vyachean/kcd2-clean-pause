@@ -1,8 +1,8 @@
 # ASI retail acceptance
 
-The ASI edition changes only the loading mechanism. It is not considered retail-equivalent to the established standalone `version.dll` path until this acceptance pass succeeds on the target KCD2 1.5.6 Xbox Store / Xbox app build.
+> **Status for v0.2.0:** optional follow-up. The standalone `version.dll` edition is the supported retail-proven release path. The ASI edition is shipped as **experimental** and does not block the stable standalone release.
 
-This checklist applies to the `0.2.0` release line and follows the current product contract documented in [README.md](../README.md) and [DESIGN.md](DESIGN.md).
+The ASI edition changes only the loading mechanism. It should not be described as supported until this acceptance pass succeeds on KCD2 1.5.6 Xbox Store / Xbox app.
 
 ## Installation baseline
 
@@ -34,6 +34,4 @@ Do not create a separate game launch solely to manufacture subtitle edge cases. 
 
 After standalone ASI acceptance, repeat the core checks with at least one other real KCD2 ASI plugin installed through the same loader.
 
-Prefer a plugin that demonstrates the reason the ASI edition exists — for example, a setup where another native mod would otherwise conflict with the standalone Clean Pause `version.dll`.
-
-Passing this follow-up proves file-level coexistence and provides evidence against hook-order regressions. It does not establish universal compatibility with every native plugin.
+Passing these checks is sufficient to remove the experimental label from the ASI edition in a later patch release if no runtime changes are needed. It does not establish universal compatibility with every native plugin.
