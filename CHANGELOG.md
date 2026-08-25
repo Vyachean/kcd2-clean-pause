@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.1-rc.4 — 2026-08-25
+
+Overhead-subtitle preservation prerelease.
+
+- Preserves active NPC speech bubbles / overhead subtitles across the vanilla pause transition instead of restoring only the root `Bubbles` HUD clip.
+- Discovers KCD2's `C_UIHudBubbles` runtime object through the `hud@0` listener list and MSVC RTTI; no fixed `WHGame.dll` RVA is introduced.
+- Freezes only `I_UIHudBubbles::UpdateBubbles()` and `ReleaseBubble()` while `Menu@0` is logically visible, arming before vanilla `SetVisible(true)` and releasing after `SetVisible(false)` returns.
+- Keeps the bubble hook optional/fail-open so an unsupported listener layout cannot disable the proven Clean Pause path.
+- Retains rc.3 blur-free presentation, exact DoF restoration, dual ASI / standalone packaging, and duplicate-load protection.
+
 ## v0.1.1-rc.3 — 2026-08-25
 
 Corrected blur-free presentation prerelease.
