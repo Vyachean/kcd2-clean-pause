@@ -14,8 +14,9 @@ class BlurContractTests(unittest.TestCase):
         self.assertGreaterEqual(CMAKE.count("${CLEAN_PAUSE_RUNTIME_SOURCES}"), 2)
 
     def test_disable_snapshots_and_disables_both_dof_controls(self):
-        self.assertIn('System.GetCVarValue("wh_cl_NearDof")', BLUR)
-        self.assertIn('System.GetCVarValue("r_DepthOfField")', BLUR)
+        self.assertIn('System.GetCVar("wh_cl_NearDof")', BLUR)
+        self.assertIn('System.GetCVar("r_DepthOfField")', BLUR)
+        self.assertNotIn("System.GetCVarValue", BLUR)
         self.assertIn('System.SetCVar("wh_cl_NearDof", 0)', BLUR)
         self.assertIn('System.SetCVar("r_DepthOfField", 0)', BLUR)
 
