@@ -18,9 +18,9 @@ Vanilla pause menu
   normal KCD2 controls -> resume / settings / save / quit
 ```
 
-Clean Pause uses KCD2's own pause lifecycle. World simulation and audio pause as they do in the normal game pause, while the pause-menu surface itself is not drawn. The mod restores the gameplay HUD child state so subtitles that were visible at pause entry remain visible.
+Clean Pause uses KCD2's own pause lifecycle. World simulation and audio pause as they do in the normal game pause, while the pause-menu surface itself is not drawn. The mod restores the gameplay HUD child state so subtitles that were visible at pause entry remain visible, including active NPC overhead speech bubbles.
 
-Clean Pause also removes the vanilla pause depth-of-field blur while its hidden-menu presentation is active. The previous `wh_cl_NearDof` and `r_DepthOfField` values are captured and restored before ordinary visible vanilla presentation resumes. The corrected rc.3 blur-entry path is retail-confirmed on the primary Xbox Store KCD2 1.5.6 target.
+Clean Pause also removes the vanilla pause depth-of-field blur while its hidden-menu presentation is active. The previous `wh_cl_NearDof` and `r_DepthOfField` values are captured and restored before ordinary visible vanilla presentation resumes. The `v0.2.0-rc.1` feature set is retail-confirmed on the primary Xbox Store KCD2 1.5.6 target for blur-free Clean Pause entry and preservation of NPC overhead subtitles.
 
 ### Known behavior
 
@@ -28,7 +28,7 @@ Xbox **B does not resume directly from Clean Pause**. It reveals the ordinary KC
 
 ## Editions
 
-Every new release publishes two mutually exclusive editions built from the same Clean Pause runtime:
+Every release publishes two mutually exclusive editions built from the same Clean Pause runtime:
 
 - **ASI edition** — `KCD2CleanPause.asi`; recommended when you already use an ASI loader or another mod owns `version.dll`.
 - **Standalone edition** — `version.dll`; no separate ASI loader is required, but it conflicts with any unrelated mod that also installs `version.dll` beside the game executable.
@@ -79,10 +79,15 @@ The runtime:
 - snapshots the visibility of KCD2's 28 HUD child movie clips before pause and restores that gameplay presentation while Clean Pause is active;
 - treats `IUIElement::GetMovieClip()` results as borrowed, call-local handles: never retained, never `Release()`d by the mod;
 - suppresses only the HUD Flash calls `ClearSubtitles` and `HideNarrativeSubtitles` while Clean Pause owns presentation;
+- preserves active NPC overhead subtitles by freezing only the live bubble update/release lifecycle while vanilla pause is logically open;
 - temporarily disables the two DoF controls only while Clean Pause owns hidden-menu presentation and restores the captured values before visible vanilla presentation;
-- fails open to the visible vanilla pause menu when an assumption cannot be verified.
+- fails open to the visible vanilla pause menu when a core assumption cannot be verified.
 
 No custom/inferred `PauseGame`, action-map replacement, fixed storefront-specific WHGame RVA, or replacement overlay is used.
+
+## Versioning
+
+The project follows SemVer and a tag-driven GitHub release flow. Feature releases bump MINOR, fixes bump PATCH, release candidates use `-rc.N`, and merging to `main` does not itself publish a GitHub Release. See [Release process](docs/RELEASE.md).
 
 ## Documentation
 
