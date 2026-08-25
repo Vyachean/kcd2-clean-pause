@@ -6,6 +6,7 @@ on:
       - fix/instant-clean-pause-hud
     paths:
       - tools/apply_pr34_review_corrections.py
+      - tools/fix_pr34_review_helper_anchor.py
       - .github/workflows/apply-pr34-review-corrections.yml
 
 permissions:
@@ -22,6 +23,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Correct staging guard
+        run: python tools/fix_pr34_review_helper_anchor.py
       - name: Apply reviewed architecture corrections
         run: python tools/apply_pr34_review_corrections.py
       - name: Repository tests
