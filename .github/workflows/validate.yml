@@ -50,7 +50,14 @@ jobs:
           if (-not $dumpbin) { throw "dumpbin.exe not found" }
 
           $exports = & $dumpbin /nologo /exports $versionDll | Out-String
-          foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
+          $expectedExports = @(
+            "GetFileVersionInfoA", "GetFileVersionInfoByHandle", "GetFileVersionInfoExA",
+            "GetFileVersionInfoExW", "GetFileVersionInfoSizeA", "GetFileVersionInfoSizeExA",
+            "GetFileVersionInfoSizeExW", "GetFileVersionInfoSizeW", "GetFileVersionInfoW",
+            "VerFindFileA", "VerFindFileW", "VerInstallFileA", "VerInstallFileW",
+            "VerLanguageNameA", "VerLanguageNameW", "VerQueryValueA", "VerQueryValueW"
+          )
+          foreach ($name in $expectedExports) {
             if ($exports -notmatch [regex]::Escape($name)) { throw "version.dll proxy export missing: $name" }
           }
 
