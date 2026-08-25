@@ -1,6 +1,6 @@
 # Official-mod reference evidence
 
-This note records the evidence behind the current `.pak`/Lua implementation.
+> **Status: historical research.** This note records evidence gathered while the project was still evaluating a pure `.pak`/Lua implementation. The current production mod is native; see [DESIGN.md](DESIGN.md). Statements below describe capabilities and experiments, not the active architecture.
 
 ## Warhorse mod structure
 
@@ -12,7 +12,9 @@ Mirror:
 
 ## Xbox/Game Pass normal-mod location
 
-Current KCD2 Vortex support and Xbox-specific Nexus instructions place normal mods in `%USERPROFILE%\Documents\kingdomcome_mods`, not beside `KingdomCome.exe`.
+KCD2 Vortex support and Xbox-specific Nexus instructions place normal `.pak` mods in `%USERPROFILE%\Documents\kingdomcome_mods`, not beside `KingdomCome.exe`.
+
+This evidence was relevant to the discarded pure-mod path. The current native editions install beside the game executable / `WHGame.dll` instead.
 
 ## Retail profile evidence
 
@@ -34,15 +36,17 @@ Dialogue and cutscene maps include `open_pause_menu`; ordinary gameplay includes
 
 KCD2 action profiles support `consoleCmd="1"`. Existing controller quicksave/keybind mods use the same profile mechanism, including `xi_start`.
 
-Implication: receiving Start does not itself require native code. PR #2 only disproved a **runtime supplemental** Start map on the tested Xbox build.
+Historical implication: receiving Start did not itself require native code. Retail testing nevertheless showed that a supplemental action-map route was not a reliable ownership mechanism for Clean Pause on the target build.
 
-## Retail pause API
+## Retail pause API research
 
-Warhorse ScriptBind docs expose `Game.PauseGame(bool)` and retail KCD2 scripts call `Game.PauseGame(true)`.
+Warhorse ScriptBind documentation exposes pause-related bindings, and retail scripts contain pause calls. Later testing established that a custom Lua pause/freeze route was still insufficient for Clean Pause because it did not reproduce the complete vanilla pause lifecycle.
+
+The current production design therefore does not use a custom Lua/native `PauseGame` owner.
 
 ## Retail ActionMapManager API
 
-Warhorse's retail method list includes `EnableActionMap` and `IsFilterEnabled`, but not `EnableActionFilter`.
+Warhorse's retail method list includes action-map/filter inspection and control APIs. These were investigated for custom input isolation.
 
 Reference:
 
@@ -50,44 +54,33 @@ Reference:
 
 ## KCD2 1.5.6 priority/exclusivity evidence
 
-`libKCD2` reverse engineering identifies `m_priority`, `m_exclusivity`, `Enable`, `GetPriority` and `GetExclusivity` on the retail 1.5.6 `IActionMap` object.
+`libKCD2` reverse engineering identifies priority/exclusivity state on retail 1.5.6 action-map objects.
 
 Reference:
 
 - https://github.com/JerryYOJ/libKCD2/blob/master/include/Offsets/vtables/IActionMap.h
 
-The game's own profile uses this model for mutually exclusive gameplay, dialogue, cutscene, menu and overlay contexts. Clean Pause therefore uses an overlay-priority exclusive temporary map.
+This supported the historical action-map prototype but is no longer part of the active Clean Pause ownership model.
 
-## `UIAction.CallFunction`
+## `UIAction.CallFunction` / `MenuEvents` research
 
-Warhorse documents `UIAction.CallFunction(elementName, instanceID, functionName, ...)` and explicitly permits `elementName` to identify a C++ UIEventSystem.
+Warhorse and CryEngine references showed that UI event systems can be invoked from scripts and motivated an experiment around `MenuEvents.DisplayIngameMenu(bool)`.
 
-Reference:
+References:
 
 - https://github.com/muyuanjin/kcd2-mod-docs/blob/main/script_bind_2025_01_14/CScriptBind_UIAction__CallFunction@IFunctionHandler_@char_@int@char_.html
-
-## `MenuEvents.DisplayIngameMenu(bool)` reference
-
-CryEngine GameSDK registers a UI-to-system event system `MenuEvents` with `DisplayIngameMenu(bool)`. Its normal open path pauses the game, enables `only_ui`, and emits the real ingame-menu UI event.
-
-Reference:
-
 - https://github.com/MergHQ/CRYENGINE/blob/release/Code/GameSDK/GameDll/UI/UIMenuEvents.cpp
 
-The current implementation calls:
-
-```lua
-UIAction.CallFunction("MenuEvents", -1, "DisplayIngameMenu", true)
-```
-
-**without first unpausing**. The exact event-system name still requires direct retail KCD2 1.5.6 confirmation.
+That route is not used in production. Current Clean Pause forwards the real Escape/Start event and lets KCD2 establish its own menu/pause state.
 
 ## Whole-file compatibility cost
 
-Warhorse recommends granular patch formats where they exist, but no official granular patch format is documented for `defaultProfile.xml`.
+The historical profile-builder work also established that replacing `defaultProfile.xml` carries whole-file compatibility risk when another mod changes the same path.
 
-Consequently the builder reads the exact installed profile and patches it locally instead of shipping a copied profile. This avoids a stale-profile mismatch but not conflicts with another mod replacing the same file.
+That compatibility cost is another reason the current mod avoids profile replacement entirely.
 
-## Current conclusion
+## Historical conclusion
 
-The official path has enough documented/observed capability to deserve a complete retail test before native code is considered necessary. Remaining unknowns are subtitle retention, input isolation semantics, retail `MenuEvents` availability, and coherent audio/cutscene pause/resume.
+The official `.pak`/Lua route was worth investigating because it exposed enough profile and scripting capability to build safe diagnostics. Retail evidence ultimately showed that it was the wrong ownership boundary for Clean Pause.
+
+The retained value of this document is the evidence behind the rejection of profile/action-map/custom-pause ownership, not a recommendation to restore that implementation.
