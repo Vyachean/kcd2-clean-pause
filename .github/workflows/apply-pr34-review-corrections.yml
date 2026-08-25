@@ -7,6 +7,7 @@ on:
     paths:
       - tools/apply_pr34_review_corrections.py
       - tools/fix_pr34_review_helper_anchor.py
+      - tools/validate_native_contract.py
       - .github/workflows/apply-pr34-review-corrections.yml
 
 permissions:
