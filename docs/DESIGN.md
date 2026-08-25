@@ -2,20 +2,19 @@
 
 ## Product contract
 
-KCD2 Clean Pause provides:
+KCD2 Clean Pause intentionally provides:
 
 ```text
 Running
   Escape / Xbox Start -> Clean Pause
 
 Clean Pause
+  sharp retained frame, no pause DoF blur
   Escape / Xbox Start -> VanillaMenu
   Xbox B               -> VanillaMenu
 ```
 
 `VanillaMenu` is KCD2's real pause menu. Clean Pause draws no replacement overlay.
-
-Clean Pause presentation is intentionally sharp: the depth-of-field state associated with the paused scene is temporarily disabled only while the vanilla menu surface is hidden. Visible vanilla pause and ordinary gameplay retain the user's original graphics settings.
 
 ## Principle: KCD2 owns pause
 
@@ -50,6 +49,20 @@ When Clean Pause is relinquished, the captured vanilla-pause snapshot is restore
 
 Snapshots contain booleans only.
 
+## Blur-free presentation
+
+Clean Pause temporarily suppresses the pause depth-of-field presentation while preserving the user's pre-existing graphics state.
+
+On successful Clean Pause entry:
+
+1. the runtime reads `wh_cl_NearDof` and `r_DepthOfField` through CryEngine's Lua `System.GetCVar` API;
+2. the exact current values are retained in the Lua runtime;
+3. both CVars are set to `0` before Clean Pause render ownership begins.
+
+Before Escape/Start or B reveals the already-open vanilla pause menu, the captured CVar values are restored. Fail-open paths also attempt the same restoration. If the DoF state cannot be captured/changed safely, Clean Pause does not take presentation ownership and the ordinary visible vanilla pause remains the fallback.
+
+This override is never written to configuration and is not a user preference. The corrected rc.3 blur-entry path is retail-confirmed on Xbox Store KCD2 1.5.6; exact restoration after the handoff remains an explicit stable-release acceptance check.
+
 ## Subtitle lifetime
 
 The named HUD `CallFunction` hook suppresses exactly two functions while Clean Pause owns presentation:
@@ -59,45 +72,31 @@ The named HUD `CallFunction` hook suppresses exactly two functions while Clean P
 
 All other HUD Flash calls are forwarded unchanged.
 
-## Blur / DoF presentation
-
-Clean Pause temporarily owns two existing KCD2 graphics CVars only for the hidden-menu interval:
-
-- `wh_cl_NearDof`;
-- `r_DepthOfField`.
-
-On entry the runtime reads and stores the exact current values through the retail Lua `System.GetCVarValue` API, then sets both to `0` through `System.SetCVar`. No configuration file is written and no permanent graphics preference is changed.
-
-The saved values are restored before Clean Pause releases render ownership to the visible vanilla menu. The same restoration is attempted on every fail-open path. If the initial values cannot be captured or the DoF change cannot be applied safely, Clean Pause does not take presentation ownership and the ordinary visible pause menu remains.
-
-A restore failure is treated as retryable process state: later validated input outside Clean Pause retries restoration instead of assuming the graphics state is clean.
-
 ## Input behavior
 
 ### Escape / Start while Clean Paused
 
-The mod restores the saved DoF values and vanilla-pause HUD snapshot, stops suppressing Menu rendering, consumes the transition input, and leaves KCD2 continuously paused. The already-open menu becomes visible.
+The mod restores DoF and the vanilla-pause HUD snapshot, stops suppressing Menu rendering, consumes the transition input, and leaves KCD2 continuously paused. The already-open menu becomes visible.
 
 ### B while Clean Paused
 
-The current product contract intentionally performs the same presentation transition: restore saved DoF and vanilla-pause HUD state and reveal the ordinary pause menu. It does **not** replay a captured Start/Escape sequence and does not forward physical B into gameplay/dialogue/cutscene action maps.
+The mod performs the same presentation transition: restore DoF and vanilla-pause HUD state and reveal the ordinary pause menu. It does **not** replay a captured Start/Escape sequence and does not forward physical B into gameplay/dialogue/cutscene action maps.
 
 The user then resumes using normal vanilla menu controls.
 
 ## Fail-open behavior
 
-A visible vanilla pause menu is the safe fallback. If Menu/HUD/DoF state cannot be resolved or verified, the mod must relinquish Clean Pause presentation ownership rather than leave gameplay live with input swallowed or graphics state silently modified.
+A visible vanilla pause menu is the safe fallback. If Menu/HUD/DoF state cannot be resolved or verified, the mod must relinquish Clean Pause presentation ownership rather than leave gameplay live with input swallowed. Any captured DoF override is restored best-effort before presentation is returned to vanilla, and transient restore failure remains retryable on later input.
 
 ## ABI boundary
 
 Verified KCD2 1.5.6 interface facts used by production include:
 
 ```text
-SSystemGlobalEnvironment + 0x30     -> IScriptSystem*
 SSystemGlobalEnvironment + 0x98     -> IGame*
 SSystemGlobalEnvironment + 0x140    -> IFlashUI*
-IScriptSystem::ExecuteBuffer         -> slot 6
 IInput::PostInputEvent              -> slot 13
+IScriptSystem::ExecuteBuffer        -> slot 6
 IFlashUI::GetUIElementByInstanceStr -> slot 18
 IUIElement::Update(float)           -> slot 23
 IUIElement::Render                  -> slot 24
