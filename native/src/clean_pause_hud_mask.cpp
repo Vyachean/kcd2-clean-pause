@@ -17,14 +17,19 @@ using namespace kcd2;
 // These are layout ABI facts verified by libKCD2, not storefront-specific RVAs.
 constexpr std::size_t kHudListenersOffset = 0x1D0;
 constexpr std::size_t kMaskListenerOffset = 0x10;
+constexpr std::size_t kMaskVisibilityInterfaceOffset = 0x58;
 constexpr std::size_t kMaskSourceMonitorOffset = 0x60;
 constexpr std::size_t kMaskOnModuleMessageSlot = 3;
+constexpr std::size_t kMaskIsElementVisibleSlot = 1;
 constexpr std::size_t kSourceEventSlot = 0;
+constexpr std::size_t kModuleMessageIdOffset = 0x08;
+constexpr std::uint32_t kHudRefreshModuleMessageId = 52;
 constexpr std::size_t kMaxListenerStorageBytes = 64 * 1024;
 constexpr char kMaskRttiName[] = ".?AVC_UIHudMask@guimodule@wh@@";
 
 using SourceEventFn = void(__fastcall*)(void*, void*, bool);
 using OnModuleMessageFn = void(__fastcall*)(void*, void*);
+using IsElementVisibleFn = bool(__fastcall*)(void*, std::uint8_t);
 
 std::atomic<MutationObserver> g_observer{nullptr};
 SourceEventFn g_originalSourceEvent{};
@@ -246,6 +251,21 @@ bool InstallHook(void* target, void* detour, void** original, void*& installedTa
     return true;
 }
 
+bool IsHudRefreshMessage(const void* message)
+{
+    if (!IsReadable(message, kModuleMessageIdOffset + sizeof(std::uint32_t)))
+        return false;
+
+    std::uint32_t id{};
+    __try {
+        id = *reinterpret_cast<const std::uint32_t*>(
+            reinterpret_cast<const std::uint8_t*>(message) + kModuleMessageIdOffset);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    return id == kHudRefreshModuleMessageId;
+}
+
 void NotifyAfterMutation()
 {
     const auto observer = g_observer.load(std::memory_order_acquire);
@@ -262,9 +282,14 @@ void __fastcall HookSourceEvent(void* sourceMonitor, void* source, bool active)
 
 void __fastcall HookOnModuleMessage(void* mask, void* message)
 {
+    // All GUI elements receive the general module-message broadcast. C_UIHudMask
+    // mutates visibility only for message id 52; read that id before vanilla runs so
+    // the message object does not need to outlive the original call.
+    const bool refresh = IsHudRefreshMessage(message);
     if (g_originalOnModuleMessage)
         g_originalOnModuleMessage(mask, message);
-    NotifyAfterMutation();
+    if (refresh)
+        NotifyAfterMutation();
 }
 
 } // namespace
@@ -302,6 +327,41 @@ bool EnsureHooks(void* hudElement, MutationObserver observer)
         return false;
 
     g_observer.store(observer, std::memory_order_release);
+    return true;
+}
+
+bool ReadCurrentVisibility(void* hudElement, bool* visible, std::size_t count)
+{
+    if (!visible || count != kHudElementCount)
+        return false;
+
+    void* mask{};
+    void* sourceMonitor{};
+    if (!FindMaskObjects(hudElement, mask, sourceMonitor))
+        return false;
+
+    auto* visibilityInterface = reinterpret_cast<std::uint8_t*>(mask)
+        + kMaskVisibilityInterfaceOffset;
+    void* interfaceOwner{};
+    std::uint32_t interfaceOffset{};
+    if (!ResolveCompleteObjectByRtti(
+            visibilityInterface, kMaskRttiName, interfaceOwner, interfaceOffset)
+        || interfaceOwner != mask || interfaceOffset != kMaskVisibilityInterfaceOffset)
+        return false;
+    if (!ValidateVtable(visibilityInterface, kMaskIsElementVisibleSlot))
+        return false;
+
+    const auto isVisible = VFunc<IsElementVisibleFn>(
+        visibilityInterface, kMaskIsElementVisibleSlot);
+    if (!isVisible || !IsExecutable(reinterpret_cast<void*>(isVisible)))
+        return false;
+
+    __try {
+        for (std::size_t i = 0; i < kHudElementCount; ++i)
+            visible[i] = isVisible(visibilityInterface, static_cast<std::uint8_t>(i));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
     return true;
 }
 
