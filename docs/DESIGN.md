@@ -50,6 +50,10 @@ The transaction therefore never reconstructs vanilla pause state by taking a who
 
 `OnModuleMessage` is not treated as a generic visibility mutation: only the verified HUD-refresh message `52` notifies the presentation observer. Source-monitor callbacks remain relevant because they directly update individual mask elements.
 
+MinHook patches shared method bodies rather than one C++ object. The detours are therefore explicitly scoped to the concrete `C_UIHudMask` and source-monitor object identities discovered from the current `hud@0`; callbacks from any other instance are forwarded to vanilla but cannot drive Clean Pause reconciliation. Those identities are published before the mutation observer becomes active.
+
+A transactional Flash replay is allowed only after a fresh complete `I_UIHudMask` read succeeds. If the authoritative state cannot be read, the transaction fails open before changing Flash. If replaying the gameplay presentation fails part-way, the just-captured authoritative vanilla snapshot is restored before Menu rendering is released.
+
 ### Pending and maintenance behavior
 
 The mask transaction can begin while pause entry is still pending, before `Menu@0` becomes verifiably visible. If that pending attempt expires and no further input arrives, the already-established main-thread `hud@0::Update(float)` path performs rollback to KCD2's vanilla HUD presentation and clears the pending transaction. It does not use update timing to manufacture or retry pause ownership.
@@ -122,6 +126,8 @@ The user then resumes using normal vanilla menu controls.
 A visible vanilla pause menu is the safe fallback. If Menu/HUD/DoF state cannot be resolved or verified, the mod must relinquish Clean Pause presentation ownership rather than leave gameplay live with input swallowed.
 
 All presentation handoffs suspend the HUD transaction before restoring vanilla state. The preferred source is live `I_UIHudMask::IsElementVisible`; an authoritative internal-state fallback snapshot is retained during verified mask mutations in case a later live read unexpectedly fails. Only when transactional mask discovery was unavailable from the start does the compatibility path use the older Flash-captured vanilla snapshot.
+
+The transactional path is fail-closed with respect to presentation ownership: it never keeps gameplay HUD pinned when a fresh authoritative internal read required for reconciliation fails, and it never releases Menu rendering after a partial gameplay replay without first attempting to restore the authoritative vanilla snapshot. Terminal entry failures clear their snapshots so the pending attempt is not silently re-armed.
 
 Any captured DoF override is restored best-effort before presentation is returned to vanilla, and a transient restore failure remains retryable on later input.
 
