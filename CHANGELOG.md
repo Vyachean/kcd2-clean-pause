@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.1-rc.3 — 2026-08-25
+
+Retail correction for the blur-free presentation candidate.
+
+- Fixes the Lua CVar getter from the nonexistent `System.GetCVarValue` call used by rc.2 to CryEngine's actual `System.GetCVar` API.
+- Keeps the rc.2 DoF design unchanged: save `wh_cl_NearDof` and `r_DepthOfField`, disable them only during Clean Pause, then restore the exact saved values before visible vanilla presentation.
+- rc.2 should not be used for testing: its invalid getter forced the DoF path to fail open to the ordinary visible pause menu.
+
 ## v0.1.1-rc.2 — 2026-08-25
 
 Presentation/safety prerelease on top of the dual-package model.
