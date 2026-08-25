@@ -63,6 +63,13 @@ class BlurContractTests(unittest.TestCase):
         self.assertIn("disable_blur_rollback", BLUR)
         self.assertIn("deferred outside-Clean-Pause retry", NATIVE)
 
+    def test_restore_never_executes_lua_from_nested_vanilla_input(self):
+        helper = NATIVE[
+            NATIVE.index("void RestoreBlurBestEffort") : NATIVE.index("bool ValidateObjectVtable")
+        ]
+        self.assertIn("if (g_forwardDepth != 0)", helper)
+        self.assertLess(helper.index("if (g_forwardDepth != 0)"), helper.index("blur::Restore()"))
+
 
 if __name__ == "__main__":
     unittest.main()
