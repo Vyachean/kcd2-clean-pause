@@ -66,7 +66,7 @@ Expected:
 
 Close it normally and confirm gameplay resumes with the same graphics behavior that existed before Clean Pause.
 
-The rc.3 restoration handoff still needs an explicit retail observation before stable promotion.
+The DoF restoration handoff still needs an explicit retail observation before stable promotion.
 
 ### 4. B behavior
 
@@ -76,23 +76,46 @@ Expected under the current product contract: the ordinary vanilla pause menu bec
 
 Use normal KCD2 menu controls to resume.
 
-### 5. Dialogue/subtitle
+### 5. Dialogue subtitle
 
 If naturally available in the same session:
 
-- pause during a visible spoken subtitle;
+- pause during a visible spoken dialogue subtitle;
 - confirm the current subtitle remains visible during Clean Pause;
 - confirm the retained frame is sharp rather than inheriting the vanilla pause blur;
 - confirm speech/audio/progression stop with the vanilla pause;
 - reveal the normal menu with Start or B, then resume normally.
 
-Do not create a separate game launch solely for a cutscene/subtitle edge case.
+### 6. NPC overhead subtitle / speech bubble — rc.4 acceptance
+
+While an NPC has a currently visible overhead chatter subtitle (the in-world speech bubble above/near the character), press Xbox Start once.
+
+Expected:
+
+- Clean Pause opens normally;
+- the exact overhead line that was visible before Start remains visible in Clean Pause;
+- its text and screen/world anchor do not get reconstructed or replaced by the mod — the original KCD2 bubble remains alive;
+- dialogue/HUD subtitle preservation and blur-free presentation continue to work as before.
+
+Then press Start again to reveal the vanilla pause menu, close the menu normally, and resume gameplay.
+
+Expected after resume:
+
+- the bubble system returns to normal KCD2 ownership;
+- the preserved line is not permanently stuck on screen;
+- subsequent NPC overhead chatter appears and disappears normally.
+
+The rc.4 bubble controller is optional/fail-open. If runtime RTTI/listener discovery cannot validate `C_UIHudBubbles`, the existing Clean Pause path must still work; only overhead-bubble preservation may be absent.
+
+Do not create a separate game launch solely for a cutscene/subtitle edge case. The overhead-bubble check can be performed whenever a suitable NPC line occurs in the same session.
 
 ## Failure-path check
 
 The blur suppression is part of the Clean Pause presentation contract, not an optional setting. If the runtime cannot safely access/save the DoF CVars, it must leave the ordinary visible vanilla pause menu rather than entering a partially working Clean Pause.
 
 Any later fail-open path must attempt to restore the saved DoF values before returning presentation to vanilla. A transient restore failure remains retryable on subsequent input.
+
+Overhead-bubble preservation is deliberately weaker than the core pause contract: inability to discover/install the bubble hooks must not force Clean Pause to fail open or change input behavior.
 
 ## ASI edition acceptance
 
@@ -106,4 +129,4 @@ When convenient, exercise repeated pause cycles, load transitions, Alt-Tab, and 
 
 ## CI
 
-Repository CI builds both x64 MSVC native images, validates standalone version-proxy exports, validates both images as x64/static-runtime builds, and runs `tools/validate_native_contract.py` plus the dual-package and blur-lifecycle contract tests.
+Repository CI builds both x64 MSVC native images, validates standalone version-proxy exports, validates both images as x64/static-runtime builds, and runs `tools/validate_native_contract.py` plus the dual-package, blur-lifecycle, and overhead-bubble contract tests.
