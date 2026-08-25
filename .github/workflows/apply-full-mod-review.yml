@@ -42,3 +42,5 @@ jobs:
           git diff --cached --quiet; if ($LASTEXITCODE -eq 0) { exit 0 }
           git commit -m "fix: close full-mod review safety gaps"
           git push origin HEAD:fix/instant-clean-pause-hud
+
+# Rerun marker: stale fail-open assertion corrected in the branch test source.
