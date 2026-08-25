@@ -113,8 +113,10 @@ if "if (refresh)\n        NotifyAfterMutation();" not in module_hook:
     raise SystemExit("OnModuleMessage observer must run only for verified HUD refresh message 52")
 
 transaction = native[native.index("void ReconcileHudMaskMutation"):native.index("void FailOpenHudMaintenance")]
-if "CaptureHudVisibilitySnapshot" in transaction or "g_vanillaPauseHudSnapshot =" in transaction:
+if "CaptureHudVisibilitySnapshot" in transaction:
     raise SystemExit("partial HUD-mask callbacks must not snapshot the whole Flash HUD as vanilla state")
+if "CaptureVanillaHudFromInternalMask" not in transaction or "g_vanillaPauseHudSnapshot = vanillaState;" not in transaction:
+    raise SystemExit("HUD-mask callback must retain an authoritative internal-state fallback snapshot")
 if "RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot" not in transaction:
     raise SystemExit("HUD-mask mutation must restore the gameplay presentation before render")
 if transaction.index("GetCurrentThreadId()") > transaction.index("ShouldPinGameplayHudPresentation()"):
@@ -188,6 +190,13 @@ if b_block.index("RestoreBlurBestEffort") > b_block.index("g_cleanHidden.store(f
 hud_update = native[native.index("void __fastcall HookHudUpdate"):native.index("bool EnsureHudUpdateHook")]
 if "g_hudMaskPinSuspended.load(std::memory_order_acquire)" not in hud_update:
     raise SystemExit("periodic HUD fallback must honor transactional exit suspension")
+for needle in (
+    "g_pendingPauseAttempt.load(std::memory_order_acquire)",
+    "now > deadline",
+    'RestoreVanillaHudPresentation("vanilla-pending-timeout-update")',
+):
+    if needle not in hud_update:
+        raise SystemExit(f"pending no-input timeout cleanup missing from HUD update: {needle}")
 
 pending = native[native.index("bool PendingAttemptAlive"):native.index("bool TryEnterCleanPause")]
 if pending.index("RestoreVanillaHudPresentation") > pending.index("ResetHudSnapshots"):

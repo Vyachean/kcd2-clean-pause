@@ -42,9 +42,18 @@ class HudMaskTransactionContractTests(unittest.TestCase):
     def test_transaction_never_whole_snapshots_partial_flash_state(self):
         callback = NATIVE[NATIVE.index('void ReconcileHudMaskMutation()'):NATIVE.index('void FailOpenHudMaintenance')]
         self.assertNotIn('CaptureHudVisibilitySnapshot', callback)
-        self.assertNotIn('g_vanillaPauseHudSnapshot =', callback)
+        self.assertIn('CaptureVanillaHudFromInternalMask', callback)
+        self.assertIn('g_vanillaPauseHudSnapshot = vanillaState;', callback)
         self.assertIn('RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot', callback)
         self.assertLess(callback.index('GetCurrentThreadId()'), callback.index('ShouldPinGameplayHudPresentation()'))
+
+    def test_pending_transaction_expires_without_requiring_another_input(self):
+        update = NATIVE[NATIVE.index('void __fastcall HookHudUpdate'):NATIVE.index('bool EnsureHudUpdateHook')]
+        self.assertIn('g_pendingPauseAttempt.load(std::memory_order_acquire)', update)
+        self.assertIn('now > deadline', update)
+        self.assertIn('RestoreVanillaHudPresentation("vanilla-pending-timeout-update")', update)
+        self.assertLess(update.index('g_hudMaskPinSuspended.store(true'), update.index('RestoreVanillaHudPresentation("vanilla-pending-timeout-update")'))
+        self.assertLess(update.index('RestoreVanillaHudPresentation("vanilla-pending-timeout-update")'), update.index('ResetHudSnapshots()'))
 
     def test_transaction_mode_does_not_require_fallback_vanilla_snapshot(self):
         entry = NATIVE[NATIVE.index('bool TryEnterCleanPause'):NATIVE.index('void HandleHiddenInput')]

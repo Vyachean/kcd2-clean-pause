@@ -639,10 +639,14 @@ void ReconcileHudMaskMutation()
     if (!ShouldPinGameplayHudPresentation())
         return;
 
-    // Vanilla has already updated its internal C_UIHudMask state. Keep that state as
-    // the source of truth and only roll the Flash presentation back before render.
-    // The vanilla state is read live from I_UIHudMask when presentation is relinquished;
-    // never snapshot all 28 Flash clips from a potentially partial source-event batch.
+    // Vanilla has already updated its internal C_UIHudMask state. Snapshot that
+    // authoritative 28-element state (not the partially-mutated Flash presentation)
+    // so a later discovery failure can still relinquish Clean Pause safely.
+    HudVisibilitySnapshot vanillaState{};
+    if (CaptureVanillaHudFromInternalMask(vanillaState))
+        g_vanillaPauseHudSnapshot = vanillaState;
+
+    // Only presentation is rolled back. KCD2 keeps owning the internal pause state.
     if (!RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay-mask-transaction"))
         Log("C_UIHudMask transaction could not restore gameplay HUD before render; periodic fallback remains active");
 }
@@ -679,19 +683,44 @@ void __fastcall HookHudUpdate(void* element, float deltaTime)
     if (!g_hudUpdateFirstReturnLogged.exchange(true, std::memory_order_acq_rel))
         Log("hud@0 Update original returned successfully");
 
-    if (element != g_hudElement
-        || !g_cleanHidden.load(std::memory_order_acquire)
-        || g_hudMaskPinSuspended.load(std::memory_order_acquire))
+    if (element != g_hudElement)
         return;
 
     if (GetCurrentThreadId() != g_mainThreadId) {
         if (!g_hudUpdateThreadMismatchLogged.exchange(true, std::memory_order_acq_rel))
-            Log("hud@0 Update observed off validated main thread; periodic HUD restore disabled for safety");
+            Log("hud@0 Update observed off validated main thread; HUD maintenance disabled for safety");
         return;
     }
 
-    const ULONGLONG enteredAt = g_cleanHiddenSinceMs.load(std::memory_order_acquire);
     const ULONGLONG now = GetTickCount64();
+
+    // The no-blink transaction starts while pause entry is still pending. If Menu@0
+    // never becomes verifiable and no further input arrives, expire that transaction
+    // here on the already-proven main-thread HUD update path so gameplay presentation
+    // cannot remain pinned indefinitely.
+    if (!g_cleanHidden.load(std::memory_order_acquire)) {
+        if (g_pendingPauseAttempt.load(std::memory_order_acquire)) {
+            const ULONGLONG deadline = g_pendingDeadlineMs.load(std::memory_order_acquire);
+            if (deadline != 0 && now > deadline) {
+                g_hudMaskPinSuspended.store(true, std::memory_order_release);
+                g_pendingPauseAttempt.store(false, std::memory_order_release);
+                g_pendingDeadlineMs.store(0, std::memory_order_release);
+                if (g_hudMaskTransactionAvailable.load(std::memory_order_acquire)
+                    && g_gameplayHudSnapshot.captured
+                    && !RestoreVanillaHudPresentation("vanilla-pending-timeout-update"))
+                    Log("pending Clean Pause HUD-update timeout could not restore vanilla presentation");
+                ResetHudSnapshots();
+                g_hudMaskPinSuspended.store(false, std::memory_order_release);
+                Log("pending Clean Pause presentation transaction expired on hud@0 Update");
+            }
+        }
+        return;
+    }
+
+    if (g_hudMaskPinSuspended.load(std::memory_order_acquire))
+        return;
+
+    const ULONGLONG enteredAt = g_cleanHiddenSinceMs.load(std::memory_order_acquire);
     if (!enteredAt || now - enteredAt > kHudSnapshotHoldMs)
         return;
 
@@ -912,6 +941,8 @@ bool TryEnterCleanPause(const char* trigger, bool swallowMatchingRelease)
 
     const bool transactional =
         g_hudMaskTransactionAvailable.load(std::memory_order_acquire);
+    if (transactional && !g_vanillaPauseHudSnapshot.captured)
+        CaptureVanillaHudFromInternalMask(g_vanillaPauseHudSnapshot);
     if (!transactional
         && !g_vanillaPauseHudSnapshot.captured
         && !CaptureHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause")) {
