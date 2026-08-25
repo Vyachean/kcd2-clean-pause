@@ -176,6 +176,8 @@ void Log(const char* format, ...)
 
 void RestoreBlurBestEffort(const char* context)
 {
+    if (g_forwardDepth != 0)
+        return;
     if (!blur::Restore() && blur::IsSuppressed())
         Log("Clean Pause DoF restore failed (%s); will retry on subsequent input",
             context ? context : "unknown");
