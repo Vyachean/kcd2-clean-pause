@@ -1,6 +1,7 @@
 #include "clean_pause_native.h"
 #include "clean_pause_blur.h"
 #include "clean_pause_bubbles.h"
+#include "clean_pause_hud_mask.h"
 #include "kcd2_abi.h"
 
 #include <MinHook.h>
@@ -566,6 +567,41 @@ bool RestoreHudVisibilitySnapshot(const HudVisibilitySnapshot& snapshot, const c
     return true;
 }
 
+bool ShouldPinGameplayHudPresentation()
+{
+    if (!g_gameplayHudSnapshot.captured)
+        return false;
+    if (g_cleanHidden.load(std::memory_order_acquire))
+        return true;
+    if (!g_pendingPauseAttempt.load(std::memory_order_acquire))
+        return false;
+
+    const ULONGLONG deadline = g_pendingDeadlineMs.load(std::memory_order_acquire);
+    return deadline != 0 && GetTickCount64() <= deadline;
+}
+
+void ReconcileHudMaskMutation()
+{
+    // C_UIHudMask has already updated its internal source-derived state here, but
+    // rendering has not resumed yet. Capture that vanilla pause state, then put the
+    // pre-pause presentation back in the same call stack so no hidden HUD frame can
+    // reach the renderer. Internal vanilla ownership is intentionally untouched.
+    if (!ShouldPinGameplayHudPresentation())
+        return;
+    if (!OnValidatedMainThread("HUD mask transaction"))
+        return;
+
+    HudVisibilitySnapshot vanillaState{};
+    if (!CaptureHudVisibilitySnapshot(vanillaState, "vanilla-mask-transaction")) {
+        Log("C_UIHudMask transaction could not capture vanilla HUD state; periodic fallback remains active");
+        return;
+    }
+    g_vanillaPauseHudSnapshot = vanillaState;
+
+    if (!RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay-mask-transaction"))
+        Log("C_UIHudMask transaction could not restore gameplay HUD before render; periodic fallback remains active");
+}
+
 void FailOpenHudMaintenance(const char* reason)
 {
     // Menu@0 remains logically visible; dropping render suppression is enough to show
@@ -621,6 +657,12 @@ bool EnsureHudUpdateHook()
     void* hud{};
     if (!ResolveHudElement(hud))
         return false;
+
+    // C_UIHudMask is the source-derived owner of the 28 child visibility flags.
+    // Observe its mutations before vanilla sees Start so a pause-source update can be
+    // visually rolled back in the same call stack, before the next render.
+    if (!hud_mask::EnsureHooks(hud, &ReconcileHudMaskMutation))
+        Log("C_UIHudMask transaction hook unavailable; using snapshot restore fallback");
 
     // Overhead NPC subtitles are managed by C_UIHudBubbles below the root "Bubbles"
     // movieclip. Install their optional lifecycle freeze before vanilla sees Start.
@@ -789,7 +831,8 @@ bool TryEnterCleanPause(const char* trigger, bool swallowMatchingRelease)
     if (!ReadVerifiedMenuVisible(visible) || !visible)
         return false;
     if (!g_gameplayHudSnapshot.captured
-        || !CaptureHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause")) {
+        || (!g_vanillaPauseHudSnapshot.captured
+            && !CaptureHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause"))) {
         ResetHudSnapshots();
         Log("vanilla pause opened but its HUD child state could not be captured; leaving ordinary visible pause menu (fail-open)");
         return false;
