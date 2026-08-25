@@ -40,7 +40,11 @@ HMODULE g_selfModule{};
 void* g_environment{};
 void* g_input{};
 void* g_game{};
+void* g_gameFramework{};
 void* g_flashUI{};
+PauseGameFn g_originalPauseGame{};
+void* g_pauseGameTarget{};
+std::atomic_bool g_pauseBarrierObserved{false};
 DWORD g_mainThreadId{};
 void* g_menuElement{};
 PostInputEventFn g_originalPostInputEvent{};
@@ -81,6 +85,7 @@ std::atomic_bool g_hudMaskThreadMismatchLogged{false};
 std::atomic_ullong g_nextHudSnapshotRefreshMs{0};
 UIElementUpdateFn g_originalHudUpdate{};
 void* g_hudUpdateTarget{};
+void* g_hudUpdateElement{};
 std::atomic_bool g_hudUpdateFirstEntryLogged{false};
 std::atomic_bool g_hudUpdateFirstReturnLogged{false};
 SRWLOCK g_logLock = SRWLOCK_INIT;
@@ -265,7 +270,8 @@ bool ValidateEnvironmentCandidate(const std::uint8_t* candidate, RuntimeEnvironm
         return false;
     if (!ValidateObjectVtable(value.input, {kInputPostInputEventSlot}))
         return false;
-    if (!ValidateObjectVtable(value.game, {kGameGetLongNameSlot, kGameGetNameSlot}))
+    if (!ValidateObjectVtable(value.game, {
+            kGameGetLongNameSlot, kGameGetNameSlot, kGameGetFrameworkSlot }))
         return false;
     if (!ValidateObjectVtable(value.system, {0}))
         return false;
@@ -478,6 +484,7 @@ void ResetHudSnapshots()
     g_hudUpdateThreadMismatchLogged.store(false, std::memory_order_release);
     g_hudMaskThreadMismatchLogged.store(false, std::memory_order_release);
     g_nextHudSnapshotRefreshMs.store(0, std::memory_order_release);
+    g_pauseBarrierObserved.store(false, std::memory_order_release);
 }
 
 bool OnValidatedMainThread(const char* operation)
@@ -844,6 +851,21 @@ bool EnsureHudUpdateHook()
     if (!ResolveHudElement(hud))
         return false;
 
+    const auto target = reinterpret_cast<void*>(VFunc<UIElementUpdateFn>(hud, kUIElementUpdateSlot));
+    if (!target || !IsExecutable(target))
+        return false;
+
+    // The expensive listener/RTTI discovery is tied to one concrete hud@0 lifetime.
+    // Repeated pause presses on the same HUD reuse the already-validated identities.
+    if (g_hudUpdateTarget) {
+        if (target != g_hudUpdateTarget)
+            return false;
+        if (hud == g_hudUpdateElement) {
+            g_hudElement = hud;
+            return true;
+        }
+    }
+
     // C_UIHudMask is the source-derived owner of the 28 child visibility flags.
     // Observe its mutations before vanilla sees Start so a pause-source update can be
     // visually rolled back in the same call stack, before the next render.
@@ -861,22 +883,15 @@ bool EnsureHudUpdateHook()
 
     // Overhead NPC subtitles are managed by C_UIHudBubbles below the root "Bubbles"
     // movieclip. Install their optional lifecycle freeze before vanilla sees Start.
-    // Discovery failure is intentionally ignored so the proven Clean Pause path remains
-    // available even if a storefront/build changes the concrete listener layout.
     bubbles::EnsureHooks(hud, g_flashUI);
 
-    const auto target = reinterpret_cast<void*>(VFunc<UIElementUpdateFn>(hud, kUIElementUpdateSlot));
-    if (!target || !IsExecutable(target))
-        return false;
-
+    g_hudElement = hud;
+    g_hudUpdateElement = hud;
     if (g_hudUpdateTarget) {
-        if (target != g_hudUpdateTarget)
-            return false;
-        g_hudElement = hud;
+        Log("hud@0 recreated; cached HUD listener identities retargeted to hud=%p", hud);
         return true;
     }
 
-    g_hudElement = hud;
     const MH_STATUS create = MH_CreateHook(
         target,
         reinterpret_cast<void*>(&HookHudUpdate),
@@ -1035,11 +1050,18 @@ bool PendingAttemptAlive()
     return false;
 }
 
-bool TryEnterCleanPause(const char* trigger, bool swallowMatchingRelease)
+bool TryEnterCleanPause(
+    const char* trigger,
+    bool swallowMatchingRelease,
+    bool requireMenuVisible = true)
 {
-    bool visible{};
-    if (!ReadVerifiedMenuVisible(visible) || !visible)
+    if (requireMenuVisible) {
+        bool visible{};
+        if (!ReadVerifiedMenuVisible(visible) || !visible)
+            return false;
+    } else if (!g_menuElement || !g_renderTarget) {
         return false;
+    }
     if (!g_gameplayHudSnapshot.captured) {
         ResetHudSnapshots();
         Log("vanilla pause opened but gameplay HUD state was unavailable; leaving ordinary visible pause menu (fail-open)");
@@ -1260,7 +1282,22 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
         }
 
         ArmPendingPauseAttempt();
+        g_pauseBarrierObserved.store(false, std::memory_order_release);
         Forward(input, event, force);
+
+        // Preferred path: vanilla itself called and returned from PauseGame(true)
+        // while handling this physical press. We are now outside the nested vanilla
+        // input stack but still in the same PostInputEvent call, so presentation can
+        // be accepted without waiting for the physical Start/Escape release or for a
+        // visible Menu frame. The release is swallowed after successful ownership.
+        if (g_pauseBarrierObserved.exchange(false, std::memory_order_acq_rel)) {
+            if (!TryEnterCleanPause("vanilla PauseGame barrier after Escape/Start press", true, false)
+                && g_gameplayHudSnapshot.captured)
+                ArmPendingPauseAttempt();
+            return;
+        }
+
+        // Compatibility fallback when the verified engine barrier was not observed.
         if (!TryEnterCleanPause("Escape/Start press", true)
             && g_gameplayHudSnapshot.captured)
             ArmPendingPauseAttempt();
@@ -1276,6 +1313,110 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
     }
 
     Forward(input, event, force);
+}
+
+bool ResolveGameFramework(const RuntimeEnvironment& environment, void*& framework)
+{
+    framework = nullptr;
+    if (!environment.game || !environment.system
+        || !ValidateObjectVtable(environment.game, {kGameGetFrameworkSlot}))
+        return false;
+
+    const auto getFramework = VFunc<GetGameFrameworkFn>(
+        environment.game, kGameGetFrameworkSlot);
+    if (!getFramework || !IsExecutable(reinterpret_cast<void*>(getFramework)))
+        return false;
+
+    __try {
+        framework = getFramework(environment.game);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        framework = nullptr;
+    }
+    if (!framework || !ValidateObjectVtable(framework, {
+            kGameFrameworkPauseGameSlot, kGameFrameworkGetSystemSlot }))
+        return false;
+
+    // Identity proof: slot 19 is the verified IGameFramework::GetISystem accessor.
+    // Do not hook a merely shape-compatible object whose system does not match gEnv.
+    const auto getSystem = VFunc<GameFrameworkGetSystemFn>(
+        framework, kGameFrameworkGetSystemSlot);
+    void* frameworkSystem{};
+    __try {
+        frameworkSystem = getSystem ? getSystem(framework) : nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        frameworkSystem = nullptr;
+    }
+    return frameworkSystem == environment.system;
+}
+
+void __fastcall HookPauseGame(
+    void* framework,
+    bool pause,
+    bool force,
+    unsigned int fadeOutInMs)
+{
+    const bool observe = framework == g_gameFramework
+        && pause
+        && g_pendingPauseAttempt.load(std::memory_order_acquire)
+        && (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId);
+    const ULONGLONG enteredAt = observe ? GetTickCount64() : 0;
+
+    // KCD2 remains the only pause owner. Never alter arguments and never synthesize a
+    // PauseGame call; observe only after the exact vanilla call has returned.
+    if (g_originalPauseGame)
+        g_originalPauseGame(framework, pause, force, fadeOutInMs);
+
+    if (!observe || !g_pendingPauseAttempt.load(std::memory_order_acquire))
+        return;
+
+    g_pauseBarrierObserved.store(true, std::memory_order_release);
+    Log(
+        "vanilla IGameFramework::PauseGame(true) returned during pending pause; force=%s fadeMs=%u callMs=%llu",
+        force ? "true" : "false",
+        fadeOutInMs,
+        static_cast<unsigned long long>(GetTickCount64() - enteredAt));
+}
+
+bool InstallPauseBarrierHook(const RuntimeEnvironment& environment)
+{
+    void* framework{};
+    if (!ResolveGameFramework(environment, framework)) {
+        Log("IGameFramework pause barrier unavailable: verified framework identity could not be resolved");
+        return false;
+    }
+
+    const auto target = reinterpret_cast<void*>(
+        VFunc<PauseGameFn>(framework, kGameFrameworkPauseGameSlot));
+    if (!target || !IsExecutable(target))
+        return false;
+
+    if (g_pauseGameTarget) {
+        if (target != g_pauseGameTarget)
+            return false;
+        g_gameFramework = framework;
+        return true;
+    }
+
+    const MH_STATUS create = MH_CreateHook(
+        target,
+        reinterpret_cast<void*>(&HookPauseGame),
+        reinterpret_cast<void**>(&g_originalPauseGame));
+    if (create != MH_OK) {
+        Log("MH_CreateHook(IGameFramework::PauseGame) failed: %d", static_cast<int>(create));
+        return false;
+    }
+    const MH_STATUS enable = MH_EnableHook(target);
+    if (enable != MH_OK) {
+        MH_RemoveHook(target);
+        Log("MH_EnableHook(IGameFramework::PauseGame) failed: %d", static_cast<int>(enable));
+        return false;
+    }
+
+    g_gameFramework = framework;
+    g_pauseGameTarget = target;
+    Log("vanilla IGameFramework::PauseGame observer active; framework=%p PauseGame=%p",
+        g_gameFramework, g_pauseGameTarget);
+    return true;
 }
 
 bool InstallInputHook(const RuntimeEnvironment& environment)
@@ -1299,6 +1440,10 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
         Log("MH_Initialize failed: %d", static_cast<int>(init));
         return false;
     }
+
+    // Optional event-driven pause barrier. If it cannot be validated, the existing
+    // Menu visibility path remains the fail-open compatibility behavior.
+    InstallPauseBarrierHook(environment);
 
     const MH_STATUS create = MH_CreateHook(
         g_postInputEventTarget,

@@ -10,7 +10,7 @@ Rejected:
 
 - profile/action routing as the primary pause interception path;
 - runtime action-map reload/remapping or `Player.OnAction` replacement;
-- inferred native `PauseGame` ABI;
+- calling an inferred/native `PauseGame` as a custom pause owner;
 - `CryAction.PauseGame`, `Action.PauseGame`, `Game.PauseGame`, or Lua/custom `PauseGame` as production owner;
 - `ActionMapManager.IsFilterEnabled("only_ui")` as vanilla-pause ownership evidence;
 - `Menu@0::SetVisible(false)` as the hidden-pause ownership architecture;
@@ -21,7 +21,8 @@ Accepted foundation:
 
 - KCD2 owns pause;
 - real Escape/Start is forwarded;
-- `Menu@0::IsVisible()` is the retail lifecycle signal;
+- the verified vanilla `IGameFramework::PauseGame(true, ...)` return may be observed as an event barrier, but is never called by the mod;
+- `Menu@0::IsVisible()` remains the visible-menu/fail-open lifecycle signal;
 - Menu visibility is untouched;
 - only `Menu@0::Render()` is suppressed during Clean Pause.
 

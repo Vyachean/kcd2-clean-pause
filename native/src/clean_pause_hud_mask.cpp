@@ -38,6 +38,7 @@ OnModuleMessageFn g_originalOnModuleMessage{};
 void* g_onModuleMessageTarget{};
 std::atomic<void*> g_maskObject{nullptr};
 std::atomic<void*> g_sourceMonitorObject{nullptr};
+std::atomic<void*> g_hudElementObject{nullptr};
 
 struct CompleteObjectLocator64 {
     std::uint32_t signature;
@@ -232,6 +233,23 @@ bool FindMaskObjects(void* hudElement, void*& owner, void*& sourceMonitor)
     return false;
 }
 
+bool LoadCachedMaskObjects(void* hudElement, void*& mask, void*& sourceMonitor)
+{
+    mask = nullptr;
+    sourceMonitor = nullptr;
+    if (!hudElement || g_hudElementObject.load(std::memory_order_acquire) != hudElement)
+        return false;
+
+    mask = g_maskObject.load(std::memory_order_acquire);
+    sourceMonitor = g_sourceMonitorObject.load(std::memory_order_acquire);
+    if (!mask || !sourceMonitor)
+        return false;
+    if (!ValidateVtable(mask, kMaskOnModuleMessageSlot)
+        || !ValidateVtable(sourceMonitor, kSourceEventSlot))
+        return false;
+    return true;
+}
+
 bool InstallHook(void* target, void* detour, void** original, void*& installedTarget)
 {
     if (!target || !detour || !original)
@@ -308,7 +326,8 @@ bool EnsureHooks(void* hudElement, MutationObserver observer)
 
     void* mask{};
     void* sourceMonitor{};
-    if (!FindMaskObjects(hudElement, mask, sourceMonitor))
+    const bool cached = LoadCachedMaskObjects(hudElement, mask, sourceMonitor);
+    if (!cached && !FindMaskObjects(hudElement, mask, sourceMonitor))
         return false;
 
     const auto sourceTarget = reinterpret_cast<void*>(
@@ -317,6 +336,12 @@ bool EnsureHooks(void* hudElement, MutationObserver observer)
         VFunc<OnModuleMessageFn>(mask, kMaskOnModuleMessageSlot));
     if (!IsExecutable(sourceTarget) || !IsExecutable(moduleMessageTarget))
         return false;
+
+    if (cached && g_sourceEventTarget == sourceTarget
+        && g_onModuleMessageTarget == moduleMessageTarget) {
+        g_observer.store(observer, std::memory_order_release);
+        return true;
+    }
 
     // Partial installation is inert because the observer is published only after
     // both mutation paths are hooked successfully.
@@ -337,6 +362,7 @@ bool EnsureHooks(void* hudElement, MutationObserver observer)
     // remain inert for unrelated instances and during partial installation.
     g_maskObject.store(mask, std::memory_order_release);
     g_sourceMonitorObject.store(sourceMonitor, std::memory_order_release);
+    g_hudElementObject.store(hudElement, std::memory_order_release);
     g_observer.store(observer, std::memory_order_release);
     return true;
 }
@@ -348,7 +374,8 @@ bool ReadCurrentVisibility(void* hudElement, bool* visible, std::size_t count)
 
     void* mask{};
     void* sourceMonitor{};
-    if (!FindMaskObjects(hudElement, mask, sourceMonitor))
+    if (!LoadCachedMaskObjects(hudElement, mask, sourceMonitor)
+        && !FindMaskObjects(hudElement, mask, sourceMonitor))
         return false;
 
     auto* visibilityInterface = reinterpret_cast<std::uint8_t*>(mask)

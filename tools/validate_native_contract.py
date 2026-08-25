@@ -28,8 +28,6 @@ forbidden = (
     "CryAction.PauseGame(",
     "Action.PauseGame(",
     "Game.PauseGame(",
-    "kGameFrameworkPauseGameSlot",
-    "PauseGameFn",
     "System.GetCVarValue",
 )
 for needle in forbidden:
@@ -49,6 +47,9 @@ required_abi = (
     "kUIElementGetMovieClipByNameSlot = 71",
     "kFlashVariableGetDisplayInfoSlot = 26",
     "kFlashVariableSetVisibleSlot = 33",
+    "kGameGetFrameworkSlot = 16",
+    "kGameFrameworkPauseGameSlot = 13",
+    "kGameFrameworkGetSystemSlot = 19",
     "XiStart = 516",
     "XiA = 526",
     "XiB = 527",
@@ -79,6 +80,10 @@ required_runtime = (
     "CLEAN_PAUSE_VERSION",
     "CLEAN_PAUSE_BUILD_ID",
     "LogWhGameFingerprint",
+    "ResolveGameFramework",
+    "HookPauseGame",
+    "InstallPauseBarrierHook",
+    "g_pauseBarrierObserved",
 )
 for needle in required_runtime:
     if needle not in native:
@@ -122,10 +127,10 @@ for needle in (
     if needle not in mask:
         raise SystemExit(f"global HUD-mask method hook is not target-instance scoped: {needle}")
 ensure_mask = mask[mask.index("bool EnsureHooks"):mask.index("bool ReadCurrentVisibility")]
-if ensure_mask.index("g_maskObject.store") > ensure_mask.index("g_observer.store"):
-    raise SystemExit("target HUD-mask identity must be published before mutation observer")
-if ensure_mask.index("g_sourceMonitorObject.store") > ensure_mask.index("g_observer.store"):
-    raise SystemExit("target source-monitor identity must be published before mutation observer")
+if ensure_mask.index("g_maskObject.store") > ensure_mask.rindex("g_observer.store"):
+    raise SystemExit("target HUD-mask identity must be published before initial mutation observer activation")
+if ensure_mask.index("g_sourceMonitorObject.store") > ensure_mask.rindex("g_observer.store"):
+    raise SystemExit("target source-monitor identity must be published before initial mutation observer activation")
 
 transaction = native[native.index("void ReconcileHudMaskMutation"):native.index("void FailOpenHudMaintenance")]
 if "CaptureHudVisibilitySnapshot" in transaction:
@@ -247,3 +252,31 @@ if post.count("&& g_gameplayHudSnapshot.captured)\n            ArmPendingPauseAt
     raise SystemExit("terminal Clean Pause entry failures must not re-arm pending ownership")
 
 print("stable native Clean Pause contract passed")
+
+# pause-barrier ownership contract
+pause_hook = native[native.index("void __fastcall HookPauseGame"):native.index("bool InstallPauseBarrierHook")]
+if pause_hook.index("g_originalPauseGame(") > pause_hook.index("g_pauseBarrierObserved.store(true"):
+    raise SystemExit("PauseGame barrier must be published only after vanilla PauseGame returns")
+if "g_originalPauseGame(framework, pause, force, fadeOutInMs);" not in pause_hook:
+    raise SystemExit("PauseGame observer must forward vanilla arguments unchanged")
+if "g_pendingPauseAttempt.load" not in pause_hook or "framework == g_gameFramework" not in pause_hook:
+    raise SystemExit("PauseGame observer must be scoped to target framework + pending physical pause")
+resolver = native[native.index("bool ResolveGameFramework"):native.index("void __fastcall HookPauseGame")]
+if "kGameGetFrameworkSlot" not in resolver or "kGameFrameworkGetSystemSlot" not in resolver:
+    raise SystemExit("framework discovery must use the verified IGame/IGameFramework accessors")
+if "frameworkSystem == environment.system" not in resolver:
+    raise SystemExit("framework identity must be proven against gEnv ISystem")
+post = native[native.index("void __fastcall HookPostInputEvent"):native.index("bool ResolveGameFramework")]
+barrier_exchange = post.index("g_pauseBarrierObserved.exchange(false")
+forward_press = post.rfind("Forward(input, event, force);", 0, barrier_exchange)
+if forward_press < 0 or forward_press > barrier_exchange:
+    raise SystemExit("PauseGame barrier may be consumed only after the outer vanilla press dispatch returns")
+if 'TryEnterCleanPause("vanilla PauseGame barrier after Escape/Start press", true, false)' not in post:
+    raise SystemExit("verified PauseGame barrier must accept Clean Pause without waiting for Menu visibility/release")
+if "g_originalPauseGame(" not in native:
+    raise SystemExit("missing vanilla PauseGame forwarding call")
+# The only direct PauseGame call in production must be the trampoline forward inside the detour.
+if native.count("g_originalPauseGame(") != 1:
+    raise SystemExit("production must never synthesize its own PauseGame calls")
+
+print("pause barrier contract passed")

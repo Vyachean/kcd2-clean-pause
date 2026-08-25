@@ -33,8 +33,11 @@ class HudMaskTransactionContractTests(unittest.TestCase):
         module = MASK[MASK.index('void __fastcall HookOnModuleMessage'):MASK.index('} // namespace\n\nbool EnsureHooks')]
         self.assertIn('mask == g_maskObject.load', module)
         ensure = MASK[MASK.index('bool EnsureHooks'):MASK.index('bool ReadCurrentVisibility')]
-        self.assertLess(ensure.index('g_maskObject.store'), ensure.index('g_observer.store'))
-        self.assertLess(ensure.index('g_sourceMonitorObject.store'), ensure.index('g_observer.store'))
+        # Cached reuse may update the observer before the initial-publication block.
+        # The first installation must still publish both concrete identities before
+        # the final observer publication that makes new detours active.
+        self.assertLess(ensure.index('g_maskObject.store'), ensure.rindex('g_observer.store'))
+        self.assertLess(ensure.index('g_sourceMonitorObject.store'), ensure.rindex('g_observer.store'))
 
     def test_transaction_fails_open_when_authoritative_state_is_unavailable(self):
         callback = NATIVE[NATIVE.index('void FailOpenHudMaskTransaction'):NATIVE.index('void FailOpenHudMaintenance')]

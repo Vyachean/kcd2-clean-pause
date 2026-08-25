@@ -39,6 +39,7 @@ void* g_bubbleUpdateTarget{};
 BubbleReleaseFn g_originalBubbleRelease{};
 void* g_bubbleReleaseTarget{};
 std::atomic<void*> g_bubbleInterfaceObject{nullptr};
+std::atomic<void*> g_hudElementObject{nullptr};
 
 struct CompleteObjectLocator64 {
     std::uint32_t signature;
@@ -312,8 +313,17 @@ void __fastcall HookMenuSetVisible(void* element, bool visible)
 bool EnsureHooks(void* hudElement, void* flashUI)
 {
     void* menu = ResolveMenu(flashUI);
-    void* bubbleInterface = FindBubbleInterface(hudElement);
-    if (!menu || !bubbleInterface)
+    if (!menu)
+        return false;
+
+    void* bubbleInterface{};
+    const bool cached = g_hudElementObject.load(std::memory_order_acquire) == hudElement
+        && g_menuElement == menu;
+    if (cached)
+        bubbleInterface = g_bubbleInterfaceObject.load(std::memory_order_acquire);
+    if (!bubbleInterface)
+        bubbleInterface = FindBubbleInterface(hudElement);
+    if (!bubbleInterface)
         return false;
 
     const auto bubbleUpdateTarget = reinterpret_cast<void*>(
@@ -326,6 +336,12 @@ bool EnsureHooks(void* hudElement, void* flashUI)
         || !IsExecutable(bubbleReleaseTarget)
         || !IsExecutable(menuSetVisibleTarget))
         return false;
+
+    if (cached
+        && g_bubbleUpdateTarget == bubbleUpdateTarget
+        && g_bubbleReleaseTarget == bubbleReleaseTarget
+        && g_menuSetVisibleTarget == menuSetVisibleTarget)
+        return true;
 
     // Install suppression hooks before the menu-visibility hook. Until the final hook
     // is active, g_pauseMenuVisible remains false, so partial installation is inert.
@@ -354,6 +370,7 @@ bool EnsureHooks(void* hudElement, void* flashUI)
     // Repeated discovery can safely retarget this to a recreated hud@0 instance while
     // the globally patched methods continue forwarding all unrelated objects.
     g_bubbleInterfaceObject.store(bubbleInterface, std::memory_order_release);
+    g_hudElementObject.store(hudElement, std::memory_order_release);
 
     bool visible{};
     const auto isVisible = VFunc<IsVisibleFn>(menu, kUIElementIsVisibleSlot);

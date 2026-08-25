@@ -27,9 +27,11 @@ The mod does not manufacture a pause state. KCD2's normal pause already owns the
 The implementation therefore:
 
 1. forwards the physical Escape/Start event to vanilla KCD2;
-2. independently verifies the pause lifecycle via `Menu@0::IsVisible()`;
-3. leaves `Menu@0` logically visible;
-4. suppresses only `Menu@0::Render()` while Clean Pause is active.
+2. observes the validated vanilla `IGameFramework::PauseGame(true, ...)` return as the preferred event barrier; the mod never calls `PauseGame` itself and never changes its arguments;
+3. accepts presentation ownership immediately after the outer physical press dispatch returns when that barrier was observed, instead of waiting for Start/Escape release;
+4. uses `Menu@0::IsVisible()` as the visible-menu/fail-open lifecycle signal when the barrier is unavailable;
+5. leaves `Menu@0` logically visible;
+6. suppresses only `Menu@0::Render()` while Clean Pause is active.
 
 This preserves a vanilla-owned pause while removing only the menu surface from the retained frame.
 
@@ -58,7 +60,7 @@ A transactional Flash replay is allowed only after a fresh complete internal HUD
 
 ### Pending and maintenance behavior
 
-The mask transaction can begin while pause entry is still pending, before `Menu@0` becomes verifiably visible. If that pending attempt expires and no further input arrives, the already-established main-thread `hud@0::Update(float)` path performs rollback to KCD2's vanilla HUD presentation and clears the pending transaction. It does not use update timing to manufacture or retry pause ownership.
+The mask transaction can begin while pause entry is still pending, before `Menu@0` becomes verifiably visible. The preferred completion point is the return from KCD2's own validated `IGameFramework::PauseGame(true, ...)` call during the forwarded physical press. The detour only records that barrier; Clean Pause presentation is accepted after the outer `PostInputEvent` forwarding returns, avoiding re-entrant Flash/Lua work inside `PauseGame` itself. If no verified barrier is observed, the existing Menu-visibility path remains the compatibility fallback. If the pending attempt expires and no further input arrives, the already-established main-thread `hud@0::Update(float)` path performs rollback to KCD2's vanilla HUD presentation and clears the pending transaction. It does not use update timing to manufacture or retry pause ownership.
 
 Once Clean Pause is active, `hud@0::Update(float)` remains only a short bounded fallback that can reapply the gameplay presentation if required. It honors the same suspension flag used by exit/fail-open handoffs, so it cannot re-pin gameplay HUD while vanilla presentation is being restored.
 
@@ -149,6 +151,9 @@ Verified KCD2 1.5.6 interface facts used by production include:
 ```text
 SSystemGlobalEnvironment + 0x98      -> IGame*
 SSystemGlobalEnvironment + 0x140     -> IFlashUI*
+IGame::Get framework/root accessor   -> slot 16
+IGameFramework::PauseGame            -> slot 13 (observer only)
+IGameFramework::GetISystem           -> slot 19 (identity proof)
 IInput::PostInputEvent               -> slot 13
 IScriptSystem::ExecuteBuffer         -> slot 6
 IFlashUI::GetUIElementByInstanceStr  -> slot 18
@@ -175,4 +180,4 @@ Both native editions statically link MinHook v1.3.4. The dependency is pinned to
 
 ## Rejected designs
 
-See [REJECTED_HYPOTHESES.md](REJECTED_HYPOTHESES.md) for the evidence ledger. Production does not use custom `PauseGame` ownership, `only_ui` ownership checks, Menu `SetVisible(false)`, root-HUD-only restoration, reconstructed bubble text/anchors, long-lived movieclip pointers, destructive `Release()` on `GetMovieClip()` results, synthetic B-resume replay, or whole-HUD vanilla Flash snapshots taken from partial `C_UIHudMask` mutation callbacks.
+See [REJECTED_HYPOTHESES.md](REJECTED_HYPOTHESES.md) for the evidence ledger. Production does not use custom `PauseGame` ownership or synthesized `PauseGame` calls, `only_ui` ownership checks, Menu `SetVisible(false)`, root-HUD-only restoration, reconstructed bubble text/anchors, long-lived movieclip pointers, destructive `Release()` on `GetMovieClip()` results, synthetic B-resume replay, or whole-HUD vanilla Flash snapshots taken from partial `C_UIHudMask` mutation callbacks.
