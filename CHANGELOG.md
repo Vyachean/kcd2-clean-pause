@@ -1,8 +1,25 @@
 # Changelog
 
+## Unreleased
+
+No unreleased changes yet.
+
+## v0.2.0-rc.1 — 2026-08-25
+
+Release candidate for the `0.2.0` feature release and first release under the normalized SemVer policy.
+
+- Consolidates the feature work previously published incrementally as `v0.1.1-rc.1` through `v0.1.1-rc.4`; no intentional runtime behavior change from `v0.1.1-rc.4`.
+- Adds dual ASI / standalone `version.dll` distribution built from the same Clean Pause runtime.
+- Adds process-wide duplicate-load protection.
+- Keeps Clean Pause sharp by temporarily removing pause DoF blur and restoring the prior graphics state before normal vanilla presentation resumes.
+- Preserves normal dialogue subtitles and active NPC overhead subtitles across the vanilla-owned pause transition.
+- Keeps current Start/Escape/B behavior and the fail-open vanilla pause contract.
+
+The old `v0.1.1-rc.1` through `v0.1.1-rc.4` tags remain immutable historical prereleases. No stable `v0.1.1` is planned; their accumulated user-facing changes belong to the `0.2.0` minor release.
+
 ## v0.1.1-rc.4 — 2026-08-25
 
-Overhead-subtitle preservation prerelease.
+Historical prerelease from before versioning normalization.
 
 - Preserves active NPC speech bubbles / overhead subtitles across the vanilla pause transition instead of restoring only the root `Bubbles` HUD clip.
 - Discovers KCD2's `C_UIHudBubbles` runtime object through the `hud@0` listener list and MSVC RTTI; no fixed `WHGame.dll` RVA is introduced.
@@ -12,7 +29,7 @@ Overhead-subtitle preservation prerelease.
 
 ## v0.1.1-rc.3 — 2026-08-25
 
-Corrected blur-free presentation prerelease.
+Historical prerelease from before versioning normalization.
 
 - Fixes the rc.2 Lua CVar getter from nonexistent `System.GetCVarValue` to CryEngine's actual `System.GetCVar` API.
 - Retail-confirmed on the primary Xbox Store KCD2 1.5.6 target that Xbox Start enters Clean Pause again and the retained frame is sharp with the pause DoF blur removed.
@@ -21,7 +38,7 @@ Corrected blur-free presentation prerelease.
 
 ## v0.1.1-rc.2 — 2026-08-25
 
-Superseded presentation/safety prerelease. Do not use for testing.
+Superseded historical prerelease. Do not use for testing.
 
 - Attempted blur-free Clean Pause by temporarily disabling `wh_cl_NearDof` and `r_DepthOfField`.
 - Used nonexistent Lua API `System.GetCVarValue`, causing the DoF capability path to fail open to the ordinary visible pause menu on retail.
@@ -29,7 +46,7 @@ Superseded presentation/safety prerelease. Do not use for testing.
 
 ## v0.1.1-rc.1 — 2026-08-25
 
-Dual-package prerelease.
+Historical prerelease from before versioning normalization.
 
 - Adds `KCD2CleanPause.asi`, loaded by a compatible shared ASI loader.
 - Retains the standalone `version.dll` edition for self-contained installation.
