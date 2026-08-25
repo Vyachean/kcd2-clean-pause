@@ -35,8 +35,9 @@ No storefront-specific `WHGame.dll` address is used. Bubble discovery is optiona
 
 - The core KCD2-owned pause/HUD mechanism is retail-proven on the primary Xbox Store KCD2 1.5.6 target.
 - rc.3 is retail-confirmed to enter Clean Pause and remove the visible pause DoF blur.
-- rc.4 overhead-bubble preservation still requires one retail observation with an active NPC overhead subtitle.
+- rc.4 is retail-confirmed to preserve NPC overhead subtitles in Clean Pause: the overhead lines appear together with the restored main HUD instead of disappearing on pause.
 - Exact DoF restoration on the subsequent visible-menu/gameplay handoff remains an explicit stable-release acceptance check.
+- A longer post-resume observation remains useful to confirm that an old overhead line cannot become permanently stuck after KCD2 regains bubble ownership.
 
 ## Known behavior / acceptance status
 
