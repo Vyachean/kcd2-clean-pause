@@ -111,6 +111,19 @@ if module_hook.index("IsHudRefreshMessage(message)") > module_hook.index("g_orig
     raise SystemExit("module message id must be read before vanilla may release/alter the message")
 if "if (refresh)\n        NotifyAfterMutation();" not in module_hook:
     raise SystemExit("OnModuleMessage observer must run only for verified HUD refresh message 52")
+for needle in (
+    "std::atomic<void*> g_maskObject{nullptr};",
+    "std::atomic<void*> g_sourceMonitorObject{nullptr};",
+    "mask == g_maskObject.load",
+    "sourceMonitor == g_sourceMonitorObject.load",
+):
+    if needle not in mask:
+        raise SystemExit(f"global HUD-mask method hook is not target-instance scoped: {needle}")
+ensure_mask = mask[mask.index("bool EnsureHooks"):mask.index("bool ReadCurrentVisibility")]
+if ensure_mask.index("g_maskObject.store") > ensure_mask.index("g_observer.store"):
+    raise SystemExit("target HUD-mask identity must be published before mutation observer")
+if ensure_mask.index("g_sourceMonitorObject.store") > ensure_mask.index("g_observer.store"):
+    raise SystemExit("target source-monitor identity must be published before mutation observer")
 
 transaction = native[native.index("void ReconcileHudMaskMutation"):native.index("void FailOpenHudMaintenance")]
 if "CaptureHudVisibilitySnapshot" in transaction:
@@ -121,6 +134,10 @@ if "RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot" not in transaction:
     raise SystemExit("HUD-mask mutation must restore the gameplay presentation before render")
 if transaction.index("GetCurrentThreadId()") > transaction.index("ShouldPinGameplayHudPresentation()"):
     raise SystemExit("HUD-mask callback must validate thread before reading non-atomic snapshot state")
+if "if (!CaptureVanillaHudFromInternalMask(vanillaState))" not in transaction:
+    raise SystemExit("HUD-mask visual replay must require a fresh authoritative internal snapshot")
+if "FailOpenHudMaskTransaction(nullptr" not in transaction or "FailOpenHudMaskTransaction(&vanillaState" not in transaction:
+    raise SystemExit("HUD-mask transaction must fail open on internal-read or gameplay-replay failure")
 
 required_blur = (
     'System.GetCVar("wh_cl_NearDof")',
@@ -173,6 +190,9 @@ if enter.index("if (!blur::Disable())") > enter.index("g_cleanHidden.store(true"
     raise SystemExit("DoF must be disabled before Clean Pause render ownership begins")
 if "const bool transactional" not in enter or "if (!transactional" not in enter:
     raise SystemExit("vanilla Flash snapshot may be required only in non-transaction fallback mode")
+entry_transactional = enter[enter.index("if (transactional)"):enter.index("if (!transactional")]
+if "if (!CaptureVanillaHudFromInternalMask(currentVanilla))" not in entry_transactional or "return false;" not in entry_transactional:
+    raise SystemExit("transactional Clean Pause entry must require fresh internal HUD state")
 
 hidden = native[native.index("void HandleHiddenInput"):native.index("void __fastcall HookPostInputEvent")]
 b_start = hidden.index("if (key == KeyId::XiB)")
@@ -201,5 +221,9 @@ for needle in (
 pending = native[native.index("bool PendingAttemptAlive"):native.index("bool TryEnterCleanPause")]
 if pending.index("RestoreVanillaHudPresentation") > pending.index("ResetHudSnapshots"):
     raise SystemExit("pending-entry expiry must undo any pre-ownership visual pin before reset")
+
+post = native[native.index("void __fastcall HookPostInputEvent"):native.index("bool InstallInputHook")]
+if post.count("&& g_gameplayHudSnapshot.captured)\n            ArmPendingPauseAttempt();") != 2:
+    raise SystemExit("terminal Clean Pause entry failures must not re-arm pending ownership")
 
 print("stable native Clean Pause contract passed")

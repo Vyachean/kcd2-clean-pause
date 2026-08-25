@@ -36,6 +36,8 @@ SourceEventFn g_originalSourceEvent{};
 void* g_sourceEventTarget{};
 OnModuleMessageFn g_originalOnModuleMessage{};
 void* g_onModuleMessageTarget{};
+std::atomic<void*> g_maskObject{nullptr};
+std::atomic<void*> g_sourceMonitorObject{nullptr};
 
 struct CompleteObjectLocator64 {
     std::uint32_t signature;
@@ -277,15 +279,20 @@ void __fastcall HookSourceEvent(void* sourceMonitor, void* source, bool active)
 {
     if (g_originalSourceEvent)
         g_originalSourceEvent(sourceMonitor, source, active);
-    NotifyAfterMutation();
+
+    // MinHook patches the shared method body, not one C_UIHudMask instance. Only the
+    // source-monitor object discovered from the current hud@0 may drive reconciliation.
+    if (sourceMonitor == g_sourceMonitorObject.load(std::memory_order_acquire))
+        NotifyAfterMutation();
 }
 
 void __fastcall HookOnModuleMessage(void* mask, void* message)
 {
-    // All GUI elements receive the general module-message broadcast. C_UIHudMask
-    // mutates visibility only for message id 52; read that id before vanilla runs so
-    // the message object does not need to outlive the original call.
-    const bool refresh = IsHudRefreshMessage(message);
+    // MinHook patches the class method globally. Ignore other C_UIHudMask instances,
+    // and for the target instance react only to verified HUD-refresh message id 52.
+    // Read the id before vanilla runs so the message does not need to outlive the call.
+    const bool targetMask = mask == g_maskObject.load(std::memory_order_acquire);
+    const bool refresh = targetMask && IsHudRefreshMessage(message);
     if (g_originalOnModuleMessage)
         g_originalOnModuleMessage(mask, message);
     if (refresh)
@@ -326,6 +333,10 @@ bool EnsureHooks(void* hudElement, MutationObserver observer)
             g_onModuleMessageTarget))
         return false;
 
+    // Publish the concrete instance identities before the observer. The detours
+    // remain inert for unrelated instances and during partial installation.
+    g_maskObject.store(mask, std::memory_order_release);
+    g_sourceMonitorObject.store(sourceMonitor, std::memory_order_release);
     g_observer.store(observer, std::memory_order_release);
     return true;
 }

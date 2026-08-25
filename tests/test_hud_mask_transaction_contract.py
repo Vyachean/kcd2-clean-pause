@@ -25,6 +25,36 @@ class HudMaskTransactionContractTests(unittest.TestCase):
         self.assertLess(hook.index('IsHudRefreshMessage(message)'), hook.index('g_originalOnModuleMessage'))
         self.assertIn('if (refresh)\n        NotifyAfterMutation();', hook)
 
+    def test_global_method_hooks_filter_to_the_discovered_hud_mask_instance(self):
+        self.assertIn('std::atomic<void*> g_maskObject{nullptr};', MASK)
+        self.assertIn('std::atomic<void*> g_sourceMonitorObject{nullptr};', MASK)
+        source = MASK[MASK.index('void __fastcall HookSourceEvent'):MASK.index('void __fastcall HookOnModuleMessage')]
+        self.assertIn('sourceMonitor == g_sourceMonitorObject.load', source)
+        module = MASK[MASK.index('void __fastcall HookOnModuleMessage'):MASK.index('} // namespace\n\nbool EnsureHooks')]
+        self.assertIn('mask == g_maskObject.load', module)
+        ensure = MASK[MASK.index('bool EnsureHooks'):MASK.index('bool ReadCurrentVisibility')]
+        self.assertLess(ensure.index('g_maskObject.store'), ensure.index('g_observer.store'))
+        self.assertLess(ensure.index('g_sourceMonitorObject.store'), ensure.index('g_observer.store'))
+
+    def test_transaction_fails_open_when_authoritative_state_is_unavailable(self):
+        callback = NATIVE[NATIVE.index('void FailOpenHudMaskTransaction'):NATIVE.index('void FailOpenHudMaintenance')]
+        reconcile = callback[callback.index('void ReconcileHudMaskMutation'):]
+        self.assertIn('if (!CaptureVanillaHudFromInternalMask(vanillaState))', reconcile)
+        self.assertIn('FailOpenHudMaskTransaction(nullptr', reconcile)
+        self.assertIn('FailOpenHudMaskTransaction(&vanillaState', reconcile)
+        self.assertLess(reconcile.index('CaptureVanillaHudFromInternalMask'), reconcile.index('RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot'))
+
+    def test_transactional_entry_requires_fresh_internal_state(self):
+        entry = NATIVE[NATIVE.index('bool TryEnterCleanPause'):NATIVE.index('void HandleHiddenInput')]
+        transactional = entry[entry.index('if (transactional)'):entry.index('if (!transactional')]
+        self.assertIn('if (!CaptureVanillaHudFromInternalMask(currentVanilla))', transactional)
+        self.assertIn('return false;', transactional)
+        self.assertIn('g_vanillaPauseHudSnapshot = currentVanilla;', transactional)
+
+    def test_terminal_entry_failure_does_not_rearm_pending_attempt(self):
+        post = NATIVE[NATIVE.index('void __fastcall HookPostInputEvent'):NATIVE.index('bool InstallInputHook')]
+        self.assertEqual(post.count('&& g_gameplayHudSnapshot.captured)\n            ArmPendingPauseAttempt();'), 2)
+
     def test_vanilla_mutation_runs_before_visual_reconciliation(self):
         source = MASK[MASK.index('void __fastcall HookSourceEvent'):MASK.index('void __fastcall HookOnModuleMessage')]
         self.assertLess(source.index('g_originalSourceEvent'), source.index('NotifyAfterMutation'))

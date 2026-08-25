@@ -627,6 +627,31 @@ bool RestoreVanillaHudPresentation(const char* label)
     return false;
 }
 
+void FailOpenHudMaskTransaction(
+    const HudVisibilitySnapshot* vanillaState,
+    const char* reason)
+{
+    // The original C_UIHudMask mutation has already run. If gameplay replay has not
+    // started, current Flash is already vanilla; otherwise use the authoritative
+    // internal snapshot captured immediately before that replay. Never continue a
+    // transaction whose internal source of truth could not be read.
+    g_hudMaskPinSuspended.store(true, std::memory_order_release);
+    g_pendingPauseAttempt.store(false, std::memory_order_release);
+    g_pendingDeadlineMs.store(0, std::memory_order_release);
+    RestoreBlurBestEffort("HUD-mask transaction fail-open");
+    if (vanillaState && vanillaState->captured
+        && !RestoreHudVisibilitySnapshot(*vanillaState, "vanilla-mask-fail-open"))
+        Log("HUD-mask transaction fail-open could not restore captured vanilla presentation");
+    g_cleanHidden.store(false, std::memory_order_release);
+    g_renderSuppressionObserved.store(false, std::memory_order_release);
+    g_cleanHiddenSinceMs.store(0, std::memory_order_release);
+    g_swallowPauseRelease.store(false, std::memory_order_release);
+    g_swallowResumeRelease.store(false, std::memory_order_release);
+    ResetHudSnapshots();
+    g_hudMaskPinSuspended.store(false, std::memory_order_release);
+    Log("C_UIHudMask transaction fail-open: %s", reason ? reason : "unknown");
+}
+
 void ReconcileHudMaskMutation()
 {
     // The mask callback can be entered through generic engine dispatch. Validate the
@@ -639,16 +664,22 @@ void ReconcileHudMaskMutation()
     if (!ShouldPinGameplayHudPresentation())
         return;
 
-    // Vanilla has already updated its internal C_UIHudMask state. Snapshot that
-    // authoritative 28-element state (not the partially-mutated Flash presentation)
-    // so a later discovery failure can still relinquish Clean Pause safely.
+    // Vanilla has already updated its internal C_UIHudMask state. A fresh complete
+    // internal snapshot is mandatory before changing Flash presentation; otherwise
+    // fail open while the just-applied vanilla Flash state is still intact.
     HudVisibilitySnapshot vanillaState{};
-    if (CaptureVanillaHudFromInternalMask(vanillaState))
-        g_vanillaPauseHudSnapshot = vanillaState;
+    if (!CaptureVanillaHudFromInternalMask(vanillaState)) {
+        FailOpenHudMaskTransaction(nullptr, "authoritative internal HUD state unavailable");
+        return;
+    }
+    g_vanillaPauseHudSnapshot = vanillaState;
 
-    // Only presentation is rolled back. KCD2 keeps owning the internal pause state.
-    if (!RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay-mask-transaction"))
-        Log("C_UIHudMask transaction could not restore gameplay HUD before render; periodic fallback remains active");
+    // Only presentation is rolled back. If that replay itself fails part-way, restore
+    // the authoritative vanilla snapshot before releasing Menu rendering.
+    if (!RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay-mask-transaction")) {
+        FailOpenHudMaskTransaction(&vanillaState, "gameplay HUD presentation replay failed");
+        return;
+    }
 }
 
 void FailOpenHudMaintenance(const char* reason)
@@ -749,7 +780,9 @@ bool EnsureHudUpdateHook()
             hud, visibilityProbe, kHudClipCount);
     }
     g_hudMaskTransactionAvailable.store(maskAvailable, std::memory_order_release);
-    if (!maskAvailable)
+    if (maskAvailable)
+        Log("C_UIHudMask transaction active for hud=%p", hud);
+    else
         Log("C_UIHudMask transaction unavailable; using snapshot restore fallback");
 
     // Overhead NPC subtitles are managed by C_UIHudBubbles below the root "Bubbles"
@@ -941,8 +974,22 @@ bool TryEnterCleanPause(const char* trigger, bool swallowMatchingRelease)
 
     const bool transactional =
         g_hudMaskTransactionAvailable.load(std::memory_order_acquire);
-    if (transactional && !g_vanillaPauseHudSnapshot.captured)
-        CaptureVanillaHudFromInternalMask(g_vanillaPauseHudSnapshot);
+    if (transactional) {
+        // Entry is accepted only with a fresh authoritative internal state. This makes
+        // the later visible-menu handoff recoverable even if discovery fails afterwards.
+        HudVisibilitySnapshot currentVanilla{};
+        if (!CaptureVanillaHudFromInternalMask(currentVanilla)) {
+            g_hudMaskPinSuspended.store(true, std::memory_order_release);
+            if (g_vanillaPauseHudSnapshot.captured)
+                RestoreHudVisibilitySnapshot(
+                    g_vanillaPauseHudSnapshot, "vanilla-entry-read-fail-open");
+            ResetHudSnapshots();
+            g_hudMaskPinSuspended.store(false, std::memory_order_release);
+            Log("vanilla pause opened but authoritative C_UIHudMask state could not be read; leaving ordinary visible pause menu (fail-open)");
+            return false;
+        }
+        g_vanillaPauseHudSnapshot = currentVanilla;
+    }
     if (!transactional
         && !g_vanillaPauseHudSnapshot.captured
         && !CaptureHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause")) {
@@ -1140,14 +1187,16 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
 
         ArmPendingPauseAttempt();
         Forward(input, event, force);
-        if (!TryEnterCleanPause("Escape/Start press", true))
+        if (!TryEnterCleanPause("Escape/Start press", true)
+            && g_gameplayHudSnapshot.captured)
             ArmPendingPauseAttempt();
         return;
     }
 
     if (released && PendingAttemptAlive()) {
         Forward(input, event, force);
-        if (!TryEnterCleanPause("Escape/Start release", false))
+        if (!TryEnterCleanPause("Escape/Start release", false)
+            && g_gameplayHudSnapshot.captured)
             ArmPendingPauseAttempt();
         return;
     }
