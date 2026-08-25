@@ -4,14 +4,16 @@
 
 **v0.1.0 is the current stable release for KCD2 1.5.6 Windows retail**, primarily the PC Xbox Store / Xbox app build.
 
-**v0.1.1-rc.1** adds dual native packaging without changing the Clean Pause runtime:
+**v0.1.1-rc.2** is the current prerelease line. It retains the dual native packaging introduced in rc.1 and adds bounded presentation/safety improvements:
 
 - `KCD2CleanPause.asi` for a shared ASI-loader installation;
-- standalone `version.dll` for the existing self-contained installation.
+- standalone `version.dll` for the existing self-contained installation;
+- process-wide duplicate-load protection if both Clean Pause editions are accidentally present;
+- blur-free Clean Pause presentation with exact DoF-state restoration.
 
-The standalone loading path is already retail-proven through v0.1.0. The ASI loading path remains prerelease until [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md) passes on the primary Xbox Store 1.5.6 target.
+The standalone loading path is already retail-proven through v0.1.0. Before v0.1.1 stable, the ASI loading path still needs [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md), and the new DoF presentation path needs one retail confirmation on the primary Xbox Store 1.5.6 target.
 
-The production runtime is in `native/src/clean_pause_native.cpp`; both editions compile that same file and differ only in bootstrap/loading.
+The production runtime is in `native/src/clean_pause_native.cpp`; both editions compile that same runtime plus the same bounded blur controller and differ only in bootstrap/loading.
 
 ## Product contract
 
@@ -20,17 +22,18 @@ Running
   Escape / Xbox Start -> Clean Pause
 
 Clean Pause
+  sharp retained frame, no pause DoF blur
   Escape / Xbox Start -> visible vanilla pause menu
   Xbox B               -> visible vanilla pause menu
 ```
 
-The vanilla pause menu then uses normal KCD2 controls to resume or perform menu actions.
+The vanilla pause menu then uses normal KCD2 controls to resume or perform menu actions. The user's original DoF settings are restored before normal visible-menu presentation resumes.
 
 Direct `Clean Pause -> B -> Running` is **not** part of the current contract. Retail testing showed B revealing the menu, and that behavior was explicitly accepted. The unverified synthetic pause-key replay experiment remains removed from production.
 
 ## Retail-proven behavior
 
-On Xbox Store KCD2 1.5.6 using the standalone loading path:
+On Xbox Store KCD2 1.5.6 using the standalone loading path, the v0.1.0 pause/HUD mechanism proved that:
 
 - first Start enters a real vanilla-owned pause without drawing the pause menu;
 - world simulation stops;
@@ -40,6 +43,8 @@ On Xbox Store KCD2 1.5.6 using the standalone loading path:
 - B from Clean Pause reveals the same vanilla pause menu;
 - the visible menu can then be closed normally;
 - the rc7e and rc7f crash regressions are not present in rc7g.
+
+The rc.2 DoF override is new presentation behavior and remains to be confirmed once in retail.
 
 ## Dual-package architecture
 
@@ -53,7 +58,7 @@ KCD2 -> version.dll proxy -> clean_pause::Start()
 
 The ASI edition exists to avoid the hard file-name conflict when another mod already owns `version.dll`. The standalone edition remains available for users who want no separate ASI-loader dependency.
 
-Do not install both Clean Pause editions together.
+Do not intentionally install both Clean Pause editions together. A process-wide guard prevents the second copy from installing duplicate hooks if both are accidentally loaded.
 
 ## Accepted runtime architecture
 
@@ -66,8 +71,9 @@ Do not install both Clean Pause editions together.
 7. `IUIElement::GetMovieClip()` pointers are borrowed/call-local: never retained and never released by the mod.
 8. `hud@0::Update(float)` performs only bounded main-thread HUD maintenance during the pause transition.
 9. Only `ClearSubtitles` and `HideNarrativeSubtitles` are suppressed for subtitle lifetime protection.
-10. B/second Start restore the captured vanilla-pause HUD state before revealing the normal menu.
-11. Unresolved state fails open to visible vanilla pause.
+10. Clean Pause saves the current `wh_cl_NearDof` and `r_DepthOfField`, sets both to `0` only for hidden-menu presentation, and restores the saved values before visible vanilla presentation resumes.
+11. B/second Start restore captured DoF and vanilla-pause HUD state before revealing the normal menu.
+12. Unresolved state fails open to visible vanilla pause; transient DoF restoration failure remains retryable.
 
 ## Permanent rejected paths
 
@@ -88,10 +94,11 @@ Do not reintroduce without new direct retail evidence:
 
 ## Before v0.1.1 stable
 
-- build and publish the dual-package prerelease;
+- build v0.1.1-rc.2 in both package editions;
+- in one optimized Xbox Store KCD2 1.5.6 session, confirm Clean Pause is sharp and the visible vanilla menu/gameplay restores the prior DoF behavior;
 - run the ASI retail-equivalence checklist on Xbox Store KCD2 1.5.6;
 - verify one shared-loader coexistence case with another real KCD2 ASI plugin;
-- if ASI behavior matches the standalone edition, promote the same dual-package model to v0.1.1 stable.
+- if those checks pass, promote the dual-package model to v0.1.1 stable.
 
 ## Later work
 
@@ -103,4 +110,4 @@ Do not reintroduce without new direct retail evidence:
 
 ## Decision rule
 
-> Reuse vanilla KCD2 pause ownership, suppress only the menu rendering, preserve the exact HUD child presentation, and prefer a visible vanilla-menu fallback over unverified resume tricks.
+> Reuse vanilla KCD2 pause ownership, suppress only the menu rendering, preserve exact presentation state, and prefer a visible vanilla-menu fallback over unverified resume tricks.
