@@ -1,5 +1,6 @@
 #include "clean_pause_native.h"
 #include "clean_pause_blur.h"
+#include "clean_pause_bubbles.h"
 #include "kcd2_abi.h"
 
 #include <MinHook.h>
@@ -620,6 +621,12 @@ bool EnsureHudUpdateHook()
     void* hud{};
     if (!ResolveHudElement(hud))
         return false;
+
+    // Overhead NPC subtitles are managed by C_UIHudBubbles below the root "Bubbles"
+    // movieclip. Install their optional lifecycle freeze before vanilla sees Start.
+    // Discovery failure is intentionally ignored so the proven Clean Pause path remains
+    // available even if a storefront/build changes the concrete listener layout.
+    bubbles::EnsureHooks(hud, g_flashUI);
 
     const auto target = reinterpret_cast<void*>(VFunc<UIElementUpdateFn>(hud, kUIElementUpdateSlot));
     if (!target || !IsExecutable(target))
