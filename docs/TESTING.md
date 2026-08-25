@@ -1,6 +1,6 @@
 # Testing
 
-This document describes the stable Clean Pause smoke/compatibility test. Historical failed hypotheses are recorded in [REJECTED_HYPOTHESES.md](REJECTED_HYPOTHESES.md) and `RETAIL_EVIDENCE_*.md`.
+This document describes the current Clean Pause smoke/compatibility test. Historical failed hypotheses are recorded in [REJECTED_HYPOTHESES.md](REJECTED_HYPOTHESES.md) and `RETAIL_EVIDENCE_*.md`.
 
 ## Supported test target
 
@@ -8,17 +8,23 @@ This document describes the stable Clean Pause smoke/compatibility test. Histori
 - primary retail evidence: PC Xbox Store / Xbox app / Game Pass;
 - Xbox controller first, with Escape analogous to Start/Menu.
 
+## Support status
+
+- standalone `version.dll`: supported and retail-proven;
+- `KCD2CleanPause.asi`: experimental until [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md) is completed.
+
+ASI acceptance does **not** block the stable standalone `v0.2.0` release.
+
 ## Install isolation
 
-Test exactly one Clean Pause edition at a time.
+Test exactly one Clean Pause edition at a time. A process-wide guard prevents duplicate hooks if both are accidentally present, but dual installation is unsupported.
 
 ### Standalone edition
 
 1. Close KCD2.
-2. Remove/disable old `Documents\kingdomcome_mods\clean_pause` prototype PAKs and any Clean Pause ASI.
+2. Remove/disable old prototype PAKs and any Clean Pause ASI.
 3. Install only the release `version.dll` beside the game executable / `WHGame.dll`.
 4. Do not overwrite another mod's unrelated `version.dll`.
-5. Optionally delete the old `kcd2_clean_pause_native.log` before testing.
 
 ### ASI edition
 
@@ -26,10 +32,6 @@ Test exactly one Clean Pause edition at a time.
 2. Remove the Clean Pause standalone `version.dll` edition.
 3. Install one compatible x64 ASI loader, normally as `dinput8.dll` beside the game executable / `WHGame.dll`.
 4. Install only `KCD2CleanPause.asi` beside that loader.
-5. Do not overwrite an existing `dinput8.dll` blindly; preserve one compatible loader for all ASI plugins.
-6. Optionally delete the old `kcd2_clean_pause_native.log` before testing.
-
-The two Clean Pause editions should not be installed together. A process-wide guard prevents duplicate hooks if both are accidentally present, but dual installation is not a supported configuration.
 
 ## Core smoke test
 
@@ -48,85 +50,48 @@ Expected:
 - audio pauses like ordinary KCD2 pause;
 - the pause menu itself is not drawn;
 - already-visible subtitle/HUD presentation remains visible where applicable;
-- the retained game frame is not covered by the vanilla pause depth-of-field blur.
+- the retained frame is not covered by the vanilla pause depth-of-field blur.
 
-The implementation temporarily disables `wh_cl_NearDof` and `r_DepthOfField` only while Clean Pause owns presentation. It must preserve the values that were active before entering Clean Pause.
+### 3. Reveal vanilla menu / resume
 
-**Retail evidence:** the `v0.2.0-rc.1` feature set is confirmed on the primary Xbox Store KCD2 1.5.6 target to enter Clean Pause from Xbox Start and retain a sharp, blur-free frame.
-
-### 3. Reveal vanilla menu
-
-While Clean Paused, press Escape/Start again.
+While Clean Paused, press Escape/Start again or Xbox B.
 
 Expected:
 
 - the already-open vanilla pause menu becomes visible with no intermediate gameplay tick;
-- the user's previous `wh_cl_NearDof` and `r_DepthOfField` values have been restored before normal menu presentation resumes;
-- vanilla pause appearance is otherwise untouched.
+- the previous `wh_cl_NearDof` and `r_DepthOfField` values are restored before normal menu presentation;
+- closing the menu resumes normal gameplay and graphics behavior.
 
-Close it normally and confirm gameplay resumes with the same graphics behavior that existed before Clean Pause.
+The current standalone retail acceptance reports normal pause/menu/resume behavior after the `v0.2.0` subtitle/DoF changes. No additional dedicated launch is required for stable promotion.
 
-The DoF restoration handoff still needs an explicit retail observation before stable `v0.2.0` promotion.
+### 4. Dialogue subtitle
 
-### 4. B behavior
+When naturally available, pause during a visible dialogue subtitle and confirm that it remains visible while Clean Pause is active and that speech/audio/progression are paused coherently.
 
-Enter Clean Pause again and press Xbox B.
+### 5. NPC overhead subtitle / speech bubble
 
-Expected under the current product contract: the ordinary vanilla pause menu becomes visible. B does not directly resume from Clean Pause. The pre-Clean-Pause DoF settings must be restored on this path too.
-
-Use normal KCD2 menu controls to resume.
-
-### 5. Dialogue subtitle
-
-If naturally available in the same session:
-
-- pause during a visible spoken dialogue subtitle;
-- confirm the current subtitle remains visible during Clean Pause;
-- confirm the retained frame is sharp rather than inheriting the vanilla pause blur;
-- confirm speech/audio/progression stop with the vanilla pause;
-- reveal the normal menu with Start or B, then resume normally.
-
-### 6. NPC overhead subtitle / speech bubble
-
-While an NPC has a currently visible overhead chatter subtitle (the in-world speech bubble above/near the character), press Xbox Start once.
+While an NPC overhead chatter subtitle is visible, enter Clean Pause.
 
 Expected:
 
-- Clean Pause opens normally;
-- the exact overhead line that was visible before Start remains visible in Clean Pause;
-- its text and screen/world anchor do not get reconstructed or replaced by the mod — the original KCD2 bubble remains alive;
-- dialogue/HUD subtitle preservation and blur-free presentation continue to work as before.
+- the exact existing overhead line remains visible;
+- its text/anchor are not reconstructed by the mod;
+- after revealing/closing the vanilla menu and resuming, KCD2 regains bubble ownership and subsequent overhead chatter behaves normally.
 
-Then press Start again to reveal the vanilla pause menu, close the menu normally, and resume gameplay.
+The overhead-bubble controller is optional/fail-open. Failure to discover `C_UIHudBubbles` must not break the core Clean Pause path.
 
-Expected after resume:
+## Failure paths
 
-- the bubble system returns to normal KCD2 ownership;
-- the preserved line is not permanently stuck on screen;
-- subsequent NPC overhead chatter appears and disappears normally.
+If the runtime cannot safely establish the core pause/HUD/DoF state, it must prefer the ordinary visible vanilla pause menu rather than leaving gameplay live with swallowed input.
 
-The overhead-bubble controller is optional/fail-open. If runtime RTTI/listener discovery cannot validate `C_UIHudBubbles`, the existing Clean Pause path must still work; only overhead-bubble preservation may be absent.
+## ASI follow-up
 
-Do not create a separate game launch solely for a cutscene/subtitle edge case. The overhead-bubble check can be performed whenever a suitable NPC line occurs in the same session.
-
-## Failure-path check
-
-The blur suppression is part of the Clean Pause presentation contract, not an optional setting. If the runtime cannot safely access/save the DoF CVars, it must leave the ordinary visible vanilla pause menu rather than entering a partially working Clean Pause.
-
-Any later fail-open path must attempt to restore the saved DoF values before returning presentation to vanilla. A transient restore failure remains retryable on subsequent input.
-
-Overhead-bubble preservation is deliberately weaker than the core pause contract: inability to discover/install the bubble hooks must not force Clean Pause to fail open or change input behavior.
-
-## ASI edition acceptance
-
-The ASI package is a new loading path around the same runtime and requires one explicit retail-equivalence pass before stable release. Follow [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md).
-
-After standalone ASI acceptance, test coexistence with at least one other real KCD2 ASI plugin loaded through the same ASI loader. This validates file-level coexistence and exercises hook ordering, but it does not imply universal compatibility with every native mod.
+When an ASI tester is available, run [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md) and one coexistence case with another real KCD2 ASI plugin. Passing those checks promotes the ASI edition from experimental to supported; it is not required for standalone `v0.2.0` stability.
 
 ## Robustness
 
-When convenient, exercise repeated pause cycles, load transitions, Alt-Tab, and controller reconnect. Any unresolved runtime assumption must degrade to ordinary visible vanilla pause rather than persistent input loss.
+When convenient, exercise repeated pause cycles, load transitions, Alt-Tab, and controller reconnect. These are ongoing compatibility coverage, not blockers for the currently accepted standalone path.
 
 ## CI
 
-Repository CI builds both x64 MSVC native images, validates standalone version-proxy exports, validates both images as x64/static-runtime builds, and runs `tools/validate_native_contract.py` plus the dual-package, blur-lifecycle, and overhead-bubble contract tests.
+Repository CI builds both x64 MSVC native images, validates standalone version-proxy exports, validates both images as x64/static-runtime builds, and runs the native, dual-package, blur-lifecycle, overhead-bubble, and versioning contract tests.

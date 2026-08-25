@@ -4,18 +4,20 @@
 
 No unreleased changes yet.
 
-## v0.2.0-rc.1 — 2026-08-25
+## v0.2.0 — 2026-08-25
 
-Release candidate for the `0.2.0` feature release and first release under the normalized SemVer policy.
+Stable feature release for the retail-proven standalone Clean Pause path.
 
-- Consolidates the feature work previously published incrementally as `v0.1.1-rc.1` through `v0.1.1-rc.4`; no intentional runtime behavior change from `v0.1.1-rc.4`.
+- Consolidates the feature work previously published incrementally as `v0.1.1-rc.1` through `v0.1.1-rc.4`.
 - Adds dual ASI / standalone `version.dll` distribution built from the same Clean Pause runtime.
 - Adds process-wide duplicate-load protection.
 - Keeps Clean Pause sharp by temporarily removing pause DoF blur and restoring the prior graphics state before normal vanilla presentation resumes.
 - Preserves normal dialogue subtitles and active NPC overhead subtitles across the vanilla-owned pause transition.
-- Keeps current Start/Escape/B behavior and the fail-open vanilla pause contract.
+- Keeps the accepted Start/Escape/B behavior and fail-open vanilla pause contract.
+- Marks the standalone `version.dll` edition supported after retail acceptance of normal pause/menu/resume behavior.
+- Keeps the ASI edition experimental until its loading path and shared-loader coexistence receive direct retail testing.
 
-The old `v0.1.1-rc.1` through `v0.1.1-rc.4` tags remain immutable historical prereleases. No stable `v0.1.1` is planned; their accumulated user-facing changes belong to the `0.2.0` minor release.
+The old `v0.1.1-rc.1` through `v0.1.1-rc.4` tags remain immutable historical prereleases. No stable `v0.1.1` is planned.
 
 ## v0.1.1-rc.4 — 2026-08-25
 
@@ -25,7 +27,7 @@ Historical prerelease from before versioning normalization.
 - Discovers KCD2's `C_UIHudBubbles` runtime object through the `hud@0` listener list and MSVC RTTI; no fixed `WHGame.dll` RVA is introduced.
 - Freezes only `I_UIHudBubbles::UpdateBubbles()` and `ReleaseBubble()` while `Menu@0` is logically visible, arming before vanilla `SetVisible(true)` and releasing after `SetVisible(false)` returns.
 - Keeps the bubble hook optional/fail-open so an unsupported listener layout cannot disable the proven Clean Pause path.
-- Retains rc.3 blur-free presentation, exact DoF restoration, dual ASI / standalone packaging, and duplicate-load protection.
+- Retains blur-free presentation, exact DoF restoration, dual ASI / standalone packaging, and duplicate-load protection.
 
 ## v0.1.1-rc.3 — 2026-08-25
 
@@ -33,8 +35,6 @@ Historical prerelease from before versioning normalization.
 
 - Fixes the rc.2 Lua CVar getter from nonexistent `System.GetCVarValue` to CryEngine's actual `System.GetCVar` API.
 - Retail-confirmed on the primary Xbox Store KCD2 1.5.6 target that Xbox Start enters Clean Pause again and the retained frame is sharp with the pause DoF blur removed.
-- Keeps exact DoF-state restoration before returning to visible vanilla presentation; that restoration handoff remains to be explicitly observed before stable promotion.
-- Retains the dual ASI / standalone `version.dll` packaging and process-wide duplicate-load guard.
 
 ## v0.1.1-rc.2 — 2026-08-25
 
@@ -50,10 +50,7 @@ Historical prerelease from before versioning normalization.
 
 - Adds `KCD2CleanPause.asi`, loaded by a compatible shared ASI loader.
 - Retains the standalone `version.dll` edition for self-contained installation.
-- Builds both editions from the same retail-proven Clean Pause runtime; only bootstrap/loading differs.
-- Publishes separate `-asi.zip` and `-version-dll.zip` assets with edition-specific installation instructions and shared checksums.
-- Adds CI contract coverage for both native images and exact package contents.
-- Keeps the ASI edition prerelease-only until its dedicated Xbox Store 1.5.6 retail-equivalence acceptance passes.
+- Builds both editions from the same runtime; only bootstrap/loading differs.
 
 ## v0.1.0 — 2026-08-24
 
