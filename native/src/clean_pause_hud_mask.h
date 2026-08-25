@@ -14,7 +14,8 @@ bool EnsureHooks(void* hudElement, MutationObserver observer);
 
 // Reads KCD2's current source-derived HUD visibility from I_UIHudMask rather than
 // from the Flash clips. The caller supplies storage for exactly 28 element values.
-// No C_UIHudMask or movieclip pointer is retained by this API.
+// The hook layer retains only validated C_UIHudMask/source-monitor identities for
+// detour scoping; callers receive no borrowed object and no movieclip pointer is retained.
 bool ReadCurrentVisibility(void* hudElement, bool* visible, std::size_t count);
 
 } // namespace clean_pause::hud_mask

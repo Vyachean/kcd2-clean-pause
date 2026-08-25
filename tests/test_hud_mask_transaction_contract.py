@@ -69,6 +69,28 @@ class HudMaskTransactionContractTests(unittest.TestCase):
         self.assertIn('VFunc<IsElementVisibleFn>', read)
         self.assertIn('count != kHudElementCount', read)
 
+    def test_snapshot_preserves_root_hud_visibility_exactly(self):
+        snapshot = NATIVE[NATIVE.index('struct HudVisibilitySnapshot'):NATIVE.index('HudVisibilitySnapshot g_gameplayHudSnapshot')]
+        self.assertIn('bool rootVisible{};', snapshot)
+        capture = NATIVE[NATIVE.index('bool CaptureHudVisibilitySnapshot'):NATIVE.index('bool RestoreHudVisibilitySnapshot')]
+        restore = NATIVE[NATIVE.index('bool RestoreHudVisibilitySnapshot'):NATIVE.index('bool ShouldPinGameplayHudPresentation')]
+        internal = NATIVE[NATIVE.index('bool CaptureVanillaHudFromInternalMask'):NATIVE.index('bool RestoreVanillaHudPresentation')]
+        self.assertIn('next.rootVisible = rootVisible;', capture)
+        self.assertIn('target.rootVisible = rootVisible;', internal)
+        self.assertIn('if (currentRootVisible && !snapshot.rootVisible)', restore)
+        self.assertIn('if (!currentRootVisible && snapshot.rootVisible)', restore)
+
+    def test_transaction_read_failure_uses_prior_complete_internal_fallback(self):
+        reconcile = NATIVE[NATIVE.index('void ReconcileHudMaskMutation()'):NATIVE.index('void FailOpenHudMaintenance')]
+        self.assertIn('const HudVisibilitySnapshot fallback = g_vanillaPauseHudSnapshot;', reconcile)
+        self.assertIn('fallback.captured ? &fallback : nullptr', reconcile)
+
+    def test_runtime_logs_whgame_fingerprint_for_future_abi_gating(self):
+        self.assertIn('void LogWhGameFingerprint(HMODULE whGame)', NATIVE)
+        self.assertIn('TimeDateStamp=0x%08lx SizeOfImage=0x%08lx CheckSum=0x%08lx', NATIVE)
+        bootstrap = NATIVE[NATIVE.index('DWORD WINAPI BootstrapThread'):]
+        self.assertIn('LogWhGameFingerprint(whGame);', bootstrap)
+
     def test_transaction_never_whole_snapshots_partial_flash_state(self):
         callback = NATIVE[NATIVE.index('void ReconcileHudMaskMutation()'):NATIVE.index('void FailOpenHudMaintenance')]
         self.assertNotIn('CaptureHudVisibilitySnapshot', callback)

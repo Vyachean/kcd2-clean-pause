@@ -5,6 +5,7 @@ native = (ROOT / "native/src/clean_pause_native.cpp").read_text(encoding="utf-8"
 blur = (ROOT / "native/src/clean_pause_blur.cpp").read_text(encoding="utf-8")
 mask = (ROOT / "native/src/clean_pause_hud_mask.cpp").read_text(encoding="utf-8")
 mask_header = (ROOT / "native/src/clean_pause_hud_mask.h").read_text(encoding="utf-8")
+bubbles = (ROOT / "native/src/clean_pause_bubbles.cpp").read_text(encoding="utf-8")
 abi = (ROOT / "native/src/kcd2_abi.h").read_text(encoding="utf-8")
 cmake = (ROOT / "native/CMakeLists.txt").read_text(encoding="utf-8")
 
@@ -32,7 +33,7 @@ forbidden = (
     "System.GetCVarValue",
 )
 for needle in forbidden:
-    if needle in native or needle in blur or needle in abi or needle in mask:
+    if needle in native or needle in blur or needle in abi or needle in mask or needle in bubbles:
         raise SystemExit(f"forbidden production path: {needle}")
 
 required_abi = (
@@ -77,6 +78,7 @@ required_runtime = (
     "RestoreBlurBestEffort",
     "CLEAN_PAUSE_VERSION",
     "CLEAN_PAUSE_BUILD_ID",
+    "LogWhGameFingerprint",
 )
 for needle in required_runtime:
     if needle not in native:
@@ -136,8 +138,8 @@ if transaction.index("GetCurrentThreadId()") > transaction.index("ShouldPinGamep
     raise SystemExit("HUD-mask callback must validate thread before reading non-atomic snapshot state")
 if "if (!CaptureVanillaHudFromInternalMask(vanillaState))" not in transaction:
     raise SystemExit("HUD-mask visual replay must require a fresh authoritative internal snapshot")
-if "FailOpenHudMaskTransaction(nullptr" not in transaction or "FailOpenHudMaskTransaction(&vanillaState" not in transaction:
-    raise SystemExit("HUD-mask transaction must fail open on internal-read or gameplay-replay failure")
+if "fallback.captured ? &fallback : nullptr" not in transaction or "FailOpenHudMaskTransaction(&vanillaState" not in transaction:
+    raise SystemExit("HUD-mask transaction must fail open with the best complete internal fallback")
 
 required_blur = (
     'System.GetCVar("wh_cl_NearDof")',
@@ -173,6 +175,24 @@ if "info[kFlashDisplayInfoVisibleOffset] != 0" not in capture:
     raise SystemExit("capture must preserve exact pre-transition visibility")
 if "setVisible(clip, snapshot.visible[i])" not in restore:
     raise SystemExit("restore must replay captured visibility, not force all children visible")
+if "bool rootVisible{};" not in native[native.index("struct HudVisibilitySnapshot"):native.index("HudVisibilitySnapshot g_gameplayHudSnapshot")]:
+    raise SystemExit("HUD snapshot must preserve root hud@0 visibility")
+for needle in (
+    "next.rootVisible = rootVisible;",
+    "target.rootVisible = rootVisible;",
+    "if (currentRootVisible && !snapshot.rootVisible)",
+    "if (!currentRootVisible && snapshot.rootVisible)",
+):
+    if needle not in native:
+        raise SystemExit(f"exact root HUD visibility contract missing: {needle}")
+
+for needle in (
+    "std::atomic<void*> g_bubbleInterfaceObject{nullptr};",
+    "bubbles == g_bubbleInterfaceObject.load",
+    "g_bubbleInterfaceObject.store(bubbleInterface",
+):
+    if needle not in bubbles:
+        raise SystemExit(f"global bubble method hook is not target-instance scoped: {needle}")
 
 menu = native[native.index("void __fastcall HookMenuRender"):native.index("bool EnsureMenuRenderHook")]
 for needle in ("GetMovieClip", "RestoreHudVisibilitySnapshot", "SetVisible", "Release"):

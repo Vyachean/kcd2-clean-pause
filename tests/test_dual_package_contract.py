@@ -7,6 +7,7 @@ ASI_ENTRY = (ROOT / "native/src/asi_entry.cpp").read_text(encoding="utf-8")
 VERSION_ENTRY = (ROOT / "native/src/version_proxy.cpp").read_text(encoding="utf-8")
 PROCESS_GUARD = (ROOT / "native/src/process_guard.cpp").read_text(encoding="utf-8")
 RELEASE = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+NOTICES = (ROOT / "THIRD_PARTY_NOTICES.txt").read_text(encoding="utf-8")
 
 
 class DualPackageContractTests(unittest.TestCase):
@@ -45,6 +46,10 @@ class DualPackageContractTests(unittest.TestCase):
         self.assertIn("INSTALL_ASI.txt", RELEASE)
         self.assertIn("INSTALL_VERSION_DLL.txt", RELEASE)
         self.assertIn("SHA256SUMS.txt", RELEASE)
+        self.assertGreaterEqual(RELEASE.count("THIRD_PARTY_NOTICES.txt"), 5)
+        self.assertIn("MinHook v1.3.4", NOTICES)
+        self.assertIn("Copyright (C) 2009-2017 Tsuda Kageyu.", NOTICES)
+        self.assertIn("Redistributions in binary form must reproduce", NOTICES)
 
 
 if __name__ == "__main__":

@@ -37,7 +37,8 @@ include(FetchContent)
 FetchContent_Declare(
   minhook
   GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
-  GIT_TAG v1.3.4
+  # MinHook v1.3.4, pinned to the immutable commit behind the release tag.
+  GIT_TAG c3fcafdc10146beb5919319d0683e44e3c30d537
   GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(minhook)

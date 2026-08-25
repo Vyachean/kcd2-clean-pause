@@ -69,6 +69,7 @@ const char* const kHudClipNames[kHudClipCount] = {
 
 struct HudVisibilitySnapshot {
     bool visible[kHudClipCount]{};
+    bool rootVisible{};
     bool captured{};
 };
 
@@ -280,6 +281,33 @@ bool ValidateEnvironmentCandidate(const std::uint8_t* candidate, RuntimeEnvironm
     return true;
 }
 
+void LogWhGameFingerprint(HMODULE whGame)
+{
+    const auto* base = reinterpret_cast<const std::uint8_t*>(whGame);
+    if (!IsReadable(base, sizeof(IMAGE_DOS_HEADER))) {
+        Log("WHGame fingerprint unavailable: unreadable DOS header");
+        return;
+    }
+
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+        Log("WHGame fingerprint unavailable: invalid DOS signature");
+        return;
+    }
+
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    if (!IsReadable(nt, sizeof(*nt)) || nt->Signature != IMAGE_NT_SIGNATURE) {
+        Log("WHGame fingerprint unavailable: invalid PE header");
+        return;
+    }
+
+    Log(
+        "WHGame fingerprint: TimeDateStamp=0x%08lx SizeOfImage=0x%08lx CheckSum=0x%08lx",
+        static_cast<unsigned long>(nt->FileHeader.TimeDateStamp),
+        static_cast<unsigned long>(nt->OptionalHeader.SizeOfImage),
+        static_cast<unsigned long>(nt->OptionalHeader.CheckSum));
+}
+
 bool FindRuntimeEnvironment(HMODULE whGame, RuntimeEnvironment& result)
 {
     const auto* base = reinterpret_cast<const std::uint8_t*>(whGame);
@@ -466,7 +494,10 @@ bool ResolveHudClipAccessor(void*& hud, GetMovieClipByNameFn& getMovieClip)
     getMovieClip = nullptr;
     if (!ResolveHudElement(hud) || hud != g_hudElement)
         return false;
-    if (!ValidateObjectVtable(hud, {kUIElementGetMovieClipByNameSlot}))
+    if (!ValidateObjectVtable(hud, {
+            kUIElementGetMovieClipByNameSlot,
+            kUIElementIsVisibleSlot,
+            kUIElementSetVisibleSlot }))
         return false;
     getMovieClip = VFunc<GetMovieClipByNameFn>(hud, kUIElementGetMovieClipByNameSlot);
     return getMovieClip && IsExecutable(reinterpret_cast<void*>(getMovieClip));
@@ -484,6 +515,15 @@ bool CaptureHudVisibilitySnapshot(HudVisibilitySnapshot& target, const char* lab
         return false;
 
     HudVisibilitySnapshot next{};
+    const auto isRootVisible = VFunc<IsVisibleFn>(hud, kUIElementIsVisibleSlot);
+    bool rootVisible{};
+    __try {
+        rootVisible = isRootVisible && isRootVisible(hud);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    next.rootVisible = rootVisible;
+
     for (std::size_t i = 0; i < kHudClipCount; ++i) {
         void* clip{};
         __try {
@@ -534,13 +574,20 @@ bool RestoreHudVisibilitySnapshot(const HudVisibilitySnapshot& snapshot, const c
     if (!ResolveHudClipAccessor(hud, getMovieClip))
         return false;
 
-    // hud@0 is only the container. RC7d proved its visibility does not control the
-    // 28 children, but it still must remain visible for restored child clips to render.
+    // Root hud@0 visibility is independent from the 28 C_UIHudMask children
+    // (wh_ui_ShowHud controls the root). Preserve it exactly instead of forcing HUD on.
+    const auto isRootVisible = VFunc<IsVisibleFn>(hud, kUIElementIsVisibleSlot);
     const auto setRootVisible = VFunc<SetVisibleFn>(hud, kUIElementSetVisibleSlot);
-    if (!setRootVisible || !IsExecutable(reinterpret_cast<void*>(setRootVisible)))
+    if (!isRootVisible || !setRootVisible
+        || !IsExecutable(reinterpret_cast<void*>(isRootVisible))
+        || !IsExecutable(reinterpret_cast<void*>(setRootVisible)))
         return false;
+
+    bool currentRootVisible{};
     __try {
-        setRootVisible(hud, true);
+        currentRootVisible = isRootVisible(hud);
+        if (currentRootVisible && !snapshot.rootVisible)
+            setRootVisible(hud, false);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -567,6 +614,16 @@ bool RestoreHudVisibilitySnapshot(const HudVisibilitySnapshot& snapshot, const c
         }
         if (!ok)
             return false;
+    }
+
+    // If the root was hidden, update children while they are not renderable and reveal
+    // the container only after the exact child state is in place.
+    if (!currentRootVisible && snapshot.rootVisible) {
+        __try {
+            setRootVisible(hud, true);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
     }
 
     if (label && std::strcmp(label, "gameplay") == 0) {
@@ -606,8 +663,19 @@ bool CaptureVanillaHudFromInternalMask(HudVisibilitySnapshot& target)
         || !hud_mask::ReadCurrentVisibility(g_hudElement, visible, kHudClipCount))
         return false;
 
+    if (!ValidateObjectVtable(g_hudElement, {kUIElementIsVisibleSlot}))
+        return false;
+    const auto isRootVisible = VFunc<IsVisibleFn>(g_hudElement, kUIElementIsVisibleSlot);
+    bool rootVisible{};
+    __try {
+        rootVisible = isRootVisible && isRootVisible(g_hudElement);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+
     for (std::size_t i = 0; i < kHudClipCount; ++i)
         target.visible[i] = visible[i];
+    target.rootVisible = rootVisible;
     target.captured = true;
     return true;
 }
@@ -669,7 +737,13 @@ void ReconcileHudMaskMutation()
     // fail open while the just-applied vanilla Flash state is still intact.
     HudVisibilitySnapshot vanillaState{};
     if (!CaptureVanillaHudFromInternalMask(vanillaState)) {
-        FailOpenHudMaskTransaction(nullptr, "authoritative internal HUD state unavailable");
+        // During an already-active transaction Flash can be a mix of the previously
+        // pinned gameplay presentation and the one vanilla element just mutated. Use
+        // the last complete internal snapshot if available before relinquishing.
+        const HudVisibilitySnapshot fallback = g_vanillaPauseHudSnapshot;
+        FailOpenHudMaskTransaction(
+            fallback.captured ? &fallback : nullptr,
+            "authoritative internal HUD state unavailable");
         return;
     }
     g_vanillaPauseHudSnapshot = vanillaState;
@@ -1271,6 +1345,8 @@ DWORD WINAPI BootstrapThread(void*)
         Log("WHGame.dll not found; Clean Pause disabled");
         return 0;
     }
+
+    LogWhGameFingerprint(whGame);
 
     RuntimeEnvironment environment{};
     for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs && !g_stopping.load(); elapsed += kPollMs) {
