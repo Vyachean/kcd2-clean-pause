@@ -26,6 +26,7 @@ forbidden = (
     "Game.PauseGame(",
     "kGameFrameworkPauseGameSlot",
     "PauseGameFn",
+    "System.GetCVarValue",
 )
 for needle in forbidden:
     if needle in native or needle in blur or needle in abi:
@@ -77,8 +78,8 @@ for needle in required_runtime:
         raise SystemExit(f"missing production runtime contract: {needle}")
 
 required_blur = (
-    'System.GetCVarValue("wh_cl_NearDof")',
-    'System.GetCVarValue("r_DepthOfField")',
+    'System.GetCVar("wh_cl_NearDof")',
+    'System.GetCVar("r_DepthOfField")',
     'System.SetCVar("wh_cl_NearDof", 0)',
     'System.SetCVar("r_DepthOfField", 0)',
     'System.SetCVar("wh_cl_NearDof", __kcd2_clean_pause_prev_near_dof)',
