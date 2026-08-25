@@ -1,4 +1,5 @@
 #include "clean_pause_native.h"
+#include "clean_pause_blur.h"
 #include "kcd2_abi.h"
 
 #include <MinHook.h>
@@ -171,6 +172,13 @@ void Log(const char* format, ...)
         CloseHandle(file);
     }
     ReleaseSRWLockExclusive(&g_logLock);
+}
+
+void RestoreBlurBestEffort(const char* context)
+{
+    if (!blur::Restore() && blur::IsSuppressed())
+        Log("Clean Pause DoF restore failed (%s); will retry on subsequent input",
+            context ? context : "unknown");
 }
 
 bool ValidateObjectVtable(void* object, std::initializer_list<std::size_t> requiredSlots)
@@ -558,7 +566,8 @@ bool RestoreHudVisibilitySnapshot(const HudVisibilitySnapshot& snapshot, const c
 void FailOpenHudMaintenance(const char* reason)
 {
     // Menu@0 remains logically visible; dropping render suppression is enough to show
-    // ordinary vanilla pause. Best-effort restore the vanilla-pause child snapshot first.
+    // ordinary vanilla pause. Best-effort restore graphics and HUD state first.
+    RestoreBlurBestEffort("HUD maintenance fail-open");
     if (g_vanillaPauseHudSnapshot.captured)
         RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-fail-open");
     g_cleanHidden.store(false, std::memory_order_release);
@@ -735,6 +744,7 @@ void Forward(void* input, const InputEvent* event, bool force)
 
 void ClearHiddenState(const char* reason)
 {
+    RestoreBlurBestEffort("clear hidden state");
     g_cleanHidden.store(false, std::memory_order_release);
     g_renderSuppressionObserved.store(false, std::memory_order_release);
     g_cleanHiddenSinceMs.store(0, std::memory_order_release);
@@ -783,6 +793,14 @@ bool TryEnterCleanPause(const char* trigger, bool swallowMatchingRelease)
         return false;
     }
 
+    if (!blur::Disable()) {
+        RestoreBlurBestEffort("Clean Pause entry rollback");
+        RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-fail-open");
+        ResetHudSnapshots();
+        Log("vanilla pause opened but DoF blur could not be disabled safely; leaving ordinary visible pause menu (fail-open)");
+        return false;
+    }
+
     const ULONGLONG enteredAt = GetTickCount64();
     g_renderSuppressionObserved.store(false, std::memory_order_release);
     g_cleanHiddenSinceMs.store(enteredAt, std::memory_order_release);
@@ -791,7 +809,7 @@ bool TryEnterCleanPause(const char* trigger, bool swallowMatchingRelease)
     g_swallowPauseRelease.store(swallowMatchingRelease, std::memory_order_release);
     g_pendingPauseAttempt.store(false, std::memory_order_release);
     g_pendingDeadlineMs.store(0, std::memory_order_release);
-    Log("Running -> Clean Pause candidate: vanilla Menu@0 remains visible but its Render is suppressed (%s)",
+    Log("Running -> Clean Pause candidate: vanilla Menu@0 Render suppressed; DoF disabled (%s)",
         trigger ? trigger : "pause input");
     return true;
 }
@@ -831,6 +849,7 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
             return;
 
         if (pressed) {
+            RestoreBlurBestEffort("show vanilla pause via Escape/Start");
             if (!RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu"))
                 Log("could not restore captured vanilla-pause HUD before showing Menu; continuing fail-open");
             g_cleanHidden.store(false, std::memory_order_release);
@@ -838,7 +857,7 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
             g_cleanHiddenSinceMs.store(0, std::memory_order_release);
             ResetHudSnapshots();
             g_swallowPauseRelease.store(true, std::memory_order_release);
-            Log("Clean Pause -> visible vanilla pause menu (second Escape/Start consumed; Render restored)");
+            Log("Clean Pause -> visible vanilla pause menu (DoF restored; second Escape/Start consumed; Render restored)");
             return;
         }
         return;
@@ -850,6 +869,7 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
         if (!pressed)
             return;
 
+        RestoreBlurBestEffort("show vanilla pause via B");
         if (!RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu-via-B"))
             Log("could not restore captured vanilla-pause HUD before showing Menu via B; continuing fail-open");
 
@@ -860,7 +880,7 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
         g_pendingDeadlineMs.store(0, std::memory_order_release);
         ResetHudSnapshots();
         g_swallowResumeRelease.store(true, std::memory_order_release);
-        Log("Clean Pause -> visible vanilla pause menu via B (v0.1.0 behavior)");
+        Log("Clean Pause -> visible vanilla pause menu via B (DoF restored; v0.1.0 behavior)");
         return;
     }
 
@@ -875,6 +895,11 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
         Forward(input, event, force);
         return;
     }
+
+    // If a previous graphics restore failed transiently, retry whenever execution
+    // returns to the validated input path outside Clean Pause.
+    if (!g_cleanHidden.load(std::memory_order_acquire) && blur::IsSuppressed())
+        RestoreBlurBestEffort("deferred outside-Clean-Pause retry");
 
     // KCD2 can post nested synthetic input while processing a physical event.
     // Never interpret or consume those nested events: forward them exactly once and
@@ -958,6 +983,7 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
     g_game = environment.game;
     g_flashUI = environment.flashUI;
     g_mainThreadId = environment.mainThreadId;
+    blur::Initialize(environment.scriptSystem, environment.mainThreadId);
 
     g_postInputEventTarget = reinterpret_cast<void*>(
         VFunc<PostInputEventFn>(g_input, kInputPostInputEventSlot));
