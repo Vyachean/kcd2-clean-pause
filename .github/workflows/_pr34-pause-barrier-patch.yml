@@ -21,7 +21,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Apply guarded correction
-        run: python tools/_pr34_pause_barrier_patch.py
+        run: |
+          python tools/_pr34_pause_barrier_patch.py
+          python tools/_pr34_pause_barrier_testfix.py
       - name: Run repository tests
         run: python -m unittest discover -s tests -v
       - name: Validate native architecture contract
