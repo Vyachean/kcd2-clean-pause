@@ -9,6 +9,7 @@ on:
       - tools/validate_native_contract.py
       - docs/RELEASE_NOTES.md
       - .github/workflows/release.yml
+      - THIRD_PARTY_NOTICES.txt
     tags: ["v*"]
   pull_request:
     paths:
@@ -17,6 +18,7 @@ on:
       - tools/validate_native_contract.py
       - docs/RELEASE_NOTES.md
       - .github/workflows/release.yml
+      - THIRD_PARTY_NOTICES.txt
   workflow_dispatch:
 
 permissions:
@@ -79,7 +81,14 @@ jobs:
           if (-not $dumpbin) { throw "dumpbin.exe not found" }
 
           $exports = & $dumpbin /nologo /exports $versionDll | Out-String
-          foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
+          $expectedExports = @(
+            "GetFileVersionInfoA", "GetFileVersionInfoByHandle", "GetFileVersionInfoExA",
+            "GetFileVersionInfoExW", "GetFileVersionInfoSizeA", "GetFileVersionInfoSizeExA",
+            "GetFileVersionInfoSizeExW", "GetFileVersionInfoSizeW", "GetFileVersionInfoW",
+            "VerFindFileA", "VerFindFileW", "VerInstallFileA", "VerInstallFileW",
+            "VerLanguageNameA", "VerLanguageNameW", "VerQueryValueA", "VerQueryValueW"
+          )
+          foreach ($name in $expectedExports) {
             if ($exports -notmatch [regex]::Escape($name)) { throw "version.dll proxy export missing: $name" }
           }
 
@@ -96,8 +105,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path release/version-dll | Out-Null
           Copy-Item $asi release/asi/KCD2CleanPause.asi
           Copy-Item native/INSTALL_ASI.txt release/asi/INSTALL.txt
+          Copy-Item THIRD_PARTY_NOTICES.txt release/asi/THIRD_PARTY_NOTICES.txt
           Copy-Item $versionDll release/version-dll/version.dll
           Copy-Item native/INSTALL_VERSION_DLL.txt release/version-dll/INSTALL.txt
+          Copy-Item THIRD_PARTY_NOTICES.txt release/version-dll/THIRD_PARTY_NOTICES.txt
 
           $asiAsset = "kcd2-clean-pause-${{ steps.meta.outputs.tag }}-asi.zip"
           $versionAsset = "kcd2-clean-pause-${{ steps.meta.outputs.tag }}-version-dll.zip"
@@ -149,8 +160,8 @@ jobs:
           sha256sum -c SHA256SUMS.txt
           unzip -t "$ASI_ASSET"
           unzip -t "$VERSION_ASSET"
-          [[ "$(unzip -Z1 "$ASI_ASSET" | sort)" == $'INSTALL.txt\nKCD2CleanPause.asi' ]]
-          [[ "$(unzip -Z1 "$VERSION_ASSET" | sort)" == $'INSTALL.txt\nversion.dll' ]]
+          [[ "$(unzip -Z1 "$ASI_ASSET" | sort)" == $'INSTALL.txt\nKCD2CleanPause.asi\nTHIRD_PARTY_NOTICES.txt' ]]
+          [[ "$(unzip -Z1 "$VERSION_ASSET" | sort)" == $'INSTALL.txt\nTHIRD_PARTY_NOTICES.txt\nversion.dll' ]]
       - name: Ensure immutable release tag
         id: release_tag
         env:
