@@ -23,17 +23,22 @@ Use the ASI edition when another mod already owns `version.dll` or when you alre
 - Xbox B from Clean Pause also reveals the vanilla pause menu.
 - Failure paths prefer the visible vanilla pause menu instead of trapping input.
 
-## rc.2 retail result
+## Retail acceptance evidence
 
-Do not use rc.2 for testing. It called a nonexistent `System.GetCVarValue` function, so the DoF controller always failed its capability check and Clean Pause fell back to the ordinary visible pause menu. rc.3 corrects that call to `System.GetCVar`.
+rc.2 must not be used for testing. It called a nonexistent `System.GetCVarValue` function, so the DoF controller always failed its capability check and Clean Pause fell back to the ordinary visible pause menu.
+
+rc.3 corrects that call to `System.GetCVar`. On the primary Xbox Store KCD2 1.5.6 target, a retail test confirmed that Xbox Start enters Clean Pause again and the retained frame is sharp with the pause DoF blur removed.
+
+That confirmation covers the corrected blur-entry path. The subsequent visible-menu/gameplay DoF restoration handoff still needs an explicit retail observation before stable promotion.
 
 ## Known behavior / acceptance status
 
 - **B does not resume directly from Clean Pause.** It reveals the normal KCD2 pause menu; resume from there normally.
 - Runtime compatibility is currently claimed for KCD2 1.5.6 only.
 - The standalone `version.dll` loading path is already retail-proven on the primary Xbox Store target.
-- The ASI loading path still requires its dedicated retail-equivalence checklist.
-- The corrected blur-free presentation requires one retail confirmation that the two DoF CVars remove the actual visible pause blur and that normal visible-menu/gameplay DoF is restored afterward.
+- The corrected rc.3 blur-entry path is retail-confirmed.
+- The ASI loading path still requires its dedicated retail-equivalence checklist and shared-loader coexistence check.
+- Exact DoF restoration before visible-menu/gameplay presentation still needs explicit retail confirmation.
 
 ## Safety/implementation notes
 
