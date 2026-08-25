@@ -20,7 +20,7 @@ Vanilla pause menu
 
 Clean Pause uses KCD2's own pause lifecycle. World simulation and audio pause as they do in the normal game pause, while the pause-menu surface itself is not drawn. The mod restores the gameplay HUD child state so subtitles that were visible at pause entry remain visible.
 
-The strong depth-of-field blur applied by the vanilla pause is intentionally left unchanged.
+While Clean Pause owns presentation, KCD2 depth-of-field is temporarily disabled so the retained game frame remains sharp. The mod snapshots the current `wh_cl_NearDof` and `r_DepthOfField` values and restores them before returning presentation to the visible vanilla pause menu. Ordinary gameplay and the visible vanilla pause menu therefore keep the user's existing graphics settings.
 
 ### Known v0.1.0 behavior
 
@@ -33,7 +33,7 @@ Every new release publishes two mutually exclusive editions built from the same 
 - **ASI edition** — `KCD2CleanPause.asi`; recommended when you already use an ASI loader or another mod owns `version.dll`.
 - **Standalone edition** — `version.dll`; no separate ASI loader is required, but it conflicts with any unrelated mod that also installs `version.dll` beside the game executable.
 
-Do **not** install both Clean Pause editions at the same time.
+Do **not** install both Clean Pause editions at the same time. A process-wide safety guard also prevents a second Clean Pause edition from installing duplicate native hooks if both files are accidentally present.
 
 See [Dual native packages](docs/DUAL_PACKAGE.md) for the packaging contract and [ASI retail acceptance](docs/ASI_RETAIL_ACCEPTANCE.md) for the additional acceptance gate of the new loader path.
 
@@ -79,6 +79,7 @@ The runtime:
 - snapshots the visibility of KCD2's 28 HUD child movie clips before pause and restores that gameplay presentation while Clean Pause is active;
 - treats `IUIElement::GetMovieClip()` results as borrowed, call-local handles: never retained, never `Release()`d by the mod;
 - suppresses only the HUD Flash calls `ClearSubtitles` and `HideNarrativeSubtitles` while Clean Pause owns presentation;
+- temporarily sets `wh_cl_NearDof` and `r_DepthOfField` to `0` only for Clean Pause, restoring their exact previous values before normal presentation resumes;
 - fails open to the visible vanilla pause menu when an assumption cannot be verified.
 
 No custom/inferred `PauseGame`, action-map replacement, fixed storefront-specific WHGame RVA, or replacement overlay is used.
