@@ -2,36 +2,37 @@
 
 ## Release status
 
-**v0.1.0 is the current stable release for KCD2 1.5.6 Windows retail**, primarily the PC Xbox Store / Xbox app build.
+**v0.2.0** is the current stable release target for KCD2 1.5.6 Windows retail.
 
-**v0.2.0-rc.1** is the current development release candidate. It is the first release under the normalized SemVer policy and consolidates the feature work that was previously published incrementally as `v0.1.1-rc.1` through `v0.1.1-rc.4`.
+Support status is per edition:
+
+- **standalone `version.dll`: supported / retail-proven** on the primary PC Xbox Store / Xbox app target;
+- **`KCD2CleanPause.asi`: experimental / not retail-validated**. It builds from the same runtime, but its loader path and coexistence with another ASI plugin have not been tested in retail.
 
 The `0.2.0` feature set adds:
 
-- `KCD2CleanPause.asi` for a shared ASI-loader installation;
-- standalone `version.dll` for the existing self-contained installation;
-- process-wide duplicate-load protection if both Clean Pause editions are accidentally present;
+- standalone and ASI packaging from one runtime;
+- process-wide duplicate-load protection;
 - blur-free Clean Pause presentation with exact DoF-state restoration;
 - preservation of active NPC speech bubbles / overhead subtitles across the vanilla pause transition.
 
-The historical `v0.1.1-rc.1` through `v0.1.1-rc.4` tags remain immutable, but **no stable v0.1.1 is planned**. These are user-facing features and therefore belong to the next minor release, `v0.2.0`.
+The historical `v0.1.1-rc.1` through `v0.1.1-rc.4` tags remain immutable. No stable `v0.1.1` is planned; their accumulated feature work belongs to `v0.2.0`.
 
-The blur-free entry path and overhead-subtitle preservation are retail-confirmed on the primary Xbox Store 1.5.6 target. Before stable `v0.2.0`, the ASI loading path still needs [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md), the DoF restoration handoff needs explicit retail confirmation, one longer post-resume bubble-lifetime observation remains useful, and one shared-loader coexistence case remains required.
+## Retail acceptance
 
-The production runtime is in `native/src/clean_pause_native.cpp`; both editions compile that same runtime plus the bounded blur and overhead-bubble controllers and differ only in bootstrap/loading.
+On Xbox Store KCD2 1.5.6 using the standalone loading path, the accepted behavior is:
 
-## Versioning / release model
+- Xbox Start enters the vanilla-owned Clean Pause without drawing the normal pause menu;
+- simulation and audio pause normally;
+- visible dialogue/HUD subtitles remain available;
+- the retained frame is sharp without the vanilla pause DoF blur;
+- NPC overhead subtitles are preserved together with the restored HUD;
+- second Start or B reveals the already-open vanilla pause menu;
+- closing the menu and resuming returns to normal game behavior.
 
-The project now uses a conventional SemVer + Git tag flow:
+The latest retail report confirms the pause works normally after the overhead-subtitle change. This closes the previous standalone blockers around normal handoff/resume behavior. No additional standalone retail launch is required for `v0.2.0`.
 
-- unreleased merged work remains under `Unreleased`;
-- backward-compatible features before 1.0 bump MINOR (`0.1.0` -> `0.2.0`);
-- fixes bump PATCH (`0.2.0` -> `0.2.1`);
-- release candidates are numbered only for the same target release (`0.2.0-rc.1`, `0.2.0-rc.2`);
-- merges to `main` build and validate but do not publish a GitHub Release;
-- publication is triggered only by an immutable matching `v<VERSION>` tag.
-
-See [RELEASE.md](RELEASE.md).
+ASI acceptance is no longer a blocker for the stable standalone release. It remains an explicit prerequisite only before the ASI edition can be described as supported.
 
 ## Product contract
 
@@ -47,90 +48,44 @@ Clean Pause
   Xbox B               -> visible vanilla pause menu
 ```
 
-The vanilla pause menu then uses normal KCD2 controls to resume or perform menu actions. The user's original DoF settings are restored before normal visible-menu presentation resumes.
-
-Direct `Clean Pause -> B -> Running` is **not** part of the current contract. Retail testing showed B revealing the menu, and that behavior was explicitly accepted. The unverified synthetic pause-key replay experiment remains removed from production.
-
-## Retail-proven behavior
-
-On Xbox Store KCD2 1.5.6 using the standalone loading path:
-
-- first Start enters a real vanilla-owned pause without drawing the pause menu;
-- world simulation stops;
-- audio pauses like the ordinary KCD2 pause;
-- dialogue subtitles can remain visible during Clean Pause;
-- the retained frame is sharp with vanilla pause DoF removed;
-- NPC overhead subtitles are preserved in Clean Pause together with the restored main HUD;
-- second Start reveals the already-open vanilla pause menu without an intermediate gameplay tick;
-- B from Clean Pause reveals the same vanilla pause menu;
-- the visible menu can then be closed normally.
-
-The earlier `v0.1.1-rc.2` attempt is superseded: its invalid Lua getter forced the designed visible-menu fail-open path. `v0.1.1-rc.3` corrected the getter, and `v0.1.1-rc.4` added the retail-confirmed overhead-bubble preservation now included in `v0.2.0-rc.1`.
-
-## Dual-package architecture
-
-The editions are mutually exclusive installations of the same runtime:
-
-```text
-ASI loader -> KCD2CleanPause.asi -> clean_pause::Start()
-
-KCD2 -> version.dll proxy -> clean_pause::Start()
-```
-
-The ASI edition exists to avoid the hard file-name conflict when another mod already owns `version.dll`. The standalone edition remains available for users who want no separate ASI-loader dependency.
-
-Do not intentionally install both Clean Pause editions together. A process-wide guard prevents the second copy from installing duplicate hooks if both are accidentally loaded.
+Direct `Clean Pause -> B -> Running` is not part of the current contract.
 
 ## Accepted runtime architecture
 
 1. KCD2 is the sole pause owner.
 2. The physical Escape/Start input is forwarded to KCD2.
-3. `Menu@0::IsVisible()` is the independent retail pause-lifecycle signal.
-4. Menu visibility is never changed by the mod.
-5. Clean Pause suppresses only `Menu@0::Render()`.
-6. Gameplay HUD presentation is preserved using two 28-value bool snapshots: gameplay state and vanilla-pause state.
-7. `IUIElement::GetMovieClip()` pointers are borrowed/call-local: never retained and never released by the mod.
-8. `hud@0::Update(float)` performs only bounded main-thread HUD maintenance during the pause transition.
-9. Only `ClearSubtitles` and `HideNarrativeSubtitles` are suppressed for normal subtitle lifetime protection.
-10. NPC overhead subtitles are handled separately: `C_UIHudBubbles` is discovered from the live `hud@0` listener list through MSVC RTTI, without fixed `WHGame.dll` RVAs.
-11. While vanilla `Menu@0` is logically visible, only `I_UIHudBubbles::UpdateBubbles()` and `ReleaseBubble()` are frozen. The freeze starts before vanilla `SetVisible(true)` and ends after `SetVisible(false)` returns.
-12. Bubble discovery is optional/fail-open and cannot disable the proven Clean Pause path if the concrete listener layout cannot be validated.
-13. Clean Pause reads the current `wh_cl_NearDof` and `r_DepthOfField` through `System.GetCVar`, sets both to `0` only for hidden-menu presentation, and restores the saved values before visible vanilla presentation resumes.
-14. B/second Start restore captured DoF and vanilla-pause HUD state before revealing the normal menu.
-15. Unresolved core state fails open to visible vanilla pause; transient DoF restoration failure remains retryable.
+3. `Menu@0::IsVisible()` is the pause-lifecycle signal.
+4. Menu visibility is never changed by the mod; only `Menu@0::Render()` is suppressed during Clean Pause.
+5. Gameplay and vanilla-pause HUD child visibility are preserved as boolean snapshots.
+6. `IUIElement::GetMovieClip()` results are borrowed/call-local and are never retained or released by the mod.
+7. `ClearSubtitles` and `HideNarrativeSubtitles` are narrowly suppressed while Clean Pause owns presentation.
+8. `C_UIHudBubbles` is discovered from the live `hud@0` listener list through MSVC RTTI without fixed `WHGame.dll` RVAs.
+9. `I_UIHudBubbles::UpdateBubbles()` and `ReleaseBubble()` are frozen only while vanilla pause is logically open.
+10. `wh_cl_NearDof` and `r_DepthOfField` are captured, disabled for hidden-menu presentation, and restored before visible vanilla presentation.
+11. Unresolved core state fails open to visible vanilla pause.
 
-## Permanent rejected paths
+## Release model
 
-Do not reintroduce without new direct retail evidence:
+The project uses SemVer and tag-driven GitHub Releases:
 
-- action-map/profile replacement as the primary pause route;
-- runtime action-map reload/remapping or `Player.OnAction` replacement;
-- inferred/native/Lua custom `PauseGame` ownership;
-- `only_ui` as vanilla pause ownership evidence;
-- hiding `Menu@0` with `SetVisible(false)`;
-- fixed libKCD2 WHGame RVAs across storefronts;
-- aggressive writable-section `S_GameContext` scanning;
-- root/global HUD visibility as complete HUD presentation;
-- reconstructing overhead bubble text/anchors after vanilla has destroyed their state;
-- retaining raw `GetMovieClip()` pointers across frames;
-- calling `Release()` on `IUIElement::GetMovieClip()` results;
-- HUD child mutation from `Menu@0::Render()`;
-- inferred contiguous XInput key IDs.
+- features before 1.0 bump MINOR;
+- fixes bump PATCH;
+- `-rc.N` is used only when the supported release itself still requires acceptance;
+- merges to `main` build and validate but do not publish;
+- publication is triggered by an immutable matching `v<VERSION>` tag.
 
-## Before v0.2.0 stable
+## Remaining work
 
-- publish `v0.2.0-rc.1` from its exact tag;
-- confirm during normal play that an overhead line does not become permanently stuck after closing the vanilla pause menu / resuming gameplay;
-- confirm that second Start/B reveals the visible vanilla menu with normal DoF and that gameplay DoF remains unchanged after resume;
-- run the ASI retail-equivalence checklist on Xbox Store KCD2 1.5.6;
+The only edition-specific acceptance debt is ASI:
+
+- run [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md) when a tester is available;
 - verify one shared-loader coexistence case with another real KCD2 ASI plugin;
-- if those checks pass, prepare and tag stable `v0.2.0` without creating unnecessary additional RCs.
+- after that, remove the experimental label from the ASI edition in a patch release if no runtime change is needed.
 
-## Later work
+Non-blocking later work:
 
-- investigate a safe direct B resume only if it can be implemented without synthetic/unverified input replay;
-- longer dialogue/subtitle lifetime testing;
-- in-engine cutscene coverage;
+- investigate safe direct B resume only if a canonical vanilla close/resume mechanism is found;
+- broader cutscene/dialogue coverage;
 - repeated-cycle, load-transition, Alt-Tab, and controller-reconnect robustness;
 - revalidate ABI facts when KCD2 changes from 1.5.6.
 
