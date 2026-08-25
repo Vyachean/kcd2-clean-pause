@@ -2,7 +2,14 @@
 
 ## Unreleased
 
-No unreleased changes yet.
+- Prevents KCD2's pause HUD-mask transition from rendering an intermediate hidden-HUD frame before Clean Pause presentation is established.
+- Uses KCD2's authoritative `C_UIHudMask` state for vanilla-menu handoff while keeping KCD2 as the sole logical pause/HUD owner.
+- Scopes globally patched HUD-mask and NPC-bubble method hooks to the exact runtime objects discovered from the current `hud@0` instance.
+- Preserves the root `hud@0` visibility state exactly, including configurations where `wh_ui_ShowHud` disables the whole HUD.
+- Strengthens transactional fail-open behavior so an internal-state read failure restores the last complete vanilla HUD state instead of exposing a mixed presentation.
+- Adds runtime `VERSION`, Git build id, and `WHGame.dll` PE fingerprint logging so retail evidence can be tied to a specific binary and future game-version compatibility gates.
+- Pins MinHook v1.3.4 to its immutable commit and includes the required MinHook/HDE redistribution notice in both binary packages.
+- Expands release/validation checks to verify the complete 17-export `version.dll` proxy surface.
 
 ## v0.2.0 — 2026-08-25
 
