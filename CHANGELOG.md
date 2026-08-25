@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.1-rc.2 — 2026-08-25
+
+Presentation/safety prerelease on top of the dual-package model.
+
+- Makes Clean Pause presentation blur-free by temporarily disabling `wh_cl_NearDof` and `r_DepthOfField` only while the vanilla pause-menu surface is hidden.
+- Saves and restores the exact pre-Clean-Pause DoF values before returning to the visible vanilla pause menu or any fail-open path.
+- Refuses Clean Pause ownership if the DoF state cannot be captured/changed safely.
+- Adds retryable restoration if a transient Lua/CVar failure prevents immediate graphics restoration.
+- Adds a process-wide guard so accidental simultaneous ASI + `version.dll` installation cannot install duplicate Clean Pause hooks.
+- Keeps KCD2 as the sole pause owner; input, subtitle-preservation, and B-to-visible-menu behavior are unchanged.
+- Keeps both ASI and standalone `version.dll` release editions.
+
 ## v0.1.1-rc.1 — 2026-08-25
 
 Dual-package prerelease.
