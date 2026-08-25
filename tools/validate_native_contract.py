@@ -3,7 +3,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 native = (ROOT / "native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
 blur = (ROOT / "native/src/clean_pause_blur.cpp").read_text(encoding="utf-8")
+mask = (ROOT / "native/src/clean_pause_hud_mask.cpp").read_text(encoding="utf-8")
+mask_header = (ROOT / "native/src/clean_pause_hud_mask.h").read_text(encoding="utf-8")
 abi = (ROOT / "native/src/kcd2_abi.h").read_text(encoding="utf-8")
+cmake = (ROOT / "native/CMakeLists.txt").read_text(encoding="utf-8")
 
 forbidden = (
     "ActionMapManager.InitActionMaps(",
@@ -29,7 +32,7 @@ forbidden = (
     "System.GetCVarValue",
 )
 for needle in forbidden:
-    if needle in native or needle in blur or needle in abi:
+    if needle in native or needle in blur or needle in abi or needle in mask:
         raise SystemExit(f"forbidden production path: {needle}")
 
 required_abi = (
@@ -60,6 +63,7 @@ required_runtime = (
     "HookHudUpdate",
     "CaptureHudVisibilitySnapshot",
     "RestoreHudVisibilitySnapshot",
+    "RestoreVanillaHudPresentation",
     "HudVisibilitySnapshot g_gameplayHudSnapshot",
     "HudVisibilitySnapshot g_vanillaPauseHudSnapshot",
     "ShouldFreezeHudFunction",
@@ -71,11 +75,50 @@ required_runtime = (
     "blur::Initialize(environment.scriptSystem, environment.mainThreadId)",
     "if (!blur::Disable())",
     "RestoreBlurBestEffort",
-    "KCD2 Clean Pause v0.1.0 active",
+    "CLEAN_PAUSE_VERSION",
+    "CLEAN_PAUSE_BUILD_ID",
 )
 for needle in required_runtime:
     if needle not in native:
         raise SystemExit(f"missing production runtime contract: {needle}")
+if "KCD2 Clean Pause v0.1.0 active" in native:
+    raise SystemExit("runtime identity must not be hard-coded to historical v0.1.0")
+for needle in ('../VERSION', 'rev-parse --short=12 HEAD', 'CLEAN_PAUSE_VERSION=', 'CLEAN_PAUSE_BUILD_ID='):
+    if needle not in cmake:
+        raise SystemExit(f"missing runtime build identity contract: {needle}")
+
+required_mask = (
+    '.?AVC_UIHudMask@guimodule@wh@@',
+    'kHudListenersOffset = 0x1D0',
+    'kMaskListenerOffset = 0x10',
+    'kMaskVisibilityInterfaceOffset = 0x58',
+    'kMaskSourceMonitorOffset = 0x60',
+    'kMaskIsElementVisibleSlot = 1',
+    'kModuleMessageIdOffset = 0x08',
+    'kHudRefreshModuleMessageId = 52',
+    'ReadCurrentVisibility',
+    'VFunc<IsElementVisibleFn>',
+)
+for needle in required_mask:
+    if needle not in mask and needle not in mask_header:
+        raise SystemExit(f"missing HUD-mask transaction contract: {needle}")
+for forbidden_rva in ("0x548BFA8", "0x180555978", "0x180C3BE68"):
+    if forbidden_rva in mask:
+        raise SystemExit(f"HUD-mask runtime must not depend on fixed WHGame RVA: {forbidden_rva}")
+
+module_hook = mask[mask.index("void __fastcall HookOnModuleMessage"):mask.index("} // namespace\n\nbool EnsureHooks")]
+if module_hook.index("IsHudRefreshMessage(message)") > module_hook.index("g_originalOnModuleMessage"):
+    raise SystemExit("module message id must be read before vanilla may release/alter the message")
+if "if (refresh)\n        NotifyAfterMutation();" not in module_hook:
+    raise SystemExit("OnModuleMessage observer must run only for verified HUD refresh message 52")
+
+transaction = native[native.index("void ReconcileHudMaskMutation"):native.index("void FailOpenHudMaintenance")]
+if "CaptureHudVisibilitySnapshot" in transaction or "g_vanillaPauseHudSnapshot =" in transaction:
+    raise SystemExit("partial HUD-mask callbacks must not snapshot the whole Flash HUD as vanilla state")
+if "RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot" not in transaction:
+    raise SystemExit("HUD-mask mutation must restore the gameplay presentation before render")
+if transaction.index("GetCurrentThreadId()") > transaction.index("ShouldPinGameplayHudPresentation()"):
+    raise SystemExit("HUD-mask callback must validate thread before reading non-atomic snapshot state")
 
 required_blur = (
     'System.GetCVar("wh_cl_NearDof")',
@@ -101,7 +144,7 @@ for name in ("Subtitles", "Hints"):
         raise SystemExit(f"HUD child snapshot table missing {name}")
 
 capture = native[native.index("bool CaptureHudVisibilitySnapshot"):native.index("bool RestoreHudVisibilitySnapshot")]
-restore = native[native.index("bool RestoreHudVisibilitySnapshot"):native.index("void FailOpenHudMaintenance")]
+restore = native[native.index("bool RestoreHudVisibilitySnapshot"):native.index("bool ShouldPinGameplayHudPresentation")]
 for block, label in ((capture, "capture"), (restore, "restore")):
     if "getMovieClip(hud, kHudClipNames[i], nullptr)" not in block:
         raise SystemExit(f"{label} does not acquire HUD children through GetMovieClip")
@@ -126,6 +169,8 @@ if freeze.count("std::strcmp(") != 2:
 enter = native[native.index("bool TryEnterCleanPause"):native.index("void HandleHiddenInput")]
 if enter.index("if (!blur::Disable())") > enter.index("g_cleanHidden.store(true"):
     raise SystemExit("DoF must be disabled before Clean Pause render ownership begins")
+if "const bool transactional" not in enter or "if (!transactional" not in enter:
+    raise SystemExit("vanilla Flash snapshot may be required only in non-transaction fallback mode")
 
 hidden = native[native.index("void HandleHiddenInput"):native.index("void __fastcall HookPostInputEvent")]
 b_start = hidden.index("if (key == KeyId::XiB)")
@@ -134,8 +179,18 @@ b_block = hidden[b_start:b_end]
 if "Forward(input, event, force);" in b_block:
     raise SystemExit("physical B must not leak to gameplay/dialog/cutscene")
 if "visible vanilla pause menu via B" not in b_block:
-    raise SystemExit("v0.1.0 B contract must reveal the vanilla pause menu")
+    raise SystemExit("B contract must reveal the vanilla pause menu")
+if b_block.index("g_hudMaskPinSuspended.store(true") > b_block.index("RestoreVanillaHudPresentation"):
+    raise SystemExit("B handoff must suspend all HUD repinning before vanilla restore")
 if b_block.index("RestoreBlurBestEffort") > b_block.index("g_cleanHidden.store(false"):
     raise SystemExit("B handoff must restore DoF before visible vanilla presentation")
+
+hud_update = native[native.index("void __fastcall HookHudUpdate"):native.index("bool EnsureHudUpdateHook")]
+if "g_hudMaskPinSuspended.load(std::memory_order_acquire)" not in hud_update:
+    raise SystemExit("periodic HUD fallback must honor transactional exit suspension")
+
+pending = native[native.index("bool PendingAttemptAlive"):native.index("bool TryEnterCleanPause")]
+if pending.index("RestoreVanillaHudPresentation") > pending.index("ResetHudSnapshots"):
+    raise SystemExit("pending-entry expiry must undo any pre-ownership visual pin before reset")
 
 print("stable native Clean Pause contract passed")
