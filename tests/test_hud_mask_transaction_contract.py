@@ -40,7 +40,7 @@ class HudMaskTransactionContractTests(unittest.TestCase):
         callback = NATIVE[NATIVE.index('void FailOpenHudMaskTransaction'):NATIVE.index('void FailOpenHudMaintenance')]
         reconcile = callback[callback.index('void ReconcileHudMaskMutation'):]
         self.assertIn('if (!CaptureVanillaHudFromInternalMask(vanillaState))', reconcile)
-        self.assertIn('FailOpenHudMaskTransaction(nullptr', reconcile)
+        self.assertIn('fallback.captured ? &fallback : nullptr', reconcile)
         self.assertIn('FailOpenHudMaskTransaction(&vanillaState', reconcile)
         self.assertLess(reconcile.index('CaptureVanillaHudFromInternalMask'), reconcile.index('RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot'))
 
