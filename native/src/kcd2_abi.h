@@ -80,6 +80,7 @@ inline constexpr std::size_t kFlashVariableGetDisplayInfoSlot = 26;
 inline constexpr std::size_t kFlashVariableSetVisibleSlot = 33;
 
 using PostInputEventFn = void(__fastcall*)(void*, const InputEvent*, bool);
+using ExecuteBufferFn = bool(__fastcall*)(void*, const char*, std::size_t, const char*, void*);
 using GetUIElementByInstanceStrFn = void*(__fastcall*)(void*, const char*);
 using UIElementUpdateFn = void(__fastcall*)(void*, float);
 using SetVisibleFn = void(__fastcall*)(void*, bool);
