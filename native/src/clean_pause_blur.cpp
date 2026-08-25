@@ -39,14 +39,14 @@ bool ExecuteLua(const char* code, const char* source)
 }
 
 constexpr const char* kDisableScript = R"lua(
-if not System or not System.GetCVarValue or not System.SetCVar then
+if not System or not System.GetCVar or not System.SetCVar then
     error("Clean Pause CVar API unavailable")
 end
 if __kcd2_clean_pause_blur_active then
     return
 end
-__kcd2_clean_pause_prev_near_dof = System.GetCVarValue("wh_cl_NearDof")
-__kcd2_clean_pause_prev_depth_of_field = System.GetCVarValue("r_DepthOfField")
+__kcd2_clean_pause_prev_near_dof = System.GetCVar("wh_cl_NearDof")
+__kcd2_clean_pause_prev_depth_of_field = System.GetCVar("r_DepthOfField")
 if __kcd2_clean_pause_prev_near_dof == nil or __kcd2_clean_pause_prev_depth_of_field == nil then
     error("Clean Pause DoF CVar unavailable")
 end
