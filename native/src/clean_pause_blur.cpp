@@ -85,9 +85,11 @@ bool Disable()
         return true;
 
     if (!ExecuteLua(kDisableScript, "@kcd2_clean_pause/disable_blur")) {
-        // The first SetCVar could have succeeded before a later Lua error. Restore
-        // best-effort before refusing Clean Pause so graphics never remain modified.
-        ExecuteLua(kRestoreScript, "@kcd2_clean_pause/disable_blur_rollback");
+        // A Lua error can happen after one SetCVar has already succeeded. Mark the
+        // graphics state dirty before rollback so a failed rollback remains retryable.
+        g_suppressed.store(true, std::memory_order_release);
+        if (ExecuteLua(kRestoreScript, "@kcd2_clean_pause/disable_blur_rollback"))
+            g_suppressed.store(false, std::memory_order_release);
         return false;
     }
 
