@@ -124,7 +124,9 @@ jobs:
           retention-days: 30
 
   publish:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -149,7 +151,49 @@ jobs:
           unzip -t "$VERSION_ASSET"
           [[ "$(unzip -Z1 "$ASI_ASSET" | sort)" == $'INSTALL.txt\nKCD2CleanPause.asi' ]]
           [[ "$(unzip -Z1 "$VERSION_ASSET" | sort)" == $'INSTALL.txt\nversion.dll' ]]
+      - name: Ensure immutable release tag
+        id: release_tag
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG already exists; leaving it unchanged."
+            exit 0
+          fi
+
+          remote_tag_sha="$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')"
+          if [[ -n "$remote_tag_sha" ]]; then
+            if [[ "$remote_tag_sha" == "$GITHUB_SHA" ]]; then
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+              echo "Tag $TAG already belongs to $remote_tag_sha; this main commit does not create another release for the same VERSION."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "Tag points to $remote_tag_sha, workflow commit is $GITHUB_SHA" >&2
+            exit 1
+          fi
+
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Release publication requires the matching tag or a main-branch release-preparation merge" >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
       - name: Publish GitHub Release
+        if: steps.release_tag.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.build.outputs.tag }}
@@ -159,12 +203,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; leaving it unchanged."
-            exit 0
-          fi
           remote_tag_sha="$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')"
-          [[ -n "$remote_tag_sha" ]] || { echo "Release publication requires an existing tag" >&2; exit 1; }
           [[ "$remote_tag_sha" == "$GITHUB_SHA" ]] || { echo "Tag points to $remote_tag_sha, workflow commit is $GITHUB_SHA" >&2; exit 1; }
           args=("$TAG" "release/$ASI_ASSET" "release/$VERSION_ASSET" "release/SHA256SUMS.txt" --title "KCD2 Clean Pause $TAG" --notes-file docs/RELEASE_NOTES.md --verify-tag)
           [[ "$PRERELEASE" == "true" ]] && args+=(--prerelease)
