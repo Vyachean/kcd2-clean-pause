@@ -1,170 +1,98 @@
-# Research notes
+# Historical research notes
 
-This document records retail observations and the KCD2 1.5.6 facts that constrain the implementation. For the active implementation plan, see [STATUS_AND_PLAN.md](STATUS_AND_PLAN.md).
+> **Status: historical evidence, not an implementation plan.** For current behavior and architecture use [README.md](../README.md), [STATUS_AND_PLAN.md](STATUS_AND_PLAN.md), and [DESIGN.md](DESIGN.md).
+
+This document summarizes the retail observations that led to the current KCD2 1.5.6 implementation. Older candidate names below are historical and must not be interpreted as the current `v0.2.0-rc.N` release sequence.
 
 ## Retail input/profile facts
 
-The exact Xbox Store 1.5.6 `defaultProfile.xml` uses two pause actions:
+The Xbox Store 1.5.6 `defaultProfile.xml` exposes separate Start routes for ordinary gameplay and dialogue/cutscene contexts, both ultimately bound to `xi_start`.
+
+Early `v0.1.0-rc.1` / `v0.1.0-rc.2` experiments showed that replacing or modifying those routes can remove normal pause entirely. The production architecture therefore leaves the retail action profile untouched.
+
+Permanent conclusions:
+
+- do not use action-map/profile replacement as the primary pause path;
+- do not call `ActionMapManager.InitActionMaps()` as part of Clean Pause;
+- do not rely on a supplemental runtime Start action for ownership.
+
+## v0.1.0-rc.3 — command chain diagnostic
+
+The historical F10 diagnostic proved that the PAK/Lua command chain could load and dispatch correctly. It also showed that the tested `Game.PauseGame` route was not a reliable production pause primitive on the target build.
+
+The useful result was diagnostic reachability, not a viable pause implementation.
+
+## v0.1.0-rc.4 — invalid native pause assumption
+
+A native prototype intercepted Escape/Start and attempted an inferred pause vfunc. Retail behavior showed gameplay remaining live while controls became unresponsive.
+
+The root cause was an invalid ABI assumption:
 
 ```text
-ordinary gameplay        open_menu/open_menu
-dialogue/cutscene/etc.   open_pause_menu/open_pause_menu
+SSystemGlobalEnvironment + 0x98 -> IGame*
 ```
 
-with retail Escape/keybind and Xbox `xi_start` bindings.
+The prototype treated that object as `IGameFramework*` and considered a non-crashing call to be successful without independently proving game pause state.
 
-`rc.1` and `rc.2` proved that modifying/replacing these vanilla routes can remove normal pause entirely. The active native architecture therefore leaves the retail profile untouched.
+Permanent conclusions:
 
-Permanent rules derived from those tests:
+- never infer pause success from a call merely returning;
+- never use an unproven `IGameFramework::PauseGame` signature as production ownership;
+- fail open rather than entering a mod-owned pseudo-pause state.
 
-- do not call `ActionMapManager.InitActionMaps()`;
-- do not rely on a supplemental runtime Start map as the primary mechanism;
-- do not make a complete `defaultProfile.xml` replacement part of the production architecture.
+## v0.1.0-rc.5 — simulation freeze is insufficient
 
-## rc.3 — command chain proven
+The next diagnostic established that a Lua-accessible pause/freeze route could stop world simulation but did **not** reproduce the complete vanilla KCD2 pause lifecycle. Audio/UI/subtitle behavior differed from real pause.
 
-`v0.1.0-rc.3` restored vanilla Escape/Start and used only a keyboard F10 diagnostic.
+This separated two concepts that had previously been conflated:
 
-Retail evidence proved:
+> freezing simulation is not the same as owning the vanilla pause lifecycle.
 
-1. the PAK loads;
-2. `Scripts/Mods/clean_pause.lua` executes;
-3. `System.AddCCommand` registration works;
-4. profile `consoleCMD` dispatch reaches the registered command;
-5. the tested `Game.PauseGame` binding is unavailable on the Xbox Store 1.5.6 runtime.
+That result permanently rejected custom Lua/native pause ownership for this mod.
 
-Therefore F10 doing nothing visually in rc.3 was not evidence of failed input dispatch.
+## Reusing vanilla pause ownership
 
-## rc.4 — invalid native ABI
+Later candidates changed direction: the real Escape/Start input was forwarded to KCD2 and the mod attempted to remove only the visible pause presentation.
 
-`v0.1.0-rc.4` intercepted Escape/Start before ActionMapManager and attempted a direct native pause call.
-
-Observed retail behavior:
-
-- Escape/Start reached the hook;
-- gameplay continued;
-- subsequent controls became unresponsive.
-
-The native log captured the critical sequence:
+One intermediate design used the `only_ui` action filter as ownership evidence. Retail work later showed that this was not a sufficient lifecycle signal. The accepted signal became:
 
 ```text
-IGameFramework::PauseGame(true, true, 0) invoked
-Running -> Clean Pause (pause input consumed before ActionMapManager)
+Menu@0::IsVisible()
 ```
 
-The implementation then repeatedly attempted the vanilla-menu handoff while retaining the false Clean Pause state.
+The accepted presentation architecture became:
 
-### Root cause 1 — gEnv +0x98 is IGame*
+- leave `Menu@0` logically visible;
+- suppress only `Menu@0::Render()` while Clean Pause is active;
+- let KCD2 remain the sole pause owner.
 
-Current KCD2 1.5.6 reverse engineering identifies:
+This is the foundation still used by the current production implementation.
 
-```cpp
-Offsets::IGame* pGame; // SSystemGlobalEnvironment + 0x98
-```
+## HUD/subtitle evidence
 
-KCD2's `IGame` vtable identifies:
+Retail testing showed that root `hud@0` visibility is not enough: KCD2 changes individual HUD child clips during pause.
 
-```text
-slot 12 -> GetLongName() -> "Kingdom Come: Deliverance"
-slot 13 -> GetName()     -> "kcd2"
-```
+Experiments then established the current safety rules:
 
-rc.4 treated `+0x98` as `IGameFramework*` and called slot 13 through a PauseGame-shaped function pointer. Under the Windows x64 calling convention, extra arguments did not necessarily cause an access violation, so `IGame::GetName()` could return normally and the mod falsely declared pause success.
+- the relevant main-HUD presentation is represented by 28 named child movie clips;
+- snapshots store visibility booleans, not raw movieclip pointers;
+- `IUIElement::GetMovieClip()` results are borrowed/call-local;
+- those results must never be retained across frames or destructively `Release()`d;
+- bounded presentation maintenance belongs on validated `hud@0::Update(float)`, not `Menu@0::Render()`.
 
-### Root cause 2 — no state confirmation
+Historical `rc7e`, `rc7f`, and `rc7g` evidence files record the pointer-lifetime/crash sequence that led to these rules.
 
-`SetNativePause()` treated "the call did not raise a structured exception" as success. It did not verify that KCD2 had actually entered a paused state.
+## Current extensions derived later
 
-The hook then set its own `g_cleanPaused=true` and swallowed gameplay/dialogue input. That exactly matches the retail symptom: the world remained live while controls appeared dead.
+After the initial `v0.1.0` stable architecture was proven, the `0.2.0` feature line added two bounded presentation features without changing pause ownership:
 
-### IGameFramework slot 13 remains unproven
+- exact DoF capture/suppression/restoration for a sharp Clean Pause frame;
+- preservation of live NPC overhead subtitle objects through the `C_UIHudBubbles` lifecycle.
 
-The current reverse-engineered KCD2 `IGameFramework` table marks slot 13 as corresponding to KCD1 `PauseGame`, but does not establish a callable KCD2 signature/semantic contract.
+These are documented in [DESIGN.md](DESIGN.md), not in the historical candidate plans.
 
-A KCD2 `I_UIMenu` callsite uses framework `+0x68` / slot 13 with KCD2-specific arguments and checks adjacent slot 14 with a `uint16_t` id. This is already enough to reject the stock CryEngine signature assumed by rc.4.
+## Reverse-engineering boundary
 
-The project must not call that slot as a production pause primitive without a separately established KCD2 contract.
+Public KCD2 reverse-engineering sources such as `JerryYOJ/libKCD2` were used as supporting evidence for interface layout and class relationships. Tentative annotations remain hints only; production contracts require either direct retail evidence or bounded runtime validation.
 
-## rc.5 — Lua pause diagnostic result
-
-`v0.1.0-rc.5` removed Start/Escape interception and used only a safe F10 diagnostic to probe the retail Lua pause route.
-
-Retail result established an important distinction:
-
-- a Lua pause binding can freeze world simulation;
-- it does **not** reproduce the complete vanilla KCD2 pause lifecycle required by Clean Pause;
-- audio/UI continue and subtitle lifetime is not retained correctly.
-
-Therefore the custom Lua pause route is rejected for production even though it can stop simulation.
-
-The useful conclusion from rc.5 is not "Lua pause does not work". It is:
-
-> simulation freeze alone is insufficient; Clean Pause needs the full vanilla pause lifecycle.
-
-## Current direction — reuse vanilla pause ownership
-
-The current candidate is `v0.1.0-rc.6`.
-
-It calls no explicit pause primitive. The first physical Escape/Start event is forwarded to KCD2, then the mod verifies vanilla pause ownership through the `only_ui` filter and hides only the visible pause-menu Flash element.
-
-This architecture is intended to inherit vanilla behavior for:
-
-- simulation;
-- dialogue/cutscene suspension;
-- audio;
-- pause counters/state;
-- resume/back handling;
-
-while removing only the visual obstruction.
-
-## Verified ABI facts used by rc.6
-
-Current KCD2 1.5.6 reverse-engineering support:
-
-```text
-SSystemGlobalEnvironment + 0x98   = IGame*
-SSystemGlobalEnvironment + 0x140  = IFlashUI*
-IGame slot 12                     = GetLongName()
-IGame slot 13                     = GetName()
-IFlashUI::GetUIElementByInstanceStr = slot 18
-IUIElement::SetVisible              = slot 28
-IUIElement::IsVisible               = slot 29
-```
-
-The raw input hook remains `IInput::PostInputEvent` before ActionMapManager.
-
-## Why `only_ui` is the ownership check
-
-The candidate does not treat a function call or pointer lookup as pause success. It forwards the real vanilla pause input and then requires the runtime state KCD2 normally establishes for the pause UI: `ActionMapManager.IsFilterEnabled("only_ui")`.
-
-Only after that state is observed may the mod hide the Menu and begin consuming unrelated input.
-
-This is the direct safety correction for rc.4.
-
-## Remaining retail questions for rc.6
-
-The next retail test must determine:
-
-1. whether first Escape/Start reaches full vanilla pause before the Menu is hidden;
-2. whether `Menu@0` is the complete visible obstruction on this retail build;
-3. whether hiding it can happen without an unacceptable visible flash;
-4. whether HUD/subtitle presentation remains visible during the underlying vanilla pause;
-5. whether the same subtitle remains indefinitely while paused;
-6. whether audio/dialogue/cutscene behavior matches normal vanilla pause;
-7. whether B can use vanilla Back to resume while the menu was hidden;
-8. whether second Escape/Start can reveal the already-open menu without an intermediate unpause;
-9. whether repeated transitions always fail open instead of leaving live gameplay with swallowed input.
-
-Compilation and CI cannot answer these questions. They can only verify Windows build/package integrity, structural ABI guards, ordering invariants, and absence of previously rejected pause primitives.
-
-## External reverse-engineering references
-
-The current KCD2 1.5.6 ABI facts are cross-checked against the public `JerryYOJ/libKCD2` reverse-engineering project, especially:
-
-- `include/crysystem/SSystemGlobalEnvironment.h`;
-- `include/Offsets/vtables/IGame.h`;
-- `include/Offsets/vtables/IGameFramework.h`;
-- `include/guimodule/I_UIMenu.h`;
-- `include/guimodule/C_UIMenu.h` / `src/guimodule/C_UIMenu.cpp`.
-
-Treat annotations explicitly marked tentative/unverified there as research hints, not production contracts.
+For the authoritative list of permanently rejected paths and current accepted rules, see [REJECTED_HYPOTHESES.md](REJECTED_HYPOTHESES.md).
