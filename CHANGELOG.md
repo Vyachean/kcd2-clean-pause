@@ -2,23 +2,20 @@
 
 ## v0.1.1-rc.3 — 2026-08-25
 
-Retail correction for the blur-free presentation candidate.
+Corrected blur-free presentation prerelease.
 
-- Fixes the Lua CVar getter from the nonexistent `System.GetCVarValue` call used by rc.2 to CryEngine's actual `System.GetCVar` API.
-- Keeps the rc.2 DoF design unchanged: save `wh_cl_NearDof` and `r_DepthOfField`, disable them only during Clean Pause, then restore the exact saved values before visible vanilla presentation.
-- rc.2 should not be used for testing: its invalid getter forced the DoF path to fail open to the ordinary visible pause menu.
+- Fixes the rc.2 Lua CVar getter from nonexistent `System.GetCVarValue` to CryEngine's actual `System.GetCVar` API.
+- Retail-confirmed on the primary Xbox Store KCD2 1.5.6 target that Xbox Start enters Clean Pause again and the retained frame is sharp with the pause DoF blur removed.
+- Keeps exact DoF-state restoration before returning to visible vanilla presentation; that restoration handoff remains to be explicitly observed before stable promotion.
+- Retains the dual ASI / standalone `version.dll` packaging and process-wide duplicate-load guard.
 
 ## v0.1.1-rc.2 — 2026-08-25
 
-Presentation/safety prerelease on top of the dual-package model.
+Superseded presentation/safety prerelease. Do not use for testing.
 
-- Makes Clean Pause presentation blur-free by temporarily disabling `wh_cl_NearDof` and `r_DepthOfField` only while the vanilla pause-menu surface is hidden.
-- Saves and restores the exact pre-Clean-Pause DoF values before returning to the visible vanilla pause menu or any fail-open path.
-- Refuses Clean Pause ownership if the DoF state cannot be captured/changed safely.
-- Adds retryable restoration if a transient Lua/CVar failure prevents immediate graphics restoration.
-- Adds a process-wide guard so accidental simultaneous ASI + `version.dll` installation cannot install duplicate Clean Pause hooks.
-- Keeps KCD2 as the sole pause owner; input, subtitle-preservation, and B-to-visible-menu behavior are unchanged.
-- Keeps both ASI and standalone `version.dll` release editions.
+- Attempted blur-free Clean Pause by temporarily disabling `wh_cl_NearDof` and `r_DepthOfField`.
+- Used nonexistent Lua API `System.GetCVarValue`, causing the DoF capability path to fail open to the ordinary visible pause menu on retail.
+- Added a process-wide guard so accidental simultaneous ASI + `version.dll` installation cannot install duplicate Clean Pause hooks.
 
 ## v0.1.1-rc.1 — 2026-08-25
 
