@@ -60,7 +60,8 @@ class BubbleContractTests(unittest.TestCase):
         ensure = ensure[: ensure.index("void __fastcall HookMenuRender")]
         self.assertIn("bubbles::EnsureHooks(hud, g_flashUI);", ensure)
 
-        pause = NATIVE[NATIVE.index("if (pressed) {"):]
+        post_input = NATIVE[NATIVE.index("void __fastcall HookPostInputEvent"):]
+        pause = post_input[post_input.index("if (pressed) {"):]
         pause = pause[: pause.index("if (released && PendingAttemptAlive())")]
         self.assertLess(pause.index("EnsureHudUpdateHook()"), pause.index("Forward(input, event, force);"))
         # Bubble discovery is explicitly best-effort: it is not part of the fail-open
