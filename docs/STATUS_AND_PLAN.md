@@ -4,7 +4,9 @@
 
 **v0.1.0 is the current stable release for KCD2 1.5.6 Windows retail**, primarily the PC Xbox Store / Xbox app build.
 
-**v0.1.1-rc.4** is the current development prerelease line. It retains the dual native packaging introduced in rc.1 and adds bounded presentation/safety improvements:
+**v0.2.0-rc.1** is the current development release candidate. It is the first release under the normalized SemVer policy and consolidates the feature work that was previously published incrementally as `v0.1.1-rc.1` through `v0.1.1-rc.4`.
+
+The `0.2.0` feature set adds:
 
 - `KCD2CleanPause.asi` for a shared ASI-loader installation;
 - standalone `version.dll` for the existing self-contained installation;
@@ -12,13 +14,24 @@
 - blur-free Clean Pause presentation with exact DoF-state restoration;
 - preservation of active NPC speech bubbles / overhead subtitles across the vanilla pause transition.
 
-rc.2 is superseded and must not be used for testing. Its blur controller called nonexistent Lua API `System.GetCVarValue`, so the DoF capability check failed and retail correctly fell open to the ordinary visible pause menu. rc.3 corrected this to CryEngine's actual `System.GetCVar` getter.
+The historical `v0.1.1-rc.1` through `v0.1.1-rc.4` tags remain immutable, but **no stable v0.1.1 is planned**. These are user-facing features and therefore belong to the next minor release, `v0.2.0`.
 
-The corrected rc.3 blur path is retail-confirmed on the primary Xbox Store 1.5.6 target: the first Xbox Start enters Clean Pause and the retained frame is sharp with the pause DoF blur removed. The rc.4 overhead-bubble path is also retail-confirmed: NPC overhead subtitles appear in Clean Pause together with the restored main HUD instead of disappearing during the pause transition.
+The blur-free entry path and overhead-subtitle preservation are retail-confirmed on the primary Xbox Store 1.5.6 target. Before stable `v0.2.0`, the ASI loading path still needs [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md), the DoF restoration handoff needs explicit retail confirmation, one longer post-resume bubble-lifetime observation remains useful, and one shared-loader coexistence case remains required.
 
-The standalone loading path is already retail-proven through v0.1.0. Before v0.1.1 stable, the ASI loading path still needs [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md), the DoF restoration handoff needs explicit retail confirmation, one longer post-resume bubble-lifetime observation remains useful, and one shared-loader coexistence case remains required.
+The production runtime is in `native/src/clean_pause_native.cpp`; both editions compile that same runtime plus the bounded blur and overhead-bubble controllers and differ only in bootstrap/loading.
 
-The production runtime is in `native/src/clean_pause_native.cpp`; both editions compile that same runtime plus the same bounded blur and overhead-bubble controllers and differ only in bootstrap/loading.
+## Versioning / release model
+
+The project now uses a conventional SemVer + Git tag flow:
+
+- unreleased merged work remains under `Unreleased`;
+- backward-compatible features before 1.0 bump MINOR (`0.1.0` -> `0.2.0`);
+- fixes bump PATCH (`0.2.0` -> `0.2.1`);
+- release candidates are numbered only for the same target release (`0.2.0-rc.1`, `0.2.0-rc.2`);
+- merges to `main` build and validate but do not publish a GitHub Release;
+- publication is triggered only by an immutable matching `v<VERSION>` tag.
+
+See [RELEASE.md](RELEASE.md).
 
 ## Product contract
 
@@ -40,22 +53,19 @@ Direct `Clean Pause -> B -> Running` is **not** part of the current contract. Re
 
 ## Retail-proven behavior
 
-On Xbox Store KCD2 1.5.6 using the standalone loading path, the v0.1.0 pause/HUD mechanism proved that:
+On Xbox Store KCD2 1.5.6 using the standalone loading path:
 
 - first Start enters a real vanilla-owned pause without drawing the pause menu;
 - world simulation stops;
 - audio pauses like the ordinary KCD2 pause;
 - dialogue subtitles can remain visible during Clean Pause;
+- the retained frame is sharp with vanilla pause DoF removed;
+- NPC overhead subtitles are preserved in Clean Pause together with the restored main HUD;
 - second Start reveals the already-open vanilla pause menu without an intermediate gameplay tick;
 - B from Clean Pause reveals the same vanilla pause menu;
-- the visible menu can then be closed normally;
-- the rc7e and rc7f crash regressions are not present in rc7g.
+- the visible menu can then be closed normally.
 
-The rc.2 retail attempt did not exercise blur suppression because its invalid Lua getter forced the designed visible-menu fail-open path.
-
-The rc.3 retail attempt confirmed the corrected blur entry path: Xbox Start enters Clean Pause and the retained frame is sharp with the vanilla pause DoF blur removed. That observation does not by itself claim that the subsequent visible-menu/gameplay DoF restoration handoff was tested in the same pass.
-
-The rc.4 retail attempt confirmed the overhead-bubble entry path: when NPC overhead subtitles are visible, they appear in Clean Pause together with the restored main UI instead of disappearing as they did before rc.4. A longer post-resume lifetime observation is still useful before treating bubble reconciliation as exhaustively covered.
+The earlier `v0.1.1-rc.2` attempt is superseded: its invalid Lua getter forced the designed visible-menu fail-open path. `v0.1.1-rc.3` corrected the getter, and `v0.1.1-rc.4` added the retail-confirmed overhead-bubble preservation now included in `v0.2.0-rc.1`.
 
 ## Dual-package architecture
 
@@ -107,14 +117,14 @@ Do not reintroduce without new direct retail evidence:
 - HUD child mutation from `Menu@0::Render()`;
 - inferred contiguous XInput key IDs.
 
-## Before v0.1.1 stable
+## Before v0.2.0 stable
 
-- publish v0.1.1-rc.4 in both package editions;
+- publish `v0.2.0-rc.1` from its exact tag;
 - confirm during normal play that an overhead line does not become permanently stuck after closing the vanilla pause menu / resuming gameplay;
 - confirm that second Start/B reveals the visible vanilla menu with normal DoF and that gameplay DoF remains unchanged after resume;
 - run the ASI retail-equivalence checklist on Xbox Store KCD2 1.5.6;
 - verify one shared-loader coexistence case with another real KCD2 ASI plugin;
-- if those checks pass, promote the dual-package model to v0.1.1 stable.
+- if those checks pass, prepare and tag stable `v0.2.0` without creating unnecessary additional RCs.
 
 ## Later work
 
