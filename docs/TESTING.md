@@ -52,6 +52,8 @@ Expected:
 
 The implementation temporarily disables `wh_cl_NearDof` and `r_DepthOfField` only while Clean Pause owns presentation. It must preserve the values that were active before entering Clean Pause.
 
+**Retail evidence:** v0.1.1-rc.3 is confirmed on the primary Xbox Store KCD2 1.5.6 target to enter Clean Pause from Xbox Start and retain a sharp, blur-free frame.
+
 ### 3. Reveal vanilla menu
 
 While Clean Paused, press Escape/Start again.
@@ -63,6 +65,8 @@ Expected:
 - vanilla pause appearance is otherwise untouched.
 
 Close it normally and confirm gameplay resumes with the same graphics behavior that existed before Clean Pause.
+
+The rc.3 restoration handoff still needs an explicit retail observation before stable promotion.
 
 ### 4. B behavior
 
@@ -102,4 +106,4 @@ When convenient, exercise repeated pause cycles, load transitions, Alt-Tab, and 
 
 ## CI
 
-Repository CI builds both x64 MSVC native images, validates standalone version-proxy exports, validates both images as x64/static-runtime builds, and runs `tools/validate_native_contract.py` plus the dual-package contract tests.
+Repository CI builds both x64 MSVC native images, validates standalone version-proxy exports, validates both images as x64/static-runtime builds, and runs `tools/validate_native_contract.py` plus the dual-package and blur-lifecycle contract tests.
