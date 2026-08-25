@@ -30,6 +30,27 @@ class HudMaskTransactionContractTests(unittest.TestCase):
         self.assertIn('g_vanillaPauseHudSnapshot = vanillaState;', callback)
         self.assertIn('g_gameplayHudSnapshot', callback)
 
+    def test_clean_pause_exit_suspends_mask_pin_before_vanilla_restore(self):
+        hidden = NATIVE[NATIVE.index('void HandleHiddenInput'):NATIVE.index('void __fastcall HookPostInputEvent')]
+        start = hidden[hidden.index('if (IsPauseKey(key))'):hidden.index('if (key == KeyId::XiB)')]
+        self.assertLess(start.index('g_hudMaskPinSuspended.store(true'), start.index('RestoreHudVisibilitySnapshot'))
+        self.assertLess(start.index('RestoreHudVisibilitySnapshot'), start.index('g_cleanHidden.store(false'))
+        self.assertLess(start.index('g_cleanHidden.store(false'), start.index('g_hudMaskPinSuspended.store(false'))
+
+        b_path = hidden[hidden.index('if (key == KeyId::XiB)'):]
+        self.assertLess(b_path.index('g_hudMaskPinSuspended.store(true'), b_path.index('RestoreHudVisibilitySnapshot'))
+        self.assertLess(b_path.index('RestoreHudVisibilitySnapshot'), b_path.index('g_cleanHidden.store(false'))
+        self.assertLess(b_path.index('g_cleanHidden.store(false'), b_path.index('g_hudMaskPinSuspended.store(false'))
+
+    def test_vanilla_snapshot_is_not_overwritten_after_clean_pause_entry(self):
+        callback = NATIVE[NATIVE.index('void ReconcileHudMaskMutation()'):NATIVE.index('void FailOpenHudMaintenance')]
+        self.assertIn('if (!g_cleanHidden.load(std::memory_order_acquire))', callback)
+        capture = callback.index('CaptureHudVisibilitySnapshot')
+        guard = callback.index('if (!g_cleanHidden.load(std::memory_order_acquire))')
+        restore = callback.index('RestoreHudVisibilitySnapshot')
+        self.assertLess(guard, capture)
+        self.assertLess(capture, restore)
+
     def test_entry_reuses_transactionally_captured_vanilla_state(self):
         entry = NATIVE[NATIVE.index('bool TryEnterCleanPause'):NATIVE.index('void HandleHiddenInput')]
         self.assertIn('!g_vanillaPauseHudSnapshot.captured', entry)

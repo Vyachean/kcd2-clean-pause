@@ -26,6 +26,7 @@ std::atomic_bool g_swallowPauseRelease{false};
 std::atomic_bool g_swallowResumeRelease{false};
 std::atomic_bool g_pendingPauseAttempt{false};
 std::atomic_ullong g_pendingDeadlineMs{0};
+std::atomic_bool g_hudMaskPinSuspended{false};
 
 HMODULE g_selfModule{};
 void* g_environment{};
@@ -569,6 +570,8 @@ bool RestoreHudVisibilitySnapshot(const HudVisibilitySnapshot& snapshot, const c
 
 bool ShouldPinGameplayHudPresentation()
 {
+    if (g_hudMaskPinSuspended.load(std::memory_order_acquire))
+        return false;
     if (!g_gameplayHudSnapshot.captured)
         return false;
     if (g_cleanHidden.load(std::memory_order_acquire))
@@ -591,12 +594,17 @@ void ReconcileHudMaskMutation()
     if (!OnValidatedMainThread("HUD mask transaction"))
         return;
 
-    HudVisibilitySnapshot vanillaState{};
-    if (!CaptureHudVisibilitySnapshot(vanillaState, "vanilla-mask-transaction")) {
-        Log("C_UIHudMask transaction could not capture vanilla HUD state; periodic fallback remains active");
-        return;
+    // Capture vanilla presentation only while the initial pause transition is pending.
+    // Once Clean Pause owns presentation, later HUD-mask callbacks must not overwrite
+    // the saved vanilla-pause state with the already-pinned gameplay presentation.
+    if (!g_cleanHidden.load(std::memory_order_acquire)) {
+        HudVisibilitySnapshot vanillaState{};
+        if (!CaptureHudVisibilitySnapshot(vanillaState, "vanilla-mask-transaction")) {
+            Log("C_UIHudMask transaction could not capture vanilla HUD state; periodic fallback remains active");
+            return;
+        }
+        g_vanillaPauseHudSnapshot = vanillaState;
     }
-    g_vanillaPauseHudSnapshot = vanillaState;
 
     if (!RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay-mask-transaction"))
         Log("C_UIHudMask transaction could not restore gameplay HUD before render; periodic fallback remains active");
@@ -802,6 +810,7 @@ void ClearHiddenState(const char* reason)
     g_swallowPauseRelease.store(false, std::memory_order_release);
     g_pendingPauseAttempt.store(false, std::memory_order_release);
     g_pendingDeadlineMs.store(0, std::memory_order_release);
+    g_hudMaskPinSuspended.store(false, std::memory_order_release);
     ResetHudSnapshots();
     if (reason)
         Log("Clean Pause ownership cleared: %s", reason);
@@ -901,6 +910,12 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
             return;
 
         if (pressed) {
+            // Stop the HUD-mask observer from re-pinning gameplay while the saved
+            // vanilla pause presentation is being restored. Keep Menu rendering
+            // suppressed until that restore is complete, then relinquish ownership.
+            g_hudMaskPinSuspended.store(true, std::memory_order_release);
+            g_pendingPauseAttempt.store(false, std::memory_order_release);
+            g_pendingDeadlineMs.store(0, std::memory_order_release);
             RestoreBlurBestEffort("show vanilla pause via Escape/Start");
             if (!RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu"))
                 Log("could not restore captured vanilla-pause HUD before showing Menu; continuing fail-open");
@@ -908,6 +923,7 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
             g_renderSuppressionObserved.store(false, std::memory_order_release);
             g_cleanHiddenSinceMs.store(0, std::memory_order_release);
             ResetHudSnapshots();
+            g_hudMaskPinSuspended.store(false, std::memory_order_release);
             g_swallowPauseRelease.store(true, std::memory_order_release);
             Log("Clean Pause -> visible vanilla pause menu (DoF restored; second Escape/Start consumed; Render restored)");
             return;
@@ -921,6 +937,9 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
         if (!pressed)
             return;
 
+        g_hudMaskPinSuspended.store(true, std::memory_order_release);
+        g_pendingPauseAttempt.store(false, std::memory_order_release);
+        g_pendingDeadlineMs.store(0, std::memory_order_release);
         RestoreBlurBestEffort("show vanilla pause via B");
         if (!RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu-via-B"))
             Log("could not restore captured vanilla-pause HUD before showing Menu via B; continuing fail-open");
@@ -931,6 +950,7 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
         g_pendingPauseAttempt.store(false, std::memory_order_release);
         g_pendingDeadlineMs.store(0, std::memory_order_release);
         ResetHudSnapshots();
+        g_hudMaskPinSuspended.store(false, std::memory_order_release);
         g_swallowResumeRelease.store(true, std::memory_order_release);
         Log("Clean Pause -> visible vanilla pause menu via B (DoF restored; v0.1.0 behavior)");
         return;
