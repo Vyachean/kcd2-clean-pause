@@ -37,13 +37,15 @@ This preserves a vanilla-owned pause while removing only the menu surface from t
 
 KCD2's pause can leave the root `hud@0` element visible while disabling its child clips. Reverse engineering and retail testing identified the relevant layer as 28 named HUD movie clips managed by KCD2's `C_UIHudMask`.
 
-Before forwarding pause input, the mod captures the current Flash visibility of those 28 clips as the gameplay presentation it wants to retain. The no-blink path then treats KCD2's internal `C_UIHudMask` state and Flash presentation as two deliberately separate layers:
+The root `hud@0` visibility is a separate state controlled by `wh_ui_ShowHud`; it is not represented by the 28 `I_UIHudMask` element values. Every HUD presentation snapshot therefore contains both the exact root visibility and the 28 child visibility booleans. Restore never forces the root visible: if the target root is hidden it is hidden before child replay, and if it must become visible the children are restored first and the root is revealed last.
+
+Before forwarding pause input, the mod captures the current Flash visibility of those 28 clips plus root visibility as the gameplay presentation it wants to retain. The no-blink path then treats KCD2's internal `C_UIHudMask` state and Flash presentation as two deliberately separate layers:
 
 1. the concrete `C_UIHudMask` listener is discovered from `hud@0` listener storage by MSVC RTTI, without a storefront-specific `WHGame.dll` RVA;
 2. the source-monitor callback and the verified HUD-refresh module message (`id 52`) are observed;
 3. vanilla runs first, so KCD2 updates its own authoritative source-derived pause state normally;
 4. before the callback returns to rendering, the mod restores only the saved gameplay Flash presentation;
-5. the authoritative current vanilla state is read from `I_UIHudMask::IsElementVisible` for all 28 elements and retained as a fallback snapshot;
+5. the authoritative current vanilla state is read from `I_UIHudMask::IsElementVisible` for all 28 elements, combined with current root `hud@0::IsVisible()`, and retained as a complete fallback snapshot;
 6. when Clean Pause presentation is relinquished, the mod reads the current internal mask again and restores that state to Flash before allowing `Menu@0` to render.
 
 The transaction therefore never reconstructs vanilla pause state by taking a whole-HUD Flash snapshot from the middle of an individual mask callback. KCD2 remains the sole owner of logical HUD visibility; Clean Pause temporarily owns only the visible Flash presentation.
@@ -52,7 +54,7 @@ The transaction therefore never reconstructs vanilla pause state by taking a who
 
 MinHook patches shared method bodies rather than one C++ object. The detours are therefore explicitly scoped to the concrete `C_UIHudMask` and source-monitor object identities discovered from the current `hud@0`; callbacks from any other instance are forwarded to vanilla but cannot drive Clean Pause reconciliation. Those identities are published before the mutation observer becomes active.
 
-A transactional Flash replay is allowed only after a fresh complete `I_UIHudMask` read succeeds. If the authoritative state cannot be read, the transaction fails open before changing Flash. If replaying the gameplay presentation fails part-way, the just-captured authoritative vanilla snapshot is restored before Menu rendering is released.
+A transactional Flash replay is allowed only after a fresh complete internal HUD read succeeds. If that fresh read fails after Clean Pause has already pinned gameplay presentation, the previous complete authoritative vanilla snapshot is used for fail-open before ownership is released. If no complete snapshot has ever been captured, the mod still relinquishes presentation rather than continuing with unverifiable state. If replaying the gameplay presentation fails part-way, the just-captured authoritative vanilla snapshot is restored before Menu rendering is released.
 
 ### Pending and maintenance behavior
 
@@ -70,7 +72,7 @@ If `C_UIHudMask` discovery or validation is unavailable before the transaction s
 - never retained across frames;
 - never `Release()`d by the mod.
 
-Snapshots contain booleans only.
+Snapshots contain booleans only (root visibility plus 28 child values).
 
 ### Dialogue-subtitle lifetime
 
@@ -91,7 +93,8 @@ The `0.2.0` feature line therefore preserves existing bubble objects rather than
 2. discovery uses no storefront-specific `WHGame.dll` RVA;
 3. the bubble freeze is armed before vanilla `Menu@0::SetVisible(true)` executes;
 4. only `I_UIHudBubbles::UpdateBubbles()` and `ReleaseBubble()` are suppressed while the vanilla menu is logically open;
-5. the freeze is removed after `Menu@0::SetVisible(false)` returns so KCD2 immediately regains normal ownership.
+5. because MinHook patches the shared class method body, those two detours suppress calls only when `this` is the exact `I_UIHudBubbles` object discovered from the current `hud@0`; unrelated instances always forward to vanilla;
+6. the freeze is removed after `Menu@0::SetVisible(false)` returns so KCD2 immediately regains normal ownership.
 
 Bubble discovery is optional/fail-open. If the concrete listener layout cannot be validated, the core Clean Pause path continues unchanged; only overhead-bubble preservation may be unavailable.
 
@@ -125,7 +128,7 @@ The user then resumes using normal vanilla menu controls.
 
 A visible vanilla pause menu is the safe fallback. If Menu/HUD/DoF state cannot be resolved or verified, the mod must relinquish Clean Pause presentation ownership rather than leave gameplay live with input swallowed.
 
-All presentation handoffs suspend the HUD transaction before restoring vanilla state. The preferred source is live `I_UIHudMask::IsElementVisible`; an authoritative internal-state fallback snapshot is retained during verified mask mutations in case a later live read unexpectedly fails. Only when transactional mask discovery was unavailable from the start does the compatibility path use the older Flash-captured vanilla snapshot.
+All presentation handoffs suspend the HUD transaction before restoring vanilla state. The preferred source is live `I_UIHudMask::IsElementVisible` plus root `hud@0::IsVisible()`; an authoritative complete fallback snapshot is retained during verified mask mutations in case a later live read unexpectedly fails. Only when transactional mask discovery was unavailable from the start does the compatibility path use the older Flash-captured vanilla snapshot.
 
 The transactional path is fail-closed with respect to presentation ownership: it never keeps gameplay HUD pinned when a fresh authoritative internal read required for reconciliation fails, and it never releases Menu rendering after a partial gameplay replay without first attempting to restore the authoritative vanilla snapshot. Terminal entry failures clear their snapshots so the pending attempt is not silently re-armed.
 
@@ -133,9 +136,11 @@ Any captured DoF override is restored best-effort before presentation is returne
 
 Overhead-bubble preservation is deliberately weaker than the core pause contract: bubble-discovery failure must not disable normal Clean Pause behavior.
 
-## Runtime identity
+## Runtime identity and compatibility evidence
 
-Native builds embed the repository `VERSION` and the configured short Git commit id in the runtime log. Retail evidence can therefore be tied to a specific binary instead of relying on a historical hard-coded version string.
+Native builds embed the repository `VERSION` and configured short Git commit id in the runtime log. They also log the loaded `WHGame.dll` PE `TimeDateStamp`, `SizeOfImage`, and `CheckSum`. Retail evidence can therefore be tied to a specific mod binary and can establish a concrete KCD2 1.5.6 executable fingerprint for a future strict compatibility gate.
+
+The current runtime still relies on validated KCD2 1.5.6 ABI/layout facts rather than an enforced executable fingerprint. Until a retail fingerprint has been captured and promoted into a gate, compatibility with later game builds must not be assumed.
 
 ## ABI boundary
 
@@ -163,6 +168,10 @@ Xbox Start/A/B                       -> 516 / 526 / 527
 ```
 
 These are interface/layout facts verified for KCD2 1.5.6, not fixed `WHGame.dll` function/global RVAs copied across storefront builds.
+
+## Third-party runtime dependency
+
+Both native editions statically link MinHook v1.3.4. The dependency is pinned to immutable commit `c3fcafdc10146beb5919319d0683e44e3c30d537`. Binary packages include `THIRD_PARTY_NOTICES.txt` containing the MinHook/HDE redistribution notices required by the upstream license.
 
 ## Rejected designs
 
