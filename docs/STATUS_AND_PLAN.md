@@ -14,9 +14,9 @@
 
 rc.2 is superseded and must not be used for testing. Its blur controller called nonexistent Lua API `System.GetCVarValue`, so the DoF capability check failed and retail correctly fell open to the ordinary visible pause menu. rc.3 corrected this to CryEngine's actual `System.GetCVar` getter.
 
-The corrected rc.3 blur path is retail-confirmed on the primary Xbox Store 1.5.6 target: the first Xbox Start enters Clean Pause and the retained frame is sharp with the pause DoF blur removed. rc.4 adds overhead-bubble preservation and requires one focused retail observation while an NPC overhead subtitle is currently visible.
+The corrected rc.3 blur path is retail-confirmed on the primary Xbox Store 1.5.6 target: the first Xbox Start enters Clean Pause and the retained frame is sharp with the pause DoF blur removed. The rc.4 overhead-bubble path is also retail-confirmed: NPC overhead subtitles appear in Clean Pause together with the restored main HUD instead of disappearing during the pause transition.
 
-The standalone loading path is already retail-proven through v0.1.0. Before v0.1.1 stable, the ASI loading path still needs [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md), the DoF restoration handoff needs explicit retail confirmation, the rc.4 overhead-bubble path needs retail confirmation, and one shared-loader coexistence case remains required.
+The standalone loading path is already retail-proven through v0.1.0. Before v0.1.1 stable, the ASI loading path still needs [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md), the DoF restoration handoff needs explicit retail confirmation, one longer post-resume bubble-lifetime observation remains useful, and one shared-loader coexistence case remains required.
 
 The production runtime is in `native/src/clean_pause_native.cpp`; both editions compile that same runtime plus the same bounded blur and overhead-bubble controllers and differ only in bootstrap/loading.
 
@@ -55,7 +55,7 @@ The rc.2 retail attempt did not exercise blur suppression because its invalid Lu
 
 The rc.3 retail attempt confirmed the corrected blur entry path: Xbox Start enters Clean Pause and the retained frame is sharp with the vanilla pause DoF blur removed. That observation does not by itself claim that the subsequent visible-menu/gameplay DoF restoration handoff was tested in the same pass.
 
-The rc.4 overhead-bubble path is not yet retail-confirmed. Static reverse-engineering evidence shows that `C_UIHudBubbles` owns separate bubble IDs / Flash objects underneath the root `Bubbles` HUD clip, explaining why the existing 28-child visibility snapshot cannot restore an overhead line once vanilla pause releases it.
+The rc.4 retail attempt confirmed the overhead-bubble entry path: when NPC overhead subtitles are visible, they appear in Clean Pause together with the restored main UI instead of disappearing as they did before rc.4. A longer post-resume lifetime observation is still useful before treating bubble reconciliation as exhaustively covered.
 
 ## Dual-package architecture
 
@@ -109,9 +109,8 @@ Do not reintroduce without new direct retail evidence:
 
 ## Before v0.1.1 stable
 
-- build v0.1.1-rc.4 in both package editions;
-- while an NPC overhead subtitle is visible, confirm first Start enters Clean Pause and that exact overhead line remains visible;
-- confirm the overhead line does not become permanently stuck after closing the vanilla pause menu / resuming gameplay;
+- publish v0.1.1-rc.4 in both package editions;
+- confirm during normal play that an overhead line does not become permanently stuck after closing the vanilla pause menu / resuming gameplay;
 - confirm that second Start/B reveals the visible vanilla menu with normal DoF and that gameplay DoF remains unchanged after resume;
 - run the ASI retail-equivalence checklist on Xbox Store KCD2 1.5.6;
 - verify one shared-loader coexistence case with another real KCD2 ASI plugin;
