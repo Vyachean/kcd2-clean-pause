@@ -14,7 +14,7 @@ The project follows Semantic Versioning with a conventional GitHub tag/release f
 - Merged work that has not been released is recorded under `Unreleased` in `CHANGELOG.md`.
 - Published tags and releases are immutable history: never move, recycle, or renumber them.
 
-The historical `v0.1.1-rc.1` through `v0.1.1-rc.4` releases predate this policy. They remain available so existing links are not broken, but no stable `v0.1.1` is planned. Their accumulated feature work targets `v0.2.0`.
+The historical `v0.1.1-rc.1` through `v0.1.1-rc.4` releases predate this policy. They remain available so existing links are not broken, but no stable `v0.1.1` is planned. Their accumulated feature work belongs to `v0.2.0`.
 
 ## Production source
 
@@ -42,7 +42,7 @@ Experimental Lua/profile material remains only as historical research and is not
 
 ## Pull-request and main-branch gates
 
-For release-affecting PRs and matching changes merged to `main`:
+For release-affecting PRs:
 
 1. repository Python tests run;
 2. `tools/validate_native_contract.py` enforces the current native safety/architecture contract;
@@ -50,9 +50,11 @@ For release-affecting PRs and matching changes merged to `main`:
 4. the standalone `version.dll` proxy exports are validated;
 5. both native images are verified as x64 and dynamic MSVC runtime dependencies are rejected;
 6. `.github/workflows/release.yml` produces the real release-shaped Actions artifact;
-7. **no GitHub Release is published from a PR, a normal `main` push, or manual workflow dispatch.**
+7. no GitHub Release or tag is created from the PR itself.
 
-This lets `main` advance normally without manufacturing a new public version for every merged change.
+For a matching release-preparation merge to `main`, the same gates run again. If `v<VERSION>` has not already been published, the workflow automatically creates the exact `v<VERSION>` tag on that `main` commit and publishes the corresponding GitHub Release. If that version already has a published immutable tag/release, later `main` commits with the same `VERSION` do not move or recreate it.
+
+This keeps ordinary development merges from manufacturing new versions: a public release still requires an intentional release-preparation change to `VERSION`, changelog, and release notes.
 
 ## Preparing a release
 
@@ -63,15 +65,15 @@ This lets `main` advance normally without manufacturing a new public version for
    - move the relevant `CHANGELOG.md` entries from `Unreleased` into that version;
    - update `docs/RELEASE_NOTES.md` for that version.
 4. Merge the release-preparation PR after CI is green.
-5. Create and push the exact tag `v<VERSION>` on that merge commit.
+5. No local Git operation is required: the successful `main` release workflow creates the immutable `v<VERSION>` tag and GitHub Release automatically when that version is not already published.
 
-The tag push is the publication event.
+A direct matching `v*` tag push remains supported, but it is not required for normal project operation.
 
 ## Publication
 
-On a matching `v*` tag, `.github/workflows/release.yml`:
+For an unpublished version on a qualifying `main` push, `.github/workflows/release.yml`:
 
-1. verifies that the tag exactly matches `VERSION`;
+1. validates that `VERSION` has the supported SemVer shape;
 2. reruns tests and native contract validation;
 3. builds both x64 native editions on Windows;
 4. packages exactly two ZIP assets:
@@ -89,22 +91,28 @@ kcd2-clean-pause-v<VERSION>-version-dll.zip
 5. writes one `SHA256SUMS.txt` covering both ZIPs;
 6. uploads the exact files as an Actions artifact;
 7. downloads and re-verifies checksums, ZIP integrity, and exact ZIP contents;
-8. verifies that the existing tag points at the workflow commit;
-9. creates the corresponding GitHub Release without moving or creating the tag.
+8. checks whether `v<VERSION>` already exists;
+9. if absent, creates `v<VERSION>` on the exact workflow commit and never moves an existing tag;
+10. verifies the remote tag points at the workflow commit;
+11. creates the corresponding GitHub Release with `--verify-tag`.
+
+On later `main` commits with the same already-published `VERSION`, publication exits without changing the tag or release. A matching explicit tag push is also accepted and must point at the workflow commit.
 
 A version containing `-alpha.N`, `-beta.N`, or `-rc.N` is published as a GitHub prerelease. A plain `X.Y.Z` version is published as stable.
 
 ## Edition policy
 
+The standalone `version.dll` edition is the supported `v0.2.0` loading path on the primary Xbox Store / Xbox app target.
+
 The ASI and standalone editions are mutually exclusive installations of the same runtime. They must not be installed together.
 
-- Prefer the ASI edition when the user already has a compatible ASI loader or another mod owns `version.dll`.
-- Keep the standalone `version.dll` edition for users who want a self-contained installation and have no conflicting `version.dll` mod.
+- Use the standalone `version.dll` edition for the supported, retail-tested path when no other mod owns `version.dll`.
+- The ASI edition is available for users who need a shared loader or already have another `version.dll` mod, but remains explicitly experimental until its loader/coexistence acceptance is completed.
 
-See [DUAL_PACKAGE.md](DUAL_PACKAGE.md) for the packaging contract.
+See [DUAL_PACKAGE.md](DUAL_PACKAGE.md) and [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md).
 
 ## Version support
 
 The runtime remains pinned to KCD2 **1.5.6** ABI facts verified during development. A future KCD2 update requires revalidation before claiming support; fixed offsets/semantics must not silently be assumed compatible.
 
-The standalone loading path is already retail-proven on the primary Xbox Store target. The ASI loading path requires its own retail acceptance before a stable release claims parity; see [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md).
+The standalone loading path is retail-proven on the primary Xbox Store target. The ASI loading path is not a blocker for stable standalone releases, but it must not be described as retail-equivalent until its dedicated acceptance passes.
