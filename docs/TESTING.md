@@ -29,7 +29,7 @@ Test exactly one Clean Pause edition at a time.
 5. Do not overwrite an existing `dinput8.dll` blindly; preserve one compatible loader for all ASI plugins.
 6. Optionally delete the old `kcd2_clean_pause_native.log` before testing.
 
-The two Clean Pause editions must never be loaded together.
+The two Clean Pause editions should not be installed together. A process-wide guard prevents duplicate hooks if both are accidentally present, but dual installation is not a supported configuration.
 
 ## Core smoke test
 
@@ -48,21 +48,31 @@ Expected:
 - audio pauses like ordinary KCD2 pause;
 - the pause menu itself is not drawn;
 - already-visible subtitle/HUD presentation remains visible where applicable;
-- vanilla pause depth-of-field blur is allowed.
+- the retained game frame is not covered by the vanilla pause depth-of-field blur.
+
+The implementation temporarily disables `wh_cl_NearDof` and `r_DepthOfField` only while Clean Pause owns presentation. It must preserve the values that were active before entering Clean Pause.
+
+**Retail evidence:** v0.1.1-rc.3 is confirmed on the primary Xbox Store KCD2 1.5.6 target to enter Clean Pause from Xbox Start and retain a sharp, blur-free frame.
 
 ### 3. Reveal vanilla menu
 
 While Clean Paused, press Escape/Start again.
 
-Expected: the already-open vanilla pause menu becomes visible with no intermediate gameplay tick.
+Expected:
 
-Close it normally and confirm gameplay resumes.
+- the already-open vanilla pause menu becomes visible with no intermediate gameplay tick;
+- the user's previous `wh_cl_NearDof` and `r_DepthOfField` values have been restored before normal menu presentation resumes;
+- vanilla pause appearance is otherwise untouched.
+
+Close it normally and confirm gameplay resumes with the same graphics behavior that existed before Clean Pause.
+
+The rc.3 restoration handoff still needs an explicit retail observation before stable promotion.
 
 ### 4. B behavior
 
 Enter Clean Pause again and press Xbox B.
 
-Expected under the current product contract: the ordinary vanilla pause menu becomes visible. B does not directly resume from Clean Pause.
+Expected under the current product contract: the ordinary vanilla pause menu becomes visible. B does not directly resume from Clean Pause. The pre-Clean-Pause DoF settings must be restored on this path too.
 
 Use normal KCD2 menu controls to resume.
 
@@ -72,10 +82,17 @@ If naturally available in the same session:
 
 - pause during a visible spoken subtitle;
 - confirm the current subtitle remains visible during Clean Pause;
+- confirm the retained frame is sharp rather than inheriting the vanilla pause blur;
 - confirm speech/audio/progression stop with the vanilla pause;
 - reveal the normal menu with Start or B, then resume normally.
 
 Do not create a separate game launch solely for a cutscene/subtitle edge case.
+
+## Failure-path check
+
+The blur suppression is part of the Clean Pause presentation contract, not an optional setting. If the runtime cannot safely access/save the DoF CVars, it must leave the ordinary visible vanilla pause menu rather than entering a partially working Clean Pause.
+
+Any later fail-open path must attempt to restore the saved DoF values before returning presentation to vanilla. A transient restore failure remains retryable on subsequent input.
 
 ## ASI edition acceptance
 
@@ -89,4 +106,4 @@ When convenient, exercise repeated pause cycles, load transitions, Alt-Tab, and 
 
 ## CI
 
-Repository CI builds both x64 MSVC native images, validates standalone version-proxy exports, validates both images as x64/static-runtime builds, and runs `tools/validate_native_contract.py` plus the dual-package contract tests.
+Repository CI builds both x64 MSVC native images, validates standalone version-proxy exports, validates both images as x64/static-runtime builds, and runs `tools/validate_native_contract.py` plus the dual-package and blur-lifecycle contract tests.

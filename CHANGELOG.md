@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.1.1-rc.3 — 2026-08-25
+
+Corrected blur-free presentation prerelease.
+
+- Fixes the rc.2 Lua CVar getter from nonexistent `System.GetCVarValue` to CryEngine's actual `System.GetCVar` API.
+- Retail-confirmed on the primary Xbox Store KCD2 1.5.6 target that Xbox Start enters Clean Pause again and the retained frame is sharp with the pause DoF blur removed.
+- Keeps exact DoF-state restoration before returning to visible vanilla presentation; that restoration handoff remains to be explicitly observed before stable promotion.
+- Retains the dual ASI / standalone `version.dll` packaging and process-wide duplicate-load guard.
+
+## v0.1.1-rc.2 — 2026-08-25
+
+Superseded presentation/safety prerelease. Do not use for testing.
+
+- Attempted blur-free Clean Pause by temporarily disabling `wh_cl_NearDof` and `r_DepthOfField`.
+- Used nonexistent Lua API `System.GetCVarValue`, causing the DoF capability path to fail open to the ordinary visible pause menu on retail.
+- Added a process-wide guard so accidental simultaneous ASI + `version.dll` installation cannot install duplicate Clean Pause hooks.
+
 ## v0.1.1-rc.1 — 2026-08-25
 
 Dual-package prerelease.

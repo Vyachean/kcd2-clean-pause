@@ -27,6 +27,8 @@ FetchContent_MakeAvailable(minhook)
 set(CLEAN_PAUSE_RUNTIME_SOURCES
   src/clean_pause_native.cpp
   src/clean_pause_native.h
+  src/clean_pause_blur.cpp
+  src/clean_pause_blur.h
   src/kcd2_abi.h
   src/process_guard.cpp
   src/process_guard.h
