@@ -63,11 +63,11 @@ class DualPackageContractTests(unittest.TestCase):
             RELEASE,
         )
         self.assertIn(
-            "ULTIMATE_ASI_LOADER_ASSET: Ultimate-ASI-Loader-NoPDB_x64.zip",
+            "ULTIMATE_ASI_LOADER_ASSET: Ultimate-ASI-Loader_x64.zip",
             RELEASE,
         )
         self.assertIn(
-            "ULTIMATE_ASI_LOADER_SHA256: e5860e7d9a1805267535b65749575b5e406cc6ea3325c7392189c578815045d1",
+            "ULTIMATE_ASI_LOADER_SHA256: 8272d83b2692662098746f2d0ad0e2d85f3c8358ab1d63f75fbe835c2c8135fd",
             RELEASE,
         )
         self.assertNotIn("releases/latest", RELEASE)
