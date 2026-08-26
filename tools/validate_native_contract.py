@@ -264,6 +264,8 @@ if pause_hook.index("g_originalPauseGame(") > pause_hook.index("g_pauseBarrierOb
     raise SystemExit("PauseGame barrier must be published only after vanilla PauseGame returns")
 if "g_pauseTransitionActive.store(true" not in pause_hook:
     raise SystemExit("HUD transaction must arm only when the verified vanilla PauseGame call begins")
+if "if (!g_originalPauseGame)" not in pause_hook:
+    raise SystemExit("PauseGame observer must fail open if its vanilla trampoline is unavailable")
 if "g_originalPauseGame(framework, pause, force, fadeOutInMs);" not in pause_hook:
     raise SystemExit("PauseGame observer must forward exact vanilla arguments unchanged")
 if "effectiveFadeOutInMs" in pause_hook:

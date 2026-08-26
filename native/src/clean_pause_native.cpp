@@ -1408,8 +1408,14 @@ void __fastcall HookPauseGame(
         g_pauseTransitionActive.store(true, std::memory_order_release);
 
     // KCD2 remains the sole pause owner and receives the exact vanilla arguments.
-    if (g_originalPauseGame)
-        g_originalPauseGame(framework, pause, force, fadeOutInMs);
+    // If the trampoline is unexpectedly unavailable, fail open rather than publishing
+    // a barrier for a pause call that never reached vanilla.
+    if (!g_originalPauseGame) {
+        if (observe)
+            g_pauseTransitionActive.store(false, std::memory_order_release);
+        return;
+    }
+    g_originalPauseGame(framework, pause, force, fadeOutInMs);
 
     if (!observe || !g_pendingPauseAttempt.load(std::memory_order_acquire)) {
         if (observe)

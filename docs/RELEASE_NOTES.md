@@ -1,36 +1,42 @@
-# KCD2 Clean Pause v0.2.0
+# KCD2 Clean Pause v0.2.1
 
-Stable feature release for **Kingdom Come: Deliverance II 1.5.6** on Windows.
+Stable patch release for **Kingdom Come: Deliverance II 1.5.6** on Windows.
 
-## Highlights since v0.1.0
+## What changed
 
-- Adds `KCD2CleanPause.asi` alongside the standalone `version.dll` build.
-- Adds a process-wide duplicate-load guard.
-- Removes the vanilla pause DoF blur from Clean Pause while preserving/restoring the user's prior `wh_cl_NearDof` and `r_DepthOfField` values.
-- Preserves normal dialogue subtitles across the vanilla-owned pause transition.
-- Preserves active NPC speech bubbles / overhead subtitles instead of losing them when vanilla pause updates the bubble system.
-- Keeps the accepted input contract: Escape/Start or Xbox B from Clean Pause reveals the already-open vanilla pause menu.
+- Fixes the visible pause-entry discontinuity from v0.2.0: Clean Pause no longer performs HUD presentation work throughout the physical Start press/release interval.
+- Arms HUD/subtitle preservation only around KCD2's verified vanilla `IGameFramework::PauseGame(true, ...)` call, so the retained frame and dialogue/audio pause together instead of producing a temporary frozen picture with continuing speech.
+- Prevents the pause HUD-mask transition from flashing a hidden-HUD frame while preserving KCD2 as the sole logical pause owner.
+- Uses KCD2's authoritative `C_UIHudMask` state for safe vanilla-menu handoff and fail-open recovery.
+- Preserves exact root `hud@0` visibility and scopes shared MinHook detours to the exact runtime HUD-mask / bubble instances.
+- Adds build identity and `WHGame.dll` fingerprint logging and strengthens packaging/license validation.
 
-## Support status
+## Retail acceptance
 
-### Standalone `version.dll` — supported
+The v0.2.1 ASI candidate was exercised on the primary Xbox Store / Xbox app KCD2 1.5.6 target with an Xbox controller and the upstream Ultimate ASI Loader. The accepted behavior includes:
 
-The standalone path is retail-proven on the primary Xbox Store / Xbox app KCD2 1.5.6 target. The latest retail observation confirms normal Clean Pause/menu/resume behavior after the NPC overhead-subtitle preservation change.
+- Start enters Clean Pause without the normal pause menu surface;
+- picture/simulation and ongoing dialogue audio pause together immediately;
+- gameplay HUD/subtitles remain retained without the previous transition blink;
+- the retained frame remains sharp without pause DoF blur;
+- second Start or Xbox B reveals the ordinary vanilla pause menu;
+- normal menu resume returns to gameplay correctly.
 
-### ASI edition — experimental
+Compatibility with arbitrary combinations of other ASI plugins is not claimed.
 
-`KCD2CleanPause.asi` is built and packaged from the same runtime, but the ASI loading path and coexistence with another real ASI plugin have not been exercised in retail. It is included for users who need a shared-loader alternative, but it is not yet claimed as a supported edition.
+## Published package
 
-## Packages
+- `kcd2-clean-pause-v0.2.1-asi.zip` — supported ASI edition; requires a compatible x64 ASI loader such as the upstream Ultimate ASI Loader `dinput8.dll` build.
+- `SHA256SUMS.txt` — checksum for the published ASI package.
 
-- `kcd2-clean-pause-v0.2.0-version-dll.zip` — supported standalone edition.
-- `kcd2-clean-pause-v0.2.0-asi.zip` — experimental ASI edition; requires a compatible x64 ASI loader.
-- `SHA256SUMS.txt` — checksums for both packages.
+Do not intentionally install multiple Clean Pause editions at once.
 
-Do not intentionally install both Clean Pause editions together.
+## Standalone version.dll status
+
+A v0.2.1 standalone `version.dll` is **not published**. Microsoft Defender flagged an earlier PR #34 standalone candidate as `Trojan:Win32/Wacatac.C!ml`; build provenance and static imports are consistent with a likely native-hooking false positive, but issue #38 remains unresolved. The standalone target continues to build and validate in CI, including all 17 proxy exports, but the project does not ask users to whitelist it and does not distribute the new standalone binary until that investigation is resolved.
+
+The older v0.2.0 standalone release remains immutable history, but it does not contain the v0.2.1 pause-transition fix.
 
 ## Compatibility / safety
 
-Runtime compatibility is currently claimed for KCD2 **1.5.6** only.
-
-The implementation intentionally avoids custom/inferred `PauseGame` ownership, action-map replacement, fixed storefront-specific `WHGame.dll` RVAs, long-lived Flash movieclip pointers, destructive `Release()` calls on borrowed movieclip handles, and synthetic B-resume replay. Failure paths prefer ordinary visible vanilla pause behavior.
+Runtime compatibility is claimed for KCD2 **1.5.6** only. KCD2 remains the sole pause owner; the mod observes the verified vanilla pause lifecycle and changes presentation only. Failure paths prefer an ordinary visible vanilla pause menu.

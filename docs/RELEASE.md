@@ -1,118 +1,81 @@
 # Release pipeline
 
-GitHub Releases are the canonical distribution channel. Generated native binaries/ZIP files are not committed.
+GitHub Releases are the canonical public distribution channel. Generated native binaries/ZIP files are not committed.
 
 ## Versioning policy
 
-The project follows Semantic Versioning with a conventional GitHub tag/release flow.
+The project follows Semantic Versioning with immutable tag-backed releases.
 
-- Stable releases use `vMAJOR.MINOR.PATCH`, for example `v0.2.0`.
-- Prereleases use the target version plus a standard identifier, normally `v0.2.0-rc.1`.
-- Before `1.0.0`, backward-compatible user-facing features increment **MINOR** (`0.1.0` -> `0.2.0`).
-- Backward-compatible fixes increment **PATCH** (`0.2.0` -> `0.2.1`).
-- A release candidate number increments only when another candidate for the **same target release** is needed (`0.2.0-rc.1` -> `0.2.0-rc.2`). It is not incremented for every merged PR.
-- Merged work that has not been released is recorded under `Unreleased` in `CHANGELOG.md`.
-- Published tags and releases are immutable history: never move, recycle, or renumber them.
-
-The historical `v0.1.1-rc.1` through `v0.1.1-rc.4` releases predate this policy. They remain available so existing links are not broken, but no stable `v0.1.1` is planned. Their accumulated feature work belongs to `v0.2.0`.
+- Stable releases use `vMAJOR.MINOR.PATCH`.
+- Prereleases use `vMAJOR.MINOR.PATCH-rc.N` (or `alpha` / `beta` where appropriate).
+- Before 1.0, backward-compatible features increment **MINOR**; backward-compatible fixes increment **PATCH**.
+- A release candidate number increments only when another candidate for the same target release is needed. It is not incremented for every merged PR.
+- Published tags/releases are immutable and are never moved or recycled.
 
 ## Production source
 
-Both editions compile the same Clean Pause runtime from `native/src/clean_pause_native.cpp`.
-
-The edition-specific bootstrap files are:
-
-```text
-ASI edition
-  native/src/asi_entry.cpp
-
-Standalone edition
-  native/src/version_proxy.cpp
-  native/src/version.def
-```
-
-Installation text is also edition-specific:
-
-```text
-native/INSTALL_ASI.txt
-native/INSTALL_VERSION_DLL.txt
-```
-
-Experimental Lua/profile material remains only as historical research and is not packaged.
+Both native editions compile the same Clean Pause runtime. Edition-specific bootstrap files are `native/src/asi_entry.cpp` and `native/src/version_proxy.cpp` / `native/src/version.def`.
 
 ## Pull-request and main-branch gates
 
-For release-affecting PRs:
+Release-affecting changes must pass:
 
-1. repository Python tests run;
-2. `tools/validate_native_contract.py` enforces the current native safety/architecture contract;
-3. Windows MSVC builds both x64 Release targets;
-4. the standalone `version.dll` proxy exports are validated;
-5. both native images are verified as x64 and dynamic MSVC runtime dependencies are rejected;
-6. `.github/workflows/release.yml` produces the real release-shaped Actions artifact;
-7. no GitHub Release or tag is created from the PR itself.
+1. repository Python tests;
+2. `tools/validate_native_contract.py`;
+3. x64 MSVC builds of both native targets;
+4. complete standalone proxy-export validation;
+5. x64/static-runtime checks for both images;
+6. release-shaped ZIP construction and integrity checks.
 
-For a matching release-preparation merge to `main`, the same gates run again. If `v<VERSION>` has not already been published, the workflow automatically creates the exact `v<VERSION>` tag on that `main` commit and publishes the corresponding GitHub Release. If that version already has a published immutable tag/release, later `main` commits with the same `VERSION` do not move or recreate it.
-
-This keeps ordinary development merges from manufacturing new versions: a public release still requires an intentional release-preparation change to `VERSION`, changelog, and release notes.
+A PR never publishes a GitHub Release. A release-preparation merge to `main` with a new `VERSION` reruns the same gates, creates the immutable matching tag if absent, and publishes only the edition assets currently approved for public distribution.
 
 ## Preparing a release
 
-1. Decide the next SemVer target from the changes since the previous stable release.
-2. If external validation is still required, use `X.Y.Z-rc.N`; otherwise use stable `X.Y.Z`.
-3. In a release-preparation PR:
-   - set `VERSION` to the exact target version;
-   - move the relevant `CHANGELOG.md` entries from `Unreleased` into that version;
-   - update `docs/RELEASE_NOTES.md` for that version.
-4. Merge the release-preparation PR after CI is green.
-5. No local Git operation is required: the successful `main` release workflow creates the immutable `v<VERSION>` tag and GitHub Release automatically when that version is not already published.
+1. Choose the next SemVer version.
+2. Set `VERSION`.
+3. Move `CHANGELOG.md` entries from `Unreleased` to the target version.
+4. Update `docs/RELEASE_NOTES.md` and current support/distribution documentation.
+5. Merge only after release-shaped CI is green.
+6. The successful main workflow automatically creates the exact `v<VERSION>` tag and GitHub Release.
 
-A direct matching `v*` tag push remains supported, but it is not required for normal project operation.
+## Edition-gated publication
 
-## Publication
+Build validation and public distribution are separate concerns. Both native targets remain continuously built so shared-runtime and proxy regressions are caught even if one edition has a temporary distribution blocker.
 
-For an unpublished version on a qualifying `main` push, `.github/workflows/release.yml`:
+For **v0.2.1**:
 
-1. validates that `VERSION` has the supported SemVer shape;
-2. reruns tests and native contract validation;
-3. builds both x64 native editions on Windows;
-4. packages exactly two ZIP assets:
+- `KCD2CleanPause.asi` is the retail-accepted public edition;
+- `version.dll` is still built, packaged and verified in Actions CI but is not attached to the public release while Defender investigation #38 remains unresolved;
+- `SHA256SUMS.txt` covers only public release assets;
+- `CI_SHA256SUMS.txt` covers both internally validated ZIPs and remains an Actions artifact rather than a public release asset.
 
-```text
-kcd2-clean-pause-v<VERSION>-asi.zip
-  KCD2CleanPause.asi
-  INSTALL.txt
+When #38 is resolved, standalone publication can be restored in a later release without changing the shared runtime architecture.
 
-kcd2-clean-pause-v<VERSION>-version-dll.zip
-  version.dll
-  INSTALL.txt
-```
+## Publication flow
 
-5. writes one `SHA256SUMS.txt` covering both ZIPs;
-6. uploads the exact files as an Actions artifact;
-7. downloads and re-verifies checksums, ZIP integrity, and exact ZIP contents;
-8. checks whether `v<VERSION>` already exists;
-9. if absent, creates `v<VERSION>` on the exact workflow commit and never moves an existing tag;
-10. verifies the remote tag points at the workflow commit;
-11. creates the corresponding GitHub Release with `--verify-tag`.
+For an unpublished version on a qualifying main push, `.github/workflows/release.yml`:
 
-On later `main` commits with the same already-published `VERSION`, publication exits without changing the tag or release. A matching explicit tag push is also accepted and must point at the workflow commit.
+1. validates `VERSION`;
+2. reruns tests/native contract validation;
+3. builds both x64 editions;
+4. validates the complete 17-export standalone proxy surface and both PE/runtime properties;
+5. constructs both edition ZIPs for CI validation;
+6. writes internal checksums for both and public checksums for approved assets;
+7. downloads and re-verifies all CI packages before publication;
+8. creates the immutable matching tag on the exact workflow commit if absent;
+9. creates the GitHub Release with only approved public assets and `--verify-tag`.
 
-A version containing `-alpha.N`, `-beta.N`, or `-rc.N` is published as a GitHub prerelease. A plain `X.Y.Z` version is published as stable.
+## Current edition policy
 
-## Edition policy
+The ASI and standalone editions are mutually exclusive installations of the same runtime.
 
-The standalone `version.dll` edition is the supported `v0.2.0` loading path on the primary Xbox Store / Xbox app target.
+- **v0.2.1 ASI:** supported on the retail-tested KCD2 1.5.6 + upstream Ultimate ASI Loader path.
+- **v0.2.1 standalone:** not publicly distributed until #38 is resolved.
+- **v0.2.0 standalone:** remains immutable historical release and was retail-proven for that version, but does not include the v0.2.1 transition fix.
 
-The ASI and standalone editions are mutually exclusive installations of the same runtime. They must not be installed together.
-
-- Use the standalone `version.dll` edition for the supported, retail-tested path when no other mod owns `version.dll`.
-- The ASI edition is available for users who need a shared loader or already have another `version.dll` mod, but remains explicitly experimental until its loader/coexistence acceptance is completed.
-
-See [DUAL_PACKAGE.md](DUAL_PACKAGE.md) and [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md).
+Support does not imply universal coexistence with every other native plugin.
 
 ## Version support
 
-The runtime remains pinned to KCD2 **1.5.6** ABI facts verified during development. A future KCD2 update requires revalidation before claiming support; fixed offsets/semantics must not silently be assumed compatible.
+Runtime compatibility is pinned to KCD2 **1.5.6** ABI facts. A future game update requires revalidation before support is claimed.
 
-The standalone loading path is retail-proven on the primary Xbox Store target. The ASI loading path is not a blocker for stable standalone releases, but it must not be described as retail-equivalent until its dedicated acceptance passes.

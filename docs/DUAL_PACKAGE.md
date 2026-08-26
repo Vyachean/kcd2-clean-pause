@@ -1,67 +1,42 @@
 # Dual native packages
 
-Starting with the `0.2.0` release line, KCD2 Clean Pause ships the same native runtime in two mutually exclusive editions.
-
-The initial stable `v0.1.0` predates this package model and contains only the standalone `version.dll` edition.
+KCD2 Clean Pause builds the same native runtime in two mutually exclusive editions.
 
 ## ASI edition
 
-Release asset:
-
 ```text
 kcd2-clean-pause-v<VERSION>-asi.zip
+  KCD2CleanPause.asi
+  INSTALL.txt
+  THIRD_PARTY_NOTICES.txt
 ```
 
-Contents:
-
-```text
-KCD2CleanPause.asi
-INSTALL.txt
-```
-
-This edition requires a compatible x64 ASI loader, normally installed as `dinput8.dll` beside the KCD2 executable / `WHGame.dll`.
-
-Use this edition when another mod already owns `version.dll`, or when the user already has a shared ASI loader for other plugins.
+Requires a compatible x64 ASI loader, normally installed as `dinput8.dll` beside the KCD2 executable / `WHGame.dll`.
 
 ## Standalone version.dll edition
 
-Release asset:
-
 ```text
 kcd2-clean-pause-v<VERSION>-version-dll.zip
+  version.dll
+  INSTALL.txt
+  THIRD_PARTY_NOTICES.txt
 ```
 
-Contents:
-
-```text
-version.dll
-INSTALL.txt
-```
-
-This edition includes its own Windows `version.dll` proxy bootstrap and requires no separate ASI loader.
-
-Do not use it when another mod already installs an unrelated `version.dll` beside the game executable.
+The standalone target includes the Windows `version.dll` proxy and requires no separate ASI loader.
 
 ## Runtime identity
 
-Both editions compile the same Clean Pause runtime source set. The only intended difference is bootstrap/loading:
+Both targets compile the same runtime source set; only bootstrap/loading differs. A process-wide guard prevents accidental duplicate hook installation, but intentional dual installation is unsupported.
 
-```text
-ASI loader -> KCD2CleanPause.asi -> clean_pause::Start()
+## Build vs publication contract
 
-KCD2 -> version.dll proxy -> clean_pause::Start()
-```
+CI always builds and validates **both** editions:
 
-The editions are mutually exclusive installations. If both are accidentally loaded, the process-wide guard allows only one copy to install Clean Pause hooks; the second module skips runtime startup. This guard is a safety net, not support for intentional dual installation.
+- both images must exist, target x64 and avoid dynamic MSVC runtime dependencies;
+- standalone must export the complete required 17-function Windows version API surface;
+- each ZIP must contain the expected binary, install text and third-party notices;
+- internal Actions checksums cover both packages.
 
-## Release contract
+Public release assets are edition-gated. For **v0.2.1**, only the ASI ZIP is published because Defender investigation #38 blocks distribution of the new standalone binary. The standalone ZIP remains a CI-only validation artifact until that issue is resolved.
 
-Every `0.2.0`-line and later release must publish both ZIPs plus one `SHA256SUMS.txt` covering both assets. CI verifies:
-
-- both native images exist and target x64;
-- neither image depends on the dynamic MSVC runtime;
-- the standalone image still exports the required Windows version APIs;
-- the ASI ZIP contains exactly `KCD2CleanPause.asi` and `INSTALL.txt`;
-- the standalone ZIP contains exactly `version.dll` and `INSTALL.txt`.
-
-The ASI loading path has an additional retail acceptance gate before stable `v0.2.0`; see [ASI_RETAIL_ACCEPTANCE.md](ASI_RETAIL_ACCEPTANCE.md).
+Do not obtain/whitelist an unofficial standalone build to bypass that gate.

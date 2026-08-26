@@ -28,6 +28,7 @@ class PauseBarrierContractTests(unittest.TestCase):
         hook = NATIVE[NATIVE.index("void __fastcall HookPauseGame"):NATIVE.index("bool InstallPauseBarrierHook")]
         self.assertIn("framework == g_gameFramework", hook)
         self.assertIn("g_pendingPauseAttempt.load", hook)
+        self.assertIn("if (!g_originalPauseGame)", hook)
         self.assertIn("g_pauseTransitionActive.store(true", hook)
         self.assertIn("g_originalPauseGame(framework, pause, force, fadeOutInMs);", hook)
         self.assertNotIn("effectiveFadeOutInMs", hook)

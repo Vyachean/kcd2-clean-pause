@@ -38,14 +38,18 @@ class DualPackageContractTests(unittest.TestCase):
         self.assertIn("ERROR_ALREADY_EXISTS", PROCESS_GUARD)
         self.assertIn("CloseHandle(guard);", PROCESS_GUARD)
 
-    def test_release_publishes_two_mutually_exclusive_assets(self):
+    def test_release_validates_both_editions_but_publishes_only_allowed_assets(self):
         self.assertIn("KCD2CleanPause.asi", RELEASE)
         self.assertIn("version.dll", RELEASE)
         self.assertIn("-asi.zip", RELEASE)
         self.assertIn("-version-dll.zip", RELEASE)
         self.assertIn("INSTALL_ASI.txt", RELEASE)
         self.assertIn("INSTALL_VERSION_DLL.txt", RELEASE)
+        self.assertIn("CI_SHA256SUMS.txt", RELEASE)
         self.assertIn("SHA256SUMS.txt", RELEASE)
+        publish = RELEASE[RELEASE.index("- name: Publish GitHub Release") :]
+        self.assertIn('"release/$ASI_ASSET" "release/SHA256SUMS.txt"', publish)
+        self.assertNotIn("VERSION_ASSET", publish)
         self.assertGreaterEqual(RELEASE.count("THIRD_PARTY_NOTICES.txt"), 5)
         self.assertIn("MinHook v1.3.4", NOTICES)
         self.assertIn("Copyright (C) 2009-2017 Tsuda Kageyu.", NOTICES)
