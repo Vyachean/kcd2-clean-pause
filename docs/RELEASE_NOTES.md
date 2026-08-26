@@ -29,6 +29,8 @@ Compatibility with arbitrary combinations of other ASI plugins is not claimed.
 - `kcd2-clean-pause-v0.2.1-asi.zip` — supported ASI edition; requires a compatible x64 ASI loader such as the upstream Ultimate ASI Loader `dinput8.dll` build.
 - `SHA256SUMS.txt` — checksum for the published ASI package.
 
+The public v0.2.1 release intentionally contains no standalone `version.dll` asset while issue #38 remains open.
+
 Do not intentionally install multiple Clean Pause editions at once.
 
 ## Standalone version.dll status
