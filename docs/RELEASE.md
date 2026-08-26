@@ -38,6 +38,8 @@ A PR never publishes a GitHub Release. A release-preparation merge to `main` wit
 5. Merge only after release-shaped CI is green.
 6. The successful main workflow automatically creates the exact `v<VERSION>` tag and GitHub Release.
 
+If a qualifying `push` event is intentionally unavailable or suppressed by the caller, `workflow_dispatch` on the `main` branch is the supported recovery path. It executes the same build/verification/tag/publication jobs; dispatches from non-main refs cannot publish.
+
 ## Edition-gated publication
 
 Build validation and public distribution are separate concerns. Both native targets remain continuously built so shared-runtime and proxy regressions are caught even if one edition has a temporary distribution blocker.
@@ -53,7 +55,7 @@ When #38 is resolved, standalone publication can be restored in a later release 
 
 ## Publication flow
 
-For an unpublished version on a qualifying main push, `.github/workflows/release.yml`:
+For an unpublished version on a qualifying main push or a manual dispatch from `main`, `.github/workflows/release.yml`:
 
 1. validates `VERSION`;
 2. reruns tests/native contract validation;
@@ -78,4 +80,3 @@ Support does not imply universal coexistence with every other native plugin.
 ## Version support
 
 Runtime compatibility is pinned to KCD2 **1.5.6** ABI facts. A future game update requires revalidation before support is claimed.
-
