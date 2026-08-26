@@ -1,19 +1,17 @@
 KCD2 Clean Pause — ASI installation
 
-Requires: Ultimate ASI Loader x64
-Official project: https://github.com/ThirteenAG/Ultimate-ASI-Loader
+This package includes the retail-tested x64 Ultimate ASI Loader dinput8.dll from the official ThirteenAG release. See ASI_LOADER_SOURCE.txt for the pinned upstream version, source commit and SHA-256 provenance, and ULTIMATE_ASI_LOADER_LICENSE.txt for its MIT license.
 
 1. Close Kingdom Come: Deliverance II.
-2. Download the x64 dinput8 build of Ultimate ASI Loader from its official releases.
-3. Place the loader as dinput8.dll beside the KCD2 executable / WHGame.dll.
-4. Copy KCD2CleanPause.asi from this package into the same directory.
-5. Start the game normally.
+2. If you do not already have a compatible ASI loader installed, copy both dinput8.dll and KCD2CleanPause.asi from this package beside the KCD2 executable / WHGame.dll.
+3. If a compatible dinput8.dll ASI loader is already installed for another mod, keep the existing loader and copy only KCD2CleanPause.asi. Do not overwrite an existing dinput8.dll blindly.
+4. Start the game normally.
 
 Do not install this ASI package together with the standalone Clean Pause version.dll package. They contain the same mod and would load it twice.
 
-Multiple ASI mods may share one compatible ASI loader. Do not overwrite an existing dinput8.dll blindly; if a compatible ASI loader is already installed, keep that one and add only KCD2CleanPause.asi.
+Multiple ASI mods may share one compatible ASI loader. The bundled loader is provided for a complete first-install package; it does not imply universal coexistence with every native plugin.
 
-Ultimate ASI Loader also supports ASI files in scripts/ or plugins/, but the initial KCD2 Clean Pause release uses the game-root layout above because that is the simplest acceptance baseline.
+Ultimate ASI Loader also supports ASI files in scripts/ or plugins/, but KCD2 Clean Pause uses the game-root layout above because that is the retail-accepted baseline.
 
 The mod writes kcd2_clean_pause_native.log beside KCD2CleanPause.asi.
 
