@@ -22,7 +22,15 @@ jobs:
         with:
           python-version: "3.12"
       - name: Apply guarded release preparation
-        run: python tools/_release_prep_v021.py
+        shell: pwsh
+        run: |
+          python tools/_release_prep_v021.py
+          $path = "docs/RELEASE.md"
+          $text = Get-Content $path -Raw
+          $text = $text.Replace('- Before 1.0, backward-compatible features increment MINOR; backward-compatible fixes increment PATCH.', '- Before 1.0, backward-compatible features increment **MINOR**; backward-compatible fixes increment **PATCH**.')
+          $text = $text.Replace('- Published tags/releases are immutable and are never moved or recycled.', '- A release candidate number increments only when another candidate for the same target release is needed. It is not incremented for every merged PR.`n- Published tags/releases are immutable and are never moved or recycled.')
+          $text = $text.Replace('6. The successful main workflow creates the matching immutable tag and GitHub Release automatically.', '6. The successful main workflow automatically creates the exact `v<VERSION>` tag and GitHub Release.')
+          Set-Content $path $text -Encoding utf8
       - name: Run repository tests
         run: python -m unittest discover -s tests -v
       - name: Validate native architecture contract
