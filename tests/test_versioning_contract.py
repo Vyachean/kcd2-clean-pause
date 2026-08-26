@@ -14,8 +14,9 @@ class VersioningContractTests(unittest.TestCase):
         pattern = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.[1-9][0-9]*)?$"
         self.assertRegex(VERSION, pattern)
 
-    def test_release_publication_is_tag_backed_and_automatic_on_main(self):
+    def test_release_publication_is_tag_backed_and_available_from_main(self):
         self.assertIn("github.event_name == 'push'", RELEASE)
+        self.assertIn("github.event_name == 'workflow_dispatch'", RELEASE)
         self.assertIn("github.ref == 'refs/heads/main'", RELEASE)
         self.assertIn("startsWith(github.ref, 'refs/tags/v')", RELEASE)
         self.assertIn('git tag "$TAG" "$GITHUB_SHA"', RELEASE)
