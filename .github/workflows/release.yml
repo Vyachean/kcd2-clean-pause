@@ -140,8 +140,9 @@ jobs:
 
   publish:
     if: >-
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+      (github.event_name == 'push' &&
+       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -200,7 +201,7 @@ jobs:
           fi
 
           if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "Release publication requires the matching tag or a main-branch release-preparation merge" >&2
+            echo "Release publication requires the matching tag or a main-branch release-preparation run" >&2
             exit 1
           fi
 
