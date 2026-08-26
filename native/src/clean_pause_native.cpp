@@ -45,6 +45,8 @@ void* g_flashUI{};
 PauseGameFn g_originalPauseGame{};
 void* g_pauseGameTarget{};
 std::atomic_bool g_pauseBarrierObserved{false};
+std::atomic_bool g_pauseTransitionActive{false};
+std::atomic_ullong g_pausePressAtMs{0};
 DWORD g_mainThreadId{};
 void* g_menuElement{};
 PostInputEventFn g_originalPostInputEvent{};
@@ -398,11 +400,11 @@ bool ShouldFreezeHudFunction(const char* name)
     if (!name)
         return false;
 
-    bool freeze = g_cleanHidden.load(std::memory_order_acquire);
-    if (!freeze && g_pendingPauseAttempt.load(std::memory_order_acquire)) {
-        const ULONGLONG deadline = g_pendingDeadlineMs.load(std::memory_order_acquire);
-        freeze = deadline != 0 && GetTickCount64() <= deadline;
-    }
+    // Pending input correlation alone must not mutate/freeze HUD presentation.
+    // Only the actual vanilla PauseGame transition and established Clean Pause own
+    // this narrow presentation freeze window.
+    const bool freeze = g_cleanHidden.load(std::memory_order_acquire)
+        || g_pauseTransitionActive.load(std::memory_order_acquire);
     if (!freeze)
         return false;
 
@@ -485,6 +487,7 @@ void ResetHudSnapshots()
     g_hudMaskThreadMismatchLogged.store(false, std::memory_order_release);
     g_nextHudSnapshotRefreshMs.store(0, std::memory_order_release);
     g_pauseBarrierObserved.store(false, std::memory_order_release);
+    g_pauseTransitionActive.store(false, std::memory_order_release);
 }
 
 bool OnValidatedMainThread(const char* operation)
@@ -652,11 +655,12 @@ bool ShouldPinGameplayHudPresentation()
         return false;
     if (g_cleanHidden.load(std::memory_order_acquire))
         return true;
-    if (!g_pendingPauseAttempt.load(std::memory_order_acquire))
-        return false;
 
-    const ULONGLONG deadline = g_pendingDeadlineMs.load(std::memory_order_acquire);
-    return deadline != 0 && GetTickCount64() <= deadline;
+    // Do not replay 28 Flash clips during the physical press/release correlation
+    // window. Arm transactional pinning only when the verified vanilla PauseGame call
+    // itself begins; this keeps the no-blink protection in the mutation call stack
+    // without stalling gameplay presentation before the real pause starts.
+    return g_pauseTransitionActive.load(std::memory_order_acquire);
 }
 
 bool CaptureVanillaHudFromInternalMask(HudVisibilitySnapshot& target)
@@ -815,9 +819,12 @@ void __fastcall HookHudUpdate(void* element, float deltaTime)
             const ULONGLONG deadline = g_pendingDeadlineMs.load(std::memory_order_acquire);
             if (deadline != 0 && now > deadline) {
                 g_hudMaskPinSuspended.store(true, std::memory_order_release);
+                const bool transitionWasActive =
+                    g_pauseTransitionActive.exchange(false, std::memory_order_acq_rel);
                 g_pendingPauseAttempt.store(false, std::memory_order_release);
                 g_pendingDeadlineMs.store(0, std::memory_order_release);
-                if (g_hudMaskTransactionAvailable.load(std::memory_order_acquire)
+                if (transitionWasActive
+                    && g_hudMaskTransactionAvailable.load(std::memory_order_acquire)
                     && g_gameplayHudSnapshot.captured
                     && !RestoreVanillaHudPresentation("vanilla-pending-timeout-update"))
                     Log("pending Clean Pause HUD-update timeout could not restore vanilla presentation");
@@ -1040,9 +1047,11 @@ bool PendingAttemptAlive()
     // before Menu@0 became verifiable. Expiry must restore KCD2's live internal state
     // rather than merely dropping the snapshot bookkeeping.
     g_hudMaskPinSuspended.store(true, std::memory_order_release);
+    const bool transitionWasActive =
+        g_pauseTransitionActive.exchange(false, std::memory_order_acq_rel);
     g_pendingPauseAttempt.store(false, std::memory_order_release);
     g_pendingDeadlineMs.store(0, std::memory_order_release);
-    if (g_gameplayHudSnapshot.captured
+    if (transitionWasActive && g_gameplayHudSnapshot.captured
         && !RestoreVanillaHudPresentation("vanilla-pending-expiry"))
         Log("pending Clean Pause expiry could not restore current vanilla HUD presentation");
     ResetHudSnapshots();
@@ -1119,6 +1128,7 @@ bool TryEnterCleanPause(
     g_cleanHiddenSinceMs.store(enteredAt, std::memory_order_release);
     g_nextHudSnapshotRefreshMs.store(enteredAt + kHudSnapshotRefreshIntervalMs, std::memory_order_release);
     g_cleanHidden.store(true, std::memory_order_release);
+    g_pauseTransitionActive.store(false, std::memory_order_release);
     g_swallowPauseRelease.store(swallowMatchingRelease, std::memory_order_release);
     g_pendingPauseAttempt.store(false, std::memory_order_release);
     g_pendingDeadlineMs.store(0, std::memory_order_release);
@@ -1263,6 +1273,12 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
     }
 
     if (pressed) {
+        const ULONGLONG pressAt = GetTickCount64();
+        g_pausePressAtMs.store(pressAt, std::memory_order_release);
+        Log("pause physical press: key=%u name=%s state=0x%08x",
+            static_cast<unsigned>(key),
+            event->keyName ? event->keyName : "<null>",
+            static_cast<unsigned>(event->state));
         ResetHudSnapshots();
         if (!EnsureMenuRenderHook() || !EnsureHudSubtitleHook() || !EnsureHudUpdateHook()
             || !CaptureHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay-pre-pause")) {
@@ -1283,7 +1299,12 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
 
         ArmPendingPauseAttempt();
         g_pauseBarrierObserved.store(false, std::memory_order_release);
+        const ULONGLONG dispatchAt = GetTickCount64();
+        Log("pause press preparation complete; setupMs=%llu",
+            static_cast<unsigned long long>(dispatchAt - pressAt));
         Forward(input, event, force);
+        Log("pause press vanilla dispatch returned; dispatchMs=%llu",
+            static_cast<unsigned long long>(GetTickCount64() - dispatchAt));
 
         // Preferred path: vanilla itself called and returned from PauseGame(true)
         // while handling this physical press. We are now outside the nested vanilla
@@ -1294,6 +1315,7 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
             if (!TryEnterCleanPause("vanilla PauseGame barrier after Escape/Start press", true, false)
                 && g_gameplayHudSnapshot.captured)
                 ArmPendingPauseAttempt();
+            g_pauseTransitionActive.store(false, std::memory_order_release);
             return;
         }
 
@@ -1305,10 +1327,27 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
     }
 
     if (released && PendingAttemptAlive()) {
+        const ULONGLONG releaseAt = GetTickCount64();
+        const ULONGLONG pressAt = g_pausePressAtMs.load(std::memory_order_acquire);
+        Log("pause physical release: key=%u sincePressMs=%llu",
+            static_cast<unsigned>(key),
+            static_cast<unsigned long long>(pressAt ? releaseAt - pressAt : 0));
         Forward(input, event, force);
-        if (!TryEnterCleanPause("Escape/Start release", false)
-            && g_gameplayHudSnapshot.captured)
+        const bool barrier =
+            g_pauseBarrierObserved.exchange(false, std::memory_order_acq_rel);
+        Log("pause release vanilla dispatch returned; dispatchMs=%llu barrier=%s",
+            static_cast<unsigned long long>(GetTickCount64() - releaseAt),
+            barrier ? "true" : "false");
+
+        bool entered{};
+        if (barrier)
+            entered = TryEnterCleanPause(
+                "vanilla PauseGame barrier after Escape/Start release", false, false);
+        else
+            entered = TryEnterCleanPause("Escape/Start release", false);
+        if (!entered && g_gameplayHudSnapshot.captured)
             ArmPendingPauseAttempt();
+        g_pauseTransitionActive.store(false, std::memory_order_release);
         return;
     }
 
@@ -1361,26 +1400,31 @@ void __fastcall HookPauseGame(
         && (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId);
     const ULONGLONG enteredAt = observe ? GetTickCount64() : 0;
 
-    // CryEngine defines the third PauseGame argument as the SFX/Voice fade-out
-    // duration. KCD2's non-zero fade is useful for its visible menu transition, but
-    // it leaves dialogue audible after the Clean Pause frame is already frozen. For
-    // the exact validated pending physical Clean Pause only, keep vanilla pause/force
-    // ownership unchanged and clamp that audio fade duration to zero. We still never
-    // synthesize a PauseGame call.
-    const unsigned int effectiveFadeOutInMs = observe ? 0u : fadeOutInMs;
-    if (g_originalPauseGame)
-        g_originalPauseGame(framework, pause, force, effectiveFadeOutInMs);
+    // Pending input correlation does not own presentation. Arm the narrow
+    // transaction only for the real vanilla pause call, so C_UIHudMask changes made
+    // inside PauseGame are rolled back in the same stack without doing 28-clip Flash
+    // work throughout the physical press/release window.
+    if (observe)
+        g_pauseTransitionActive.store(true, std::memory_order_release);
 
-    if (!observe || !g_pendingPauseAttempt.load(std::memory_order_acquire))
+    // KCD2 remains the sole pause owner and receives the exact vanilla arguments.
+    if (g_originalPauseGame)
+        g_originalPauseGame(framework, pause, force, fadeOutInMs);
+
+    if (!observe || !g_pendingPauseAttempt.load(std::memory_order_acquire)) {
+        if (observe)
+            g_pauseTransitionActive.store(false, std::memory_order_release);
         return;
+    }
 
     g_pauseBarrierObserved.store(true, std::memory_order_release);
+    const ULONGLONG pressAt = g_pausePressAtMs.load(std::memory_order_acquire);
     Log(
-        "vanilla IGameFramework::PauseGame(true) returned during pending pause; force=%s requestedFadeMs=%u effectiveFadeMs=%u callMs=%llu",
+        "vanilla IGameFramework::PauseGame(true) returned during pending pause; force=%s fadeMs=%u callMs=%llu pressToPauseMs=%llu",
         force ? "true" : "false",
         fadeOutInMs,
-        effectiveFadeOutInMs,
-        static_cast<unsigned long long>(GetTickCount64() - enteredAt));
+        static_cast<unsigned long long>(GetTickCount64() - enteredAt),
+        static_cast<unsigned long long>(pressAt ? enteredAt - pressAt : 0));
 }
 
 bool InstallPauseBarrierHook(const RuntimeEnvironment& environment)

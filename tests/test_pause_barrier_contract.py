@@ -24,16 +24,32 @@ class PauseBarrierContractTests(unittest.TestCase):
         self.assertIn("kGameGetFrameworkSlot", resolver)
         self.assertIn("kGameFrameworkGetSystemSlot", resolver)
 
-    def test_pause_hook_keeps_vanilla_pause_ownership_and_zeroes_only_clean_pause_audio_fade(self):
+    def test_pause_hook_keeps_exact_vanilla_ownership_and_scopes_pinning_to_pause_call(self):
         hook = NATIVE[NATIVE.index("void __fastcall HookPauseGame"):NATIVE.index("bool InstallPauseBarrierHook")]
         self.assertIn("framework == g_gameFramework", hook)
         self.assertIn("g_pendingPauseAttempt.load", hook)
-        self.assertIn("const unsigned int effectiveFadeOutInMs = observe ? 0u : fadeOutInMs;", hook)
-        self.assertIn("g_originalPauseGame(framework, pause, force, effectiveFadeOutInMs);", hook)
-        self.assertNotIn("g_originalPauseGame(framework, pause, force, fadeOutInMs);", hook)
-        self.assertIn("requestedFadeMs=%u effectiveFadeMs=%u", hook)
+        self.assertIn("g_pauseTransitionActive.store(true", hook)
+        self.assertIn("g_originalPauseGame(framework, pause, force, fadeOutInMs);", hook)
+        self.assertNotIn("effectiveFadeOutInMs", hook)
+        self.assertLess(hook.index("g_pauseTransitionActive.store(true"), hook.index("g_originalPauseGame("))
         self.assertLess(hook.index("g_originalPauseGame("), hook.index("g_pauseBarrierObserved.store(true"))
         self.assertEqual(NATIVE.count("g_originalPauseGame("), 1)
+
+    def test_pending_input_correlation_does_not_pin_or_freeze_hud(self):
+        freeze = NATIVE[NATIVE.index("bool ShouldFreezeHudFunction"):NATIVE.index("bool __fastcall HookHudCallFunction")]
+        pin = NATIVE[NATIVE.index("bool ShouldPinGameplayHudPresentation"):NATIVE.index("bool CaptureVanillaHudFromInternalMask")]
+        self.assertIn("g_pauseTransitionActive.load", freeze)
+        self.assertIn("g_pauseTransitionActive.load", pin)
+        self.assertNotIn("g_pendingPauseAttempt.load", freeze)
+        self.assertNotIn("g_pendingPauseAttempt.load", pin)
+
+    def test_release_consumes_pause_barrier_and_logs_transition_timing(self):
+        post = NATIVE[NATIVE.index("void __fastcall HookPostInputEvent"):NATIVE.index("bool ResolveGameFramework")]
+        self.assertIn("pause physical press:", post)
+        self.assertIn("pause press preparation complete; setupMs=%llu", post)
+        self.assertIn("pause physical release: key=%u sincePressMs=%llu", post)
+        self.assertIn("pause release vanilla dispatch returned; dispatchMs=%llu barrier=%s", post)
+        self.assertIn("vanilla PauseGame barrier after Escape/Start release", post)
 
     def test_barrier_consumed_after_outer_press_forward(self):
         post = NATIVE[NATIVE.index("void __fastcall HookPostInputEvent"):NATIVE.index("bool ResolveGameFramework")]

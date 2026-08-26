@@ -209,6 +209,11 @@ if "g_originalRender(element);" not in menu:
 freeze = native[native.index("bool ShouldFreezeHudFunction"):native.index("bool __fastcall HookHudCallFunction")]
 if freeze.count("std::strcmp(") != 2:
     raise SystemExit("subtitle freeze whitelist must contain exactly two comparisons")
+if "g_pauseTransitionActive.load" not in freeze or "g_pendingPauseAttempt.load" in freeze:
+    raise SystemExit("subtitle freeze must be scoped to actual PauseGame transition, not pending input correlation")
+pin = native[native.index("bool ShouldPinGameplayHudPresentation"):native.index("bool CaptureVanillaHudFromInternalMask")]
+if "g_pauseTransitionActive.load" not in pin or "g_pendingPauseAttempt.load" in pin:
+    raise SystemExit("HUD pinning must be scoped to actual PauseGame transition, not pending input correlation")
 
 enter = native[native.index("bool TryEnterCleanPause"):native.index("void HandleHiddenInput")]
 if enter.index("if (!blur::Disable())") > enter.index("g_cleanHidden.store(true"):
@@ -257,12 +262,14 @@ print("stable native Clean Pause contract passed")
 pause_hook = native[native.index("void __fastcall HookPauseGame"):native.index("bool InstallPauseBarrierHook")]
 if pause_hook.index("g_originalPauseGame(") > pause_hook.index("g_pauseBarrierObserved.store(true"):
     raise SystemExit("PauseGame barrier must be published only after vanilla PauseGame returns")
-if "const unsigned int effectiveFadeOutInMs = observe ? 0u : fadeOutInMs;" not in pause_hook:
-    raise SystemExit("pending Clean Pause must clamp only the documented SFX/Voice fade duration")
-if "g_originalPauseGame(framework, pause, force, effectiveFadeOutInMs);" not in pause_hook:
-    raise SystemExit("PauseGame hook must preserve vanilla pause/force ownership and use only the scoped audio fade override")
-if "requestedFadeMs=%u effectiveFadeMs=%u" not in pause_hook:
-    raise SystemExit("PauseGame log must expose requested and effective audio fade durations")
+if "g_pauseTransitionActive.store(true" not in pause_hook:
+    raise SystemExit("HUD transaction must arm only when the verified vanilla PauseGame call begins")
+if "g_originalPauseGame(framework, pause, force, fadeOutInMs);" not in pause_hook:
+    raise SystemExit("PauseGame observer must forward exact vanilla arguments unchanged")
+if "effectiveFadeOutInMs" in pause_hook:
+    raise SystemExit("disproven audio-fade override must not remain in production")
+if pause_hook.index("g_pauseTransitionActive.store(true") > pause_hook.index("g_originalPauseGame("):
+    raise SystemExit("pause transition pinning must arm before vanilla PauseGame mutates HUD")
 if "g_pendingPauseAttempt.load" not in pause_hook or "framework == g_gameFramework" not in pause_hook:
     raise SystemExit("PauseGame observer must be scoped to target framework + pending physical pause")
 resolver = native[native.index("bool ResolveGameFramework"):native.index("void __fastcall HookPauseGame")]
@@ -276,7 +283,17 @@ forward_press = post.rfind("Forward(input, event, force);", 0, barrier_exchange)
 if forward_press < 0 or forward_press > barrier_exchange:
     raise SystemExit("PauseGame barrier may be consumed only after the outer vanilla press dispatch returns")
 if 'TryEnterCleanPause("vanilla PauseGame barrier after Escape/Start press", true, false)' not in post:
-    raise SystemExit("verified PauseGame barrier must accept Clean Pause without waiting for Menu visibility/release")
+    raise SystemExit("verified PauseGame barrier must accept Clean Pause on press when vanilla pauses there")
+if '"vanilla PauseGame barrier after Escape/Start release", false, false' not in post:
+    raise SystemExit("verified PauseGame barrier must also be consumed on the retail Start-release pause path")
+for needle in (
+    "pause physical press:",
+    "pause press preparation complete; setupMs=%llu",
+    "pause physical release: key=%u sincePressMs=%llu",
+    "pressToPauseMs=%llu",
+):
+    if needle not in native:
+        raise SystemExit(f"pause transition timing diagnostic missing: {needle}")
 if "g_originalPauseGame(" not in native:
     raise SystemExit("missing vanilla PauseGame forwarding call")
 # The only direct PauseGame call in production must be the trampoline forward inside the detour.
