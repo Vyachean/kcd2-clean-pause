@@ -24,10 +24,14 @@ class PauseBarrierContractTests(unittest.TestCase):
         self.assertIn("kGameGetFrameworkSlot", resolver)
         self.assertIn("kGameFrameworkGetSystemSlot", resolver)
 
-    def test_pause_hook_is_observer_only_and_after_original(self):
+    def test_pause_hook_keeps_vanilla_pause_ownership_and_zeroes_only_clean_pause_audio_fade(self):
         hook = NATIVE[NATIVE.index("void __fastcall HookPauseGame"):NATIVE.index("bool InstallPauseBarrierHook")]
         self.assertIn("framework == g_gameFramework", hook)
         self.assertIn("g_pendingPauseAttempt.load", hook)
+        self.assertIn("const unsigned int effectiveFadeOutInMs = observe ? 0u : fadeOutInMs;", hook)
+        self.assertIn("g_originalPauseGame(framework, pause, force, effectiveFadeOutInMs);", hook)
+        self.assertNotIn("g_originalPauseGame(framework, pause, force, fadeOutInMs);", hook)
+        self.assertIn("requestedFadeMs=%u effectiveFadeMs=%u", hook)
         self.assertLess(hook.index("g_originalPauseGame("), hook.index("g_pauseBarrierObserved.store(true"))
         self.assertEqual(NATIVE.count("g_originalPauseGame("), 1)
 

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Prevents KCD2's pause HUD-mask transition from rendering an intermediate hidden-HUD frame before Clean Pause presentation is established.
+- Synchronizes Clean Pause audio with the retained frame by clamping only the pending Clean Pause `PauseGame` SFX/Voice fade duration to `0 ms`; KCD2 still owns the actual pause and the original `pause`/`force` values.
 - Uses KCD2's authoritative `C_UIHudMask` state for vanilla-menu handoff while keeping KCD2 as the sole logical pause/HUD owner.
 - Scopes globally patched HUD-mask and NPC-bubble method hooks to the exact runtime objects discovered from the current `hud@0` instance.
 - Preserves the root `hud@0` visibility state exactly, including configurations where `wh_ui_ShowHud` disables the whole HUD.

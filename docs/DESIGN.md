@@ -27,7 +27,7 @@ The mod does not manufacture a pause state. KCD2's normal pause already owns the
 The implementation therefore:
 
 1. forwards the physical Escape/Start event to vanilla KCD2;
-2. observes the validated vanilla `IGameFramework::PauseGame(true, ...)` return as the preferred event barrier; the mod never calls `PauseGame` itself and never changes its arguments;
+2. observes the validated vanilla `IGameFramework::PauseGame(true, ...)` call as the preferred event barrier; the mod never calls `PauseGame` itself; for the exact pending Clean Pause transition it preserves vanilla `pause`/`force` ownership but clamps only the documented SFX/Voice fade duration to `0 ms`, so dialogue does not continue after the retained frame freezes;
 3. accepts presentation ownership immediately after the outer physical press dispatch returns when that barrier was observed, instead of waiting for Start/Escape release;
 4. uses `Menu@0::IsVisible()` as the visible-menu/fail-open lifecycle signal when the barrier is unavailable;
 5. leaves `Menu@0` logically visible;
@@ -60,7 +60,7 @@ A transactional Flash replay is allowed only after a fresh complete internal HUD
 
 ### Pending and maintenance behavior
 
-The mask transaction can begin while pause entry is still pending, before `Menu@0` becomes verifiably visible. The preferred completion point is the return from KCD2's own validated `IGameFramework::PauseGame(true, ...)` call during the forwarded physical press. The detour only records that barrier; Clean Pause presentation is accepted after the outer `PostInputEvent` forwarding returns, avoiding re-entrant Flash/Lua work inside `PauseGame` itself. If no verified barrier is observed, the existing Menu-visibility path remains the compatibility fallback. If the pending attempt expires and no further input arrives, the already-established main-thread `hud@0::Update(float)` path performs rollback to KCD2's vanilla HUD presentation and clears the pending transaction. It does not use update timing to manufacture or retry pause ownership.
+The mask transaction can begin while pause entry is still pending, before `Menu@0` becomes verifiably visible. The preferred completion point is the return from KCD2's own validated `IGameFramework::PauseGame(true, ...)` call during the forwarded physical press. CryEngine documents the third `PauseGame` argument as the SFX/Voice fade-out time; only for this already-validated pending Clean Pause call the detour changes that duration to `0 ms`, while forwarding the original `pause` and `force` values unchanged. This removes the otherwise intentional audio tail after the visual frame has frozen. The detour records the barrier after vanilla returns; Clean Pause presentation is accepted after the outer `PostInputEvent` forwarding returns, avoiding re-entrant Flash/Lua work inside `PauseGame` itself. If no verified barrier is observed, the existing Menu-visibility path remains the compatibility fallback. If the pending attempt expires and no further input arrives, the already-established main-thread `hud@0::Update(float)` path performs rollback to KCD2's vanilla HUD presentation and clears the pending transaction. It does not use update timing to manufacture or retry pause ownership.
 
 Once Clean Pause is active, `hud@0::Update(float)` remains only a short bounded fallback that can reapply the gameplay presentation if required. It honors the same suspension flag used by exit/fail-open handoffs, so it cannot re-pin gameplay HUD while vanilla presentation is being restored.
 
@@ -152,7 +152,7 @@ Verified KCD2 1.5.6 interface facts used by production include:
 SSystemGlobalEnvironment + 0x98      -> IGame*
 SSystemGlobalEnvironment + 0x140     -> IFlashUI*
 IGame::Get framework/root accessor   -> slot 16
-IGameFramework::PauseGame            -> slot 13 (observer only)
+IGameFramework::PauseGame            -> slot 13 (vanilla owner; pending Clean Pause audio fade -> 0 ms)
 IGameFramework::GetISystem           -> slot 19 (identity proof)
 IInput::PostInputEvent               -> slot 13
 IScriptSystem::ExecuteBuffer         -> slot 6

@@ -257,8 +257,12 @@ print("stable native Clean Pause contract passed")
 pause_hook = native[native.index("void __fastcall HookPauseGame"):native.index("bool InstallPauseBarrierHook")]
 if pause_hook.index("g_originalPauseGame(") > pause_hook.index("g_pauseBarrierObserved.store(true"):
     raise SystemExit("PauseGame barrier must be published only after vanilla PauseGame returns")
-if "g_originalPauseGame(framework, pause, force, fadeOutInMs);" not in pause_hook:
-    raise SystemExit("PauseGame observer must forward vanilla arguments unchanged")
+if "const unsigned int effectiveFadeOutInMs = observe ? 0u : fadeOutInMs;" not in pause_hook:
+    raise SystemExit("pending Clean Pause must clamp only the documented SFX/Voice fade duration")
+if "g_originalPauseGame(framework, pause, force, effectiveFadeOutInMs);" not in pause_hook:
+    raise SystemExit("PauseGame hook must preserve vanilla pause/force ownership and use only the scoped audio fade override")
+if "requestedFadeMs=%u effectiveFadeMs=%u" not in pause_hook:
+    raise SystemExit("PauseGame log must expose requested and effective audio fade durations")
 if "g_pendingPauseAttempt.load" not in pause_hook or "framework == g_gameFramework" not in pause_hook:
     raise SystemExit("PauseGame observer must be scoped to target framework + pending physical pause")
 resolver = native[native.index("bool ResolveGameFramework"):native.index("void __fastcall HookPauseGame")]

@@ -1361,19 +1361,25 @@ void __fastcall HookPauseGame(
         && (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId);
     const ULONGLONG enteredAt = observe ? GetTickCount64() : 0;
 
-    // KCD2 remains the only pause owner. Never alter arguments and never synthesize a
-    // PauseGame call; observe only after the exact vanilla call has returned.
+    // CryEngine defines the third PauseGame argument as the SFX/Voice fade-out
+    // duration. KCD2's non-zero fade is useful for its visible menu transition, but
+    // it leaves dialogue audible after the Clean Pause frame is already frozen. For
+    // the exact validated pending physical Clean Pause only, keep vanilla pause/force
+    // ownership unchanged and clamp that audio fade duration to zero. We still never
+    // synthesize a PauseGame call.
+    const unsigned int effectiveFadeOutInMs = observe ? 0u : fadeOutInMs;
     if (g_originalPauseGame)
-        g_originalPauseGame(framework, pause, force, fadeOutInMs);
+        g_originalPauseGame(framework, pause, force, effectiveFadeOutInMs);
 
     if (!observe || !g_pendingPauseAttempt.load(std::memory_order_acquire))
         return;
 
     g_pauseBarrierObserved.store(true, std::memory_order_release);
     Log(
-        "vanilla IGameFramework::PauseGame(true) returned during pending pause; force=%s fadeMs=%u callMs=%llu",
+        "vanilla IGameFramework::PauseGame(true) returned during pending pause; force=%s requestedFadeMs=%u effectiveFadeMs=%u callMs=%llu",
         force ? "true" : "false",
         fadeOutInMs,
+        effectiveFadeOutInMs,
         static_cast<unsigned long long>(GetTickCount64() - enteredAt));
 }
 
