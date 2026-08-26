@@ -1,0 +1,42 @@
+name: v0.2.1 release preparation
+
+on:
+  push:
+    branches:
+      - fix/instant-clean-pause-hud
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/instant-clean-pause-hud
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply guarded release preparation
+        run: python tools/_release_prep_v021.py
+      - name: Run repository tests
+        run: python -m unittest discover -s tests -v
+      - name: Validate native architecture contract
+        run: python tools/validate_native_contract.py
+      - name: Configure x64 Release
+        run: cmake -S native -B native/build -A x64
+      - name: Build x64 Release
+        run: cmake --build native/build --config Release --parallel
+      - name: Commit verified release preparation
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION CHANGELOG.md README.md docs native/src/clean_pause_native.cpp tests tools/validate_native_contract.py .github/workflows/release.yml
+          if (git diff --cached --quiet) { throw "Release preparation produced no changes" }
+          git commit -m "release: prepare v0.2.1"
+          git push origin HEAD:fix/instant-clean-pause-hud
