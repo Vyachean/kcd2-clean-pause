@@ -9,6 +9,7 @@ on:
       - tools/validate_native_contract.py
       - docs/RELEASE_NOTES.md
       - .github/workflows/release.yml
+      - THIRD_PARTY_NOTICES.txt
     tags: ["v*"]
   pull_request:
     paths:
@@ -17,6 +18,7 @@ on:
       - tools/validate_native_contract.py
       - docs/RELEASE_NOTES.md
       - .github/workflows/release.yml
+      - THIRD_PARTY_NOTICES.txt
   workflow_dispatch:
 
 permissions:
@@ -79,7 +81,14 @@ jobs:
           if (-not $dumpbin) { throw "dumpbin.exe not found" }
 
           $exports = & $dumpbin /nologo /exports $versionDll | Out-String
-          foreach ($name in @("GetFileVersionInfoW", "GetFileVersionInfoSizeW", "VerQueryValueW")) {
+          $expectedExports = @(
+            "GetFileVersionInfoA", "GetFileVersionInfoByHandle", "GetFileVersionInfoExA",
+            "GetFileVersionInfoExW", "GetFileVersionInfoSizeA", "GetFileVersionInfoSizeExA",
+            "GetFileVersionInfoSizeExW", "GetFileVersionInfoSizeW", "GetFileVersionInfoW",
+            "VerFindFileA", "VerFindFileW", "VerInstallFileA", "VerInstallFileW",
+            "VerLanguageNameA", "VerLanguageNameW", "VerQueryValueA", "VerQueryValueW"
+          )
+          foreach ($name in $expectedExports) {
             if ($exports -notmatch [regex]::Escape($name)) { throw "version.dll proxy export missing: $name" }
           }
 
@@ -96,8 +105,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path release/version-dll | Out-Null
           Copy-Item $asi release/asi/KCD2CleanPause.asi
           Copy-Item native/INSTALL_ASI.txt release/asi/INSTALL.txt
+          Copy-Item THIRD_PARTY_NOTICES.txt release/asi/THIRD_PARTY_NOTICES.txt
           Copy-Item $versionDll release/version-dll/version.dll
           Copy-Item native/INSTALL_VERSION_DLL.txt release/version-dll/INSTALL.txt
+          Copy-Item THIRD_PARTY_NOTICES.txt release/version-dll/THIRD_PARTY_NOTICES.txt
 
           $asiAsset = "kcd2-clean-pause-${{ steps.meta.outputs.tag }}-asi.zip"
           $versionAsset = "kcd2-clean-pause-${{ steps.meta.outputs.tag }}-version-dll.zip"
@@ -106,10 +117,13 @@ jobs:
 
           $asiHash = (Get-FileHash "release/$asiAsset" -Algorithm SHA256).Hash.ToLowerInvariant()
           $versionHash = (Get-FileHash "release/$versionAsset" -Algorithm SHA256).Hash.ToLowerInvariant()
+          # Public checksums cover only assets we intentionally distribute. The standalone
+          # package is still built, packaged and hashed in CI while Defender issue #38 is open.
+          "$asiHash  $asiAsset" | Set-Content release/SHA256SUMS.txt -Encoding ascii
           @(
             "$asiHash  $asiAsset",
             "$versionHash  $versionAsset"
-          ) | Set-Content release/SHA256SUMS.txt -Encoding ascii
+          ) | Set-Content release/CI_SHA256SUMS.txt -Encoding ascii
 
           "asi_asset=$asiAsset" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "version_asset=$versionAsset" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -120,6 +134,7 @@ jobs:
             release/${{ steps.package.outputs.asi_asset }}
             release/${{ steps.package.outputs.version_asset }}
             release/SHA256SUMS.txt
+            release/CI_SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -146,11 +161,12 @@ jobs:
         run: |
           set -euo pipefail
           cd release
+          sha256sum -c CI_SHA256SUMS.txt
           sha256sum -c SHA256SUMS.txt
           unzip -t "$ASI_ASSET"
           unzip -t "$VERSION_ASSET"
-          [[ "$(unzip -Z1 "$ASI_ASSET" | sort)" == $'INSTALL.txt\nKCD2CleanPause.asi' ]]
-          [[ "$(unzip -Z1 "$VERSION_ASSET" | sort)" == $'INSTALL.txt\nversion.dll' ]]
+          [[ "$(unzip -Z1 "$ASI_ASSET" | sort)" == $'INSTALL.txt\nKCD2CleanPause.asi\nTHIRD_PARTY_NOTICES.txt' ]]
+          [[ "$(unzip -Z1 "$VERSION_ASSET" | sort)" == $'INSTALL.txt\nTHIRD_PARTY_NOTICES.txt\nversion.dll' ]]
       - name: Ensure immutable release tag
         id: release_tag
         env:
@@ -199,13 +215,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.build.outputs.tag }}
           ASI_ASSET: ${{ needs.build.outputs.asi_asset }}
-          VERSION_ASSET: ${{ needs.build.outputs.version_asset }}
           PRERELEASE: ${{ needs.build.outputs.prerelease }}
         shell: bash
         run: |
           set -euo pipefail
           remote_tag_sha="$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')"
           [[ "$remote_tag_sha" == "$GITHUB_SHA" ]] || { echo "Tag points to $remote_tag_sha, workflow commit is $GITHUB_SHA" >&2; exit 1; }
-          args=("$TAG" "release/$ASI_ASSET" "release/$VERSION_ASSET" "release/SHA256SUMS.txt" --title "KCD2 Clean Pause $TAG" --notes-file docs/RELEASE_NOTES.md --verify-tag)
+          # Standalone version.dll is intentionally not a public v0.2.1 asset while #38 is unresolved.
+          args=("$TAG" "release/$ASI_ASSET" "release/SHA256SUMS.txt" --title "KCD2 Clean Pause $TAG" --notes-file docs/RELEASE_NOTES.md --verify-tag)
           [[ "$PRERELEASE" == "true" ]] && args+=(--prerelease)
           gh release create "${args[@]}"

@@ -46,6 +46,15 @@ class BubbleContractTests(unittest.TestCase):
         self.assertNotIn("HookBubbleSetText", BUBBLES)
         self.assertNotIn("HookBubbleSetAnchor", BUBBLES)
 
+    def test_global_bubble_method_hooks_are_scoped_to_discovered_instance(self):
+        self.assertIn('std::atomic<void*> g_bubbleInterfaceObject{nullptr};', BUBBLES)
+        update = BUBBLES[BUBBLES.index('void __fastcall HookBubbleUpdate'):BUBBLES.index('void __fastcall HookBubbleRelease')]
+        release = BUBBLES[BUBBLES.index('void __fastcall HookBubbleRelease'):BUBBLES.index('void __fastcall HookMenuSetVisible')]
+        self.assertIn('bubbles == g_bubbleInterfaceObject.load', update)
+        self.assertIn('bubbles == g_bubbleInterfaceObject.load', release)
+        ensure = BUBBLES[BUBBLES.index('bool EnsureHooks'):]
+        self.assertLess(ensure.index('g_menuSetVisibleTarget'), ensure.index('g_bubbleInterfaceObject.store'))
+
     def test_menu_freeze_arms_before_vanilla_show_and_releases_after_hide(self):
         hook = BUBBLES[BUBBLES.index("void __fastcall HookMenuSetVisible"):]
         hook = hook[: hook.index("} // namespace", 1)]

@@ -1,6 +1,7 @@
 #include "clean_pause_native.h"
 #include "clean_pause_blur.h"
 #include "clean_pause_bubbles.h"
+#include "clean_pause_hud_mask.h"
 #include "kcd2_abi.h"
 
 #include <MinHook.h>
@@ -11,6 +12,13 @@
 #include <cstring>
 #include <initializer_list>
 #include <string>
+
+#ifndef CLEAN_PAUSE_VERSION
+#define CLEAN_PAUSE_VERSION "unknown"
+#endif
+#ifndef CLEAN_PAUSE_BUILD_ID
+#define CLEAN_PAUSE_BUILD_ID "unknown"
+#endif
 
 namespace clean_pause {
 namespace {
@@ -25,12 +33,20 @@ std::atomic_bool g_swallowPauseRelease{false};
 std::atomic_bool g_swallowResumeRelease{false};
 std::atomic_bool g_pendingPauseAttempt{false};
 std::atomic_ullong g_pendingDeadlineMs{0};
+std::atomic_bool g_hudMaskPinSuspended{false};
+std::atomic_bool g_hudMaskTransactionAvailable{false};
 
 HMODULE g_selfModule{};
 void* g_environment{};
 void* g_input{};
 void* g_game{};
+void* g_gameFramework{};
 void* g_flashUI{};
+PauseGameFn g_originalPauseGame{};
+void* g_pauseGameTarget{};
+std::atomic_bool g_pauseBarrierObserved{false};
+std::atomic_bool g_pauseTransitionActive{false};
+std::atomic_ullong g_pausePressAtMs{0};
 DWORD g_mainThreadId{};
 void* g_menuElement{};
 PostInputEventFn g_originalPostInputEvent{};
@@ -59,6 +75,7 @@ const char* const kHudClipNames[kHudClipCount] = {
 
 struct HudVisibilitySnapshot {
     bool visible[kHudClipCount]{};
+    bool rootVisible{};
     bool captured{};
 };
 
@@ -66,9 +83,11 @@ HudVisibilitySnapshot g_gameplayHudSnapshot{};
 HudVisibilitySnapshot g_vanillaPauseHudSnapshot{};
 std::atomic_bool g_hudSnapshotRestoreObserved{false};
 std::atomic_bool g_hudUpdateThreadMismatchLogged{false};
+std::atomic_bool g_hudMaskThreadMismatchLogged{false};
 std::atomic_ullong g_nextHudSnapshotRefreshMs{0};
 UIElementUpdateFn g_originalHudUpdate{};
 void* g_hudUpdateTarget{};
+void* g_hudUpdateElement{};
 std::atomic_bool g_hudUpdateFirstEntryLogged{false};
 std::atomic_bool g_hudUpdateFirstReturnLogged{false};
 SRWLOCK g_logLock = SRWLOCK_INIT;
@@ -253,7 +272,8 @@ bool ValidateEnvironmentCandidate(const std::uint8_t* candidate, RuntimeEnvironm
         return false;
     if (!ValidateObjectVtable(value.input, {kInputPostInputEventSlot}))
         return false;
-    if (!ValidateObjectVtable(value.game, {kGameGetLongNameSlot, kGameGetNameSlot}))
+    if (!ValidateObjectVtable(value.game, {
+            kGameGetLongNameSlot, kGameGetNameSlot, kGameGetFrameworkSlot }))
         return false;
     if (!ValidateObjectVtable(value.system, {0}))
         return false;
@@ -267,6 +287,33 @@ bool ValidateEnvironmentCandidate(const std::uint8_t* candidate, RuntimeEnvironm
 
     out = value;
     return true;
+}
+
+void LogWhGameFingerprint(HMODULE whGame)
+{
+    const auto* base = reinterpret_cast<const std::uint8_t*>(whGame);
+    if (!IsReadable(base, sizeof(IMAGE_DOS_HEADER))) {
+        Log("WHGame fingerprint unavailable: unreadable DOS header");
+        return;
+    }
+
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+        Log("WHGame fingerprint unavailable: invalid DOS signature");
+        return;
+    }
+
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    if (!IsReadable(nt, sizeof(*nt)) || nt->Signature != IMAGE_NT_SIGNATURE) {
+        Log("WHGame fingerprint unavailable: invalid PE header");
+        return;
+    }
+
+    Log(
+        "WHGame fingerprint: TimeDateStamp=0x%08lx SizeOfImage=0x%08lx CheckSum=0x%08lx",
+        static_cast<unsigned long>(nt->FileHeader.TimeDateStamp),
+        static_cast<unsigned long>(nt->OptionalHeader.SizeOfImage),
+        static_cast<unsigned long>(nt->OptionalHeader.CheckSum));
 }
 
 bool FindRuntimeEnvironment(HMODULE whGame, RuntimeEnvironment& result)
@@ -353,11 +400,11 @@ bool ShouldFreezeHudFunction(const char* name)
     if (!name)
         return false;
 
-    bool freeze = g_cleanHidden.load(std::memory_order_acquire);
-    if (!freeze && g_pendingPauseAttempt.load(std::memory_order_acquire)) {
-        const ULONGLONG deadline = g_pendingDeadlineMs.load(std::memory_order_acquire);
-        freeze = deadline != 0 && GetTickCount64() <= deadline;
-    }
+    // Pending input correlation alone must not mutate/freeze HUD presentation.
+    // Only the actual vanilla PauseGame transition and established Clean Pause own
+    // this narrow presentation freeze window.
+    const bool freeze = g_cleanHidden.load(std::memory_order_acquire)
+        || g_pauseTransitionActive.load(std::memory_order_acquire);
     if (!freeze)
         return false;
 
@@ -437,7 +484,10 @@ void ResetHudSnapshots()
     g_vanillaPauseHudSnapshot = {};
     g_hudSnapshotRestoreObserved.store(false, std::memory_order_release);
     g_hudUpdateThreadMismatchLogged.store(false, std::memory_order_release);
+    g_hudMaskThreadMismatchLogged.store(false, std::memory_order_release);
     g_nextHudSnapshotRefreshMs.store(0, std::memory_order_release);
+    g_pauseBarrierObserved.store(false, std::memory_order_release);
+    g_pauseTransitionActive.store(false, std::memory_order_release);
 }
 
 bool OnValidatedMainThread(const char* operation)
@@ -454,7 +504,10 @@ bool ResolveHudClipAccessor(void*& hud, GetMovieClipByNameFn& getMovieClip)
     getMovieClip = nullptr;
     if (!ResolveHudElement(hud) || hud != g_hudElement)
         return false;
-    if (!ValidateObjectVtable(hud, {kUIElementGetMovieClipByNameSlot}))
+    if (!ValidateObjectVtable(hud, {
+            kUIElementGetMovieClipByNameSlot,
+            kUIElementIsVisibleSlot,
+            kUIElementSetVisibleSlot }))
         return false;
     getMovieClip = VFunc<GetMovieClipByNameFn>(hud, kUIElementGetMovieClipByNameSlot);
     return getMovieClip && IsExecutable(reinterpret_cast<void*>(getMovieClip));
@@ -472,6 +525,15 @@ bool CaptureHudVisibilitySnapshot(HudVisibilitySnapshot& target, const char* lab
         return false;
 
     HudVisibilitySnapshot next{};
+    const auto isRootVisible = VFunc<IsVisibleFn>(hud, kUIElementIsVisibleSlot);
+    bool rootVisible{};
+    __try {
+        rootVisible = isRootVisible && isRootVisible(hud);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    next.rootVisible = rootVisible;
+
     for (std::size_t i = 0; i < kHudClipCount; ++i) {
         void* clip{};
         __try {
@@ -522,13 +584,20 @@ bool RestoreHudVisibilitySnapshot(const HudVisibilitySnapshot& snapshot, const c
     if (!ResolveHudClipAccessor(hud, getMovieClip))
         return false;
 
-    // hud@0 is only the container. RC7d proved its visibility does not control the
-    // 28 children, but it still must remain visible for restored child clips to render.
+    // Root hud@0 visibility is independent from the 28 C_UIHudMask children
+    // (wh_ui_ShowHud controls the root). Preserve it exactly instead of forcing HUD on.
+    const auto isRootVisible = VFunc<IsVisibleFn>(hud, kUIElementIsVisibleSlot);
     const auto setRootVisible = VFunc<SetVisibleFn>(hud, kUIElementSetVisibleSlot);
-    if (!setRootVisible || !IsExecutable(reinterpret_cast<void*>(setRootVisible)))
+    if (!isRootVisible || !setRootVisible
+        || !IsExecutable(reinterpret_cast<void*>(isRootVisible))
+        || !IsExecutable(reinterpret_cast<void*>(setRootVisible)))
         return false;
+
+    bool currentRootVisible{};
     __try {
-        setRootVisible(hud, true);
+        currentRootVisible = isRootVisible(hud);
+        if (currentRootVisible && !snapshot.rootVisible)
+            setRootVisible(hud, false);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -557,6 +626,16 @@ bool RestoreHudVisibilitySnapshot(const HudVisibilitySnapshot& snapshot, const c
             return false;
     }
 
+    // If the root was hidden, update children while they are not renderable and reveal
+    // the container only after the exact child state is in place.
+    if (!currentRootVisible && snapshot.rootVisible) {
+        __try {
+            setRootVisible(hud, true);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
     if (label && std::strcmp(label, "gameplay") == 0) {
         if (!g_hudSnapshotRestoreObserved.exchange(true, std::memory_order_acq_rel))
             Log("Clean Pause gameplay HUD snapshot restored across all 28 clips");
@@ -566,17 +645,144 @@ bool RestoreHudVisibilitySnapshot(const HudVisibilitySnapshot& snapshot, const c
     return true;
 }
 
+bool ShouldPinGameplayHudPresentation()
+{
+    if (!g_hudMaskTransactionAvailable.load(std::memory_order_acquire))
+        return false;
+    if (g_hudMaskPinSuspended.load(std::memory_order_acquire))
+        return false;
+    if (!g_gameplayHudSnapshot.captured)
+        return false;
+    if (g_cleanHidden.load(std::memory_order_acquire))
+        return true;
+
+    // Do not replay 28 Flash clips during the physical press/release correlation
+    // window. Arm transactional pinning only when the verified vanilla PauseGame call
+    // itself begins; this keeps the no-blink protection in the mutation call stack
+    // without stalling gameplay presentation before the real pause starts.
+    return g_pauseTransitionActive.load(std::memory_order_acquire);
+}
+
+bool CaptureVanillaHudFromInternalMask(HudVisibilitySnapshot& target)
+{
+    target = {};
+    if (!OnValidatedMainThread("read C_UIHudMask visibility"))
+        return false;
+
+    bool visible[kHudClipCount]{};
+    if (!g_hudElement
+        || !hud_mask::ReadCurrentVisibility(g_hudElement, visible, kHudClipCount))
+        return false;
+
+    if (!ValidateObjectVtable(g_hudElement, {kUIElementIsVisibleSlot}))
+        return false;
+    const auto isRootVisible = VFunc<IsVisibleFn>(g_hudElement, kUIElementIsVisibleSlot);
+    bool rootVisible{};
+    __try {
+        rootVisible = isRootVisible && isRootVisible(g_hudElement);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+
+    for (std::size_t i = 0; i < kHudClipCount; ++i)
+        target.visible[i] = visible[i];
+    target.rootVisible = rootVisible;
+    target.captured = true;
+    return true;
+}
+
+bool RestoreVanillaHudPresentation(const char* label)
+{
+    if (g_hudMaskTransactionAvailable.load(std::memory_order_acquire)) {
+        HudVisibilitySnapshot current{};
+        if (CaptureVanillaHudFromInternalMask(current)
+            && RestoreHudVisibilitySnapshot(current, label))
+            return true;
+        Log("live C_UIHudMask visibility restore failed (%s)", label ? label : "unnamed");
+    }
+
+    if (g_vanillaPauseHudSnapshot.captured)
+        return RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, label);
+    return false;
+}
+
+void FailOpenHudMaskTransaction(
+    const HudVisibilitySnapshot* vanillaState,
+    const char* reason)
+{
+    // The original C_UIHudMask mutation has already run. If gameplay replay has not
+    // started, current Flash is already vanilla; otherwise use the authoritative
+    // internal snapshot captured immediately before that replay. Never continue a
+    // transaction whose internal source of truth could not be read.
+    g_hudMaskPinSuspended.store(true, std::memory_order_release);
+    g_pendingPauseAttempt.store(false, std::memory_order_release);
+    g_pendingDeadlineMs.store(0, std::memory_order_release);
+    RestoreBlurBestEffort("HUD-mask transaction fail-open");
+    if (vanillaState && vanillaState->captured
+        && !RestoreHudVisibilitySnapshot(*vanillaState, "vanilla-mask-fail-open"))
+        Log("HUD-mask transaction fail-open could not restore captured vanilla presentation");
+    g_cleanHidden.store(false, std::memory_order_release);
+    g_renderSuppressionObserved.store(false, std::memory_order_release);
+    g_cleanHiddenSinceMs.store(0, std::memory_order_release);
+    g_swallowPauseRelease.store(false, std::memory_order_release);
+    g_swallowResumeRelease.store(false, std::memory_order_release);
+    ResetHudSnapshots();
+    g_hudMaskPinSuspended.store(false, std::memory_order_release);
+    Log("C_UIHudMask transaction fail-open: %s", reason ? reason : "unknown");
+}
+
+void ReconcileHudMaskMutation()
+{
+    // The mask callback can be entered through generic engine dispatch. Validate the
+    // thread before touching the non-atomic snapshot structs or mutating Flash.
+    if (g_mainThreadId && GetCurrentThreadId() != g_mainThreadId) {
+        if (!g_hudMaskThreadMismatchLogged.exchange(true, std::memory_order_acq_rel))
+            Log("C_UIHudMask mutation observed off validated main thread; transactional HUD pin skipped");
+        return;
+    }
+    if (!ShouldPinGameplayHudPresentation())
+        return;
+
+    // Vanilla has already updated its internal C_UIHudMask state. A fresh complete
+    // internal snapshot is mandatory before changing Flash presentation; otherwise
+    // fail open while the just-applied vanilla Flash state is still intact.
+    HudVisibilitySnapshot vanillaState{};
+    if (!CaptureVanillaHudFromInternalMask(vanillaState)) {
+        // During an already-active transaction Flash can be a mix of the previously
+        // pinned gameplay presentation and the one vanilla element just mutated. Use
+        // the last complete internal snapshot if available before relinquishing.
+        const HudVisibilitySnapshot fallback = g_vanillaPauseHudSnapshot;
+        FailOpenHudMaskTransaction(
+            fallback.captured ? &fallback : nullptr,
+            "authoritative internal HUD state unavailable");
+        return;
+    }
+    g_vanillaPauseHudSnapshot = vanillaState;
+
+    // Only presentation is rolled back. If that replay itself fails part-way, restore
+    // the authoritative vanilla snapshot before releasing Menu rendering.
+    if (!RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay-mask-transaction")) {
+        FailOpenHudMaskTransaction(&vanillaState, "gameplay HUD presentation replay failed");
+        return;
+    }
+}
+
 void FailOpenHudMaintenance(const char* reason)
 {
-    // Menu@0 remains logically visible; dropping render suppression is enough to show
-    // ordinary vanilla pause. Best-effort restore graphics and HUD state first.
+    // Relinquish presentation transactionally: first stop all re-pinning paths, then
+    // restore the graphics and KCD2's current internal HUD state, and only then allow
+    // Menu@0 to render again.
+    g_hudMaskPinSuspended.store(true, std::memory_order_release);
+    g_pendingPauseAttempt.store(false, std::memory_order_release);
+    g_pendingDeadlineMs.store(0, std::memory_order_release);
     RestoreBlurBestEffort("HUD maintenance fail-open");
-    if (g_vanillaPauseHudSnapshot.captured)
-        RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-fail-open");
+    if (!RestoreVanillaHudPresentation("vanilla-pause-fail-open"))
+        Log("Clean Pause fail-open could not restore current vanilla HUD presentation");
     g_cleanHidden.store(false, std::memory_order_release);
     g_renderSuppressionObserved.store(false, std::memory_order_release);
     g_cleanHiddenSinceMs.store(0, std::memory_order_release);
     ResetHudSnapshots();
+    g_hudMaskPinSuspended.store(false, std::memory_order_release);
     Log("Clean Pause HUD maintenance fail-open: %s", reason ? reason : "unknown");
 }
 
@@ -593,17 +799,47 @@ void __fastcall HookHudUpdate(void* element, float deltaTime)
     if (!g_hudUpdateFirstReturnLogged.exchange(true, std::memory_order_acq_rel))
         Log("hud@0 Update original returned successfully");
 
-    if (element != g_hudElement || !g_cleanHidden.load(std::memory_order_acquire))
+    if (element != g_hudElement)
         return;
 
     if (GetCurrentThreadId() != g_mainThreadId) {
         if (!g_hudUpdateThreadMismatchLogged.exchange(true, std::memory_order_acq_rel))
-            Log("hud@0 Update observed off validated main thread; periodic HUD restore disabled for safety");
+            Log("hud@0 Update observed off validated main thread; HUD maintenance disabled for safety");
         return;
     }
 
-    const ULONGLONG enteredAt = g_cleanHiddenSinceMs.load(std::memory_order_acquire);
     const ULONGLONG now = GetTickCount64();
+
+    // The no-blink transaction starts while pause entry is still pending. If Menu@0
+    // never becomes verifiable and no further input arrives, expire that transaction
+    // here on the already-proven main-thread HUD update path so gameplay presentation
+    // cannot remain pinned indefinitely.
+    if (!g_cleanHidden.load(std::memory_order_acquire)) {
+        if (g_pendingPauseAttempt.load(std::memory_order_acquire)) {
+            const ULONGLONG deadline = g_pendingDeadlineMs.load(std::memory_order_acquire);
+            if (deadline != 0 && now > deadline) {
+                g_hudMaskPinSuspended.store(true, std::memory_order_release);
+                const bool transitionWasActive =
+                    g_pauseTransitionActive.exchange(false, std::memory_order_acq_rel);
+                g_pendingPauseAttempt.store(false, std::memory_order_release);
+                g_pendingDeadlineMs.store(0, std::memory_order_release);
+                if (transitionWasActive
+                    && g_hudMaskTransactionAvailable.load(std::memory_order_acquire)
+                    && g_gameplayHudSnapshot.captured
+                    && !RestoreVanillaHudPresentation("vanilla-pending-timeout-update"))
+                    Log("pending Clean Pause HUD-update timeout could not restore vanilla presentation");
+                ResetHudSnapshots();
+                g_hudMaskPinSuspended.store(false, std::memory_order_release);
+                Log("pending Clean Pause presentation transaction expired on hud@0 Update");
+            }
+        }
+        return;
+    }
+
+    if (g_hudMaskPinSuspended.load(std::memory_order_acquire))
+        return;
+
+    const ULONGLONG enteredAt = g_cleanHiddenSinceMs.load(std::memory_order_acquire);
     if (!enteredAt || now - enteredAt > kHudSnapshotHoldMs)
         return;
 
@@ -622,24 +858,47 @@ bool EnsureHudUpdateHook()
     if (!ResolveHudElement(hud))
         return false;
 
-    // Overhead NPC subtitles are managed by C_UIHudBubbles below the root "Bubbles"
-    // movieclip. Install their optional lifecycle freeze before vanilla sees Start.
-    // Discovery failure is intentionally ignored so the proven Clean Pause path remains
-    // available even if a storefront/build changes the concrete listener layout.
-    bubbles::EnsureHooks(hud, g_flashUI);
-
     const auto target = reinterpret_cast<void*>(VFunc<UIElementUpdateFn>(hud, kUIElementUpdateSlot));
     if (!target || !IsExecutable(target))
         return false;
 
+    // The expensive listener/RTTI discovery is tied to one concrete hud@0 lifetime.
+    // Repeated pause presses on the same HUD reuse the already-validated identities.
     if (g_hudUpdateTarget) {
         if (target != g_hudUpdateTarget)
             return false;
-        g_hudElement = hud;
+        if (hud == g_hudUpdateElement) {
+            g_hudElement = hud;
+            return true;
+        }
+    }
+
+    // C_UIHudMask is the source-derived owner of the 28 child visibility flags.
+    // Observe its mutations before vanilla sees Start so a pause-source update can be
+    // visually rolled back in the same call stack, before the next render.
+    bool maskAvailable = hud_mask::EnsureHooks(hud, &ReconcileHudMaskMutation);
+    if (maskAvailable) {
+        bool visibilityProbe[kHudClipCount]{};
+        maskAvailable = hud_mask::ReadCurrentVisibility(
+            hud, visibilityProbe, kHudClipCount);
+    }
+    g_hudMaskTransactionAvailable.store(maskAvailable, std::memory_order_release);
+    if (maskAvailable)
+        Log("C_UIHudMask transaction active for hud=%p", hud);
+    else
+        Log("C_UIHudMask transaction unavailable; using snapshot restore fallback");
+
+    // Overhead NPC subtitles are managed by C_UIHudBubbles below the root "Bubbles"
+    // movieclip. Install their optional lifecycle freeze before vanilla sees Start.
+    bubbles::EnsureHooks(hud, g_flashUI);
+
+    g_hudElement = hud;
+    g_hudUpdateElement = hud;
+    if (g_hudUpdateTarget) {
+        Log("hud@0 recreated; cached HUD listener identities retargeted to hud=%p", hud);
         return true;
     }
 
-    g_hudElement = hud;
     const MH_STATUS create = MH_CreateHook(
         target,
         reinterpret_cast<void*>(&HookHudUpdate),
@@ -753,14 +1012,20 @@ void Forward(void* input, const InputEvent* event, bool force)
 
 void ClearHiddenState(const char* reason)
 {
+    g_hudMaskPinSuspended.store(true, std::memory_order_release);
+    g_pendingPauseAttempt.store(false, std::memory_order_release);
+    g_pendingDeadlineMs.store(0, std::memory_order_release);
     RestoreBlurBestEffort("clear hidden state");
+    if (g_gameplayHudSnapshot.captured
+        && !RestoreVanillaHudPresentation("vanilla-current-clear-hidden"))
+        Log("Clean Pause clear-hidden could not restore current vanilla HUD presentation");
     g_cleanHidden.store(false, std::memory_order_release);
     g_renderSuppressionObserved.store(false, std::memory_order_release);
     g_cleanHiddenSinceMs.store(0, std::memory_order_release);
     g_swallowPauseRelease.store(false, std::memory_order_release);
-    g_pendingPauseAttempt.store(false, std::memory_order_release);
-    g_pendingDeadlineMs.store(0, std::memory_order_release);
+    g_swallowResumeRelease.store(false, std::memory_order_release);
     ResetHudSnapshots();
+    g_hudMaskPinSuspended.store(false, std::memory_order_release);
     if (reason)
         Log("Clean Pause ownership cleared: %s", reason);
 }
@@ -777,44 +1042,93 @@ bool PendingAttemptAlive()
         return false;
     if (GetTickCount64() <= g_pendingDeadlineMs.load(std::memory_order_acquire))
         return true;
+
+    // A transactional mask callback may already have pinned gameplay presentation
+    // before Menu@0 became verifiable. Expiry must restore KCD2's live internal state
+    // rather than merely dropping the snapshot bookkeeping.
+    g_hudMaskPinSuspended.store(true, std::memory_order_release);
+    const bool transitionWasActive =
+        g_pauseTransitionActive.exchange(false, std::memory_order_acq_rel);
     g_pendingPauseAttempt.store(false, std::memory_order_release);
     g_pendingDeadlineMs.store(0, std::memory_order_release);
+    if (transitionWasActive && g_gameplayHudSnapshot.captured
+        && !RestoreVanillaHudPresentation("vanilla-pending-expiry"))
+        Log("pending Clean Pause expiry could not restore current vanilla HUD presentation");
     ResetHudSnapshots();
+    g_hudMaskPinSuspended.store(false, std::memory_order_release);
     return false;
 }
 
-bool TryEnterCleanPause(const char* trigger, bool swallowMatchingRelease)
+bool TryEnterCleanPause(
+    const char* trigger,
+    bool swallowMatchingRelease,
+    bool requireMenuVisible = true)
 {
-    bool visible{};
-    if (!ReadVerifiedMenuVisible(visible) || !visible)
+    if (requireMenuVisible) {
+        bool visible{};
+        if (!ReadVerifiedMenuVisible(visible) || !visible)
+            return false;
+    } else if (!g_menuElement || !g_renderTarget) {
         return false;
-    if (!g_gameplayHudSnapshot.captured
-        || !CaptureHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause")) {
+    }
+    if (!g_gameplayHudSnapshot.captured) {
         ResetHudSnapshots();
-        Log("vanilla pause opened but its HUD child state could not be captured; leaving ordinary visible pause menu (fail-open)");
+        Log("vanilla pause opened but gameplay HUD state was unavailable; leaving ordinary visible pause menu (fail-open)");
+        return false;
+    }
+
+    const bool transactional =
+        g_hudMaskTransactionAvailable.load(std::memory_order_acquire);
+    if (transactional) {
+        // Entry is accepted only with a fresh authoritative internal state. This makes
+        // the later visible-menu handoff recoverable even if discovery fails afterwards.
+        HudVisibilitySnapshot currentVanilla{};
+        if (!CaptureVanillaHudFromInternalMask(currentVanilla)) {
+            g_hudMaskPinSuspended.store(true, std::memory_order_release);
+            if (g_vanillaPauseHudSnapshot.captured)
+                RestoreHudVisibilitySnapshot(
+                    g_vanillaPauseHudSnapshot, "vanilla-entry-read-fail-open");
+            ResetHudSnapshots();
+            g_hudMaskPinSuspended.store(false, std::memory_order_release);
+            Log("vanilla pause opened but authoritative C_UIHudMask state could not be read; leaving ordinary visible pause menu (fail-open)");
+            return false;
+        }
+        g_vanillaPauseHudSnapshot = currentVanilla;
+    }
+    if (!transactional
+        && !g_vanillaPauseHudSnapshot.captured
+        && !CaptureHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause")) {
+        ResetHudSnapshots();
+        Log("vanilla pause opened but fallback HUD state could not be captured; leaving ordinary visible pause menu (fail-open)");
         return false;
     }
 
     if (!RestoreHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay")) {
-        RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-fail-open");
+        g_hudMaskPinSuspended.store(true, std::memory_order_release);
+        RestoreVanillaHudPresentation("vanilla-pause-fail-open");
         ResetHudSnapshots();
+        g_hudMaskPinSuspended.store(false, std::memory_order_release);
         Log("vanilla pause opened but gameplay HUD child snapshot could not be restored; leaving ordinary visible pause menu (fail-open)");
         return false;
     }
 
     if (!blur::Disable()) {
+        g_hudMaskPinSuspended.store(true, std::memory_order_release);
         RestoreBlurBestEffort("Clean Pause entry rollback");
-        RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-fail-open");
+        RestoreVanillaHudPresentation("vanilla-pause-fail-open");
         ResetHudSnapshots();
+        g_hudMaskPinSuspended.store(false, std::memory_order_release);
         Log("vanilla pause opened but DoF blur could not be disabled safely; leaving ordinary visible pause menu (fail-open)");
         return false;
     }
 
     const ULONGLONG enteredAt = GetTickCount64();
+    g_hudMaskPinSuspended.store(false, std::memory_order_release);
     g_renderSuppressionObserved.store(false, std::memory_order_release);
     g_cleanHiddenSinceMs.store(enteredAt, std::memory_order_release);
     g_nextHudSnapshotRefreshMs.store(enteredAt + kHudSnapshotRefreshIntervalMs, std::memory_order_release);
     g_cleanHidden.store(true, std::memory_order_release);
+    g_pauseTransitionActive.store(false, std::memory_order_release);
     g_swallowPauseRelease.store(swallowMatchingRelease, std::memory_order_release);
     g_pendingPauseAttempt.store(false, std::memory_order_release);
     g_pendingDeadlineMs.store(0, std::memory_order_release);
@@ -841,8 +1155,6 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
         const ULONGLONG enteredAt = g_cleanHiddenSinceMs.load(std::memory_order_acquire);
         const ULONGLONG now = GetTickCount64();
         if (enteredAt != 0 && now - enteredAt > kRenderObservationGraceMs) {
-            if (g_vanillaPauseHudSnapshot.captured)
-                RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-fail-open");
             ClearHiddenState("Render suppression was not observed within 250 ms; fail-open");
             Forward(input, event, force);
             return;
@@ -858,13 +1170,20 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
             return;
 
         if (pressed) {
+            // Stop the HUD-mask observer from re-pinning gameplay while the saved
+            // vanilla pause presentation is being restored. Keep Menu rendering
+            // suppressed until that restore is complete, then relinquish ownership.
+            g_hudMaskPinSuspended.store(true, std::memory_order_release);
+            g_pendingPauseAttempt.store(false, std::memory_order_release);
+            g_pendingDeadlineMs.store(0, std::memory_order_release);
             RestoreBlurBestEffort("show vanilla pause via Escape/Start");
-            if (!RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu"))
+            if (!RestoreVanillaHudPresentation("vanilla-pause-visible-menu"))
                 Log("could not restore captured vanilla-pause HUD before showing Menu; continuing fail-open");
             g_cleanHidden.store(false, std::memory_order_release);
             g_renderSuppressionObserved.store(false, std::memory_order_release);
             g_cleanHiddenSinceMs.store(0, std::memory_order_release);
             ResetHudSnapshots();
+            g_hudMaskPinSuspended.store(false, std::memory_order_release);
             g_swallowPauseRelease.store(true, std::memory_order_release);
             Log("Clean Pause -> visible vanilla pause menu (DoF restored; second Escape/Start consumed; Render restored)");
             return;
@@ -878,8 +1197,11 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
         if (!pressed)
             return;
 
+        g_hudMaskPinSuspended.store(true, std::memory_order_release);
+        g_pendingPauseAttempt.store(false, std::memory_order_release);
+        g_pendingDeadlineMs.store(0, std::memory_order_release);
         RestoreBlurBestEffort("show vanilla pause via B");
-        if (!RestoreHudVisibilitySnapshot(g_vanillaPauseHudSnapshot, "vanilla-pause-visible-menu-via-B"))
+        if (!RestoreVanillaHudPresentation("vanilla-pause-visible-menu-via-B"))
             Log("could not restore captured vanilla-pause HUD before showing Menu via B; continuing fail-open");
 
         g_cleanHidden.store(false, std::memory_order_release);
@@ -888,8 +1210,9 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
         g_pendingPauseAttempt.store(false, std::memory_order_release);
         g_pendingDeadlineMs.store(0, std::memory_order_release);
         ResetHudSnapshots();
+        g_hudMaskPinSuspended.store(false, std::memory_order_release);
         g_swallowResumeRelease.store(true, std::memory_order_release);
-        Log("Clean Pause -> visible vanilla pause menu via B (DoF restored; v0.1.0 behavior)");
+        Log("Clean Pause -> visible vanilla pause menu via B (DoF restored; accepted behavior)");
         return;
     }
 
@@ -950,6 +1273,12 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
     }
 
     if (pressed) {
+        const ULONGLONG pressAt = GetTickCount64();
+        g_pausePressAtMs.store(pressAt, std::memory_order_release);
+        Log("pause physical press: key=%u name=%s state=0x%08x",
+            static_cast<unsigned>(key),
+            event->keyName ? event->keyName : "<null>",
+            static_cast<unsigned>(event->state));
         ResetHudSnapshots();
         if (!EnsureMenuRenderHook() || !EnsureHudSubtitleHook() || !EnsureHudUpdateHook()
             || !CaptureHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay-pre-pause")) {
@@ -969,20 +1298,181 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
         }
 
         ArmPendingPauseAttempt();
+        g_pauseBarrierObserved.store(false, std::memory_order_release);
+        const ULONGLONG dispatchAt = GetTickCount64();
+        Log("pause press preparation complete; setupMs=%llu",
+            static_cast<unsigned long long>(dispatchAt - pressAt));
         Forward(input, event, force);
-        if (!TryEnterCleanPause("Escape/Start press", true))
+        Log("pause press vanilla dispatch returned; dispatchMs=%llu",
+            static_cast<unsigned long long>(GetTickCount64() - dispatchAt));
+
+        // Preferred path: vanilla itself called and returned from PauseGame(true)
+        // while handling this physical press. We are now outside the nested vanilla
+        // input stack but still in the same PostInputEvent call, so presentation can
+        // be accepted without waiting for the physical Start/Escape release or for a
+        // visible Menu frame. The release is swallowed after successful ownership.
+        if (g_pauseBarrierObserved.exchange(false, std::memory_order_acq_rel)) {
+            if (!TryEnterCleanPause("vanilla PauseGame barrier after Escape/Start press", true, false)
+                && g_gameplayHudSnapshot.captured)
+                ArmPendingPauseAttempt();
+            g_pauseTransitionActive.store(false, std::memory_order_release);
+            return;
+        }
+
+        // Compatibility fallback when the verified engine barrier was not observed.
+        if (!TryEnterCleanPause("Escape/Start press", true)
+            && g_gameplayHudSnapshot.captured)
             ArmPendingPauseAttempt();
         return;
     }
 
     if (released && PendingAttemptAlive()) {
+        const ULONGLONG releaseAt = GetTickCount64();
+        const ULONGLONG pressAt = g_pausePressAtMs.load(std::memory_order_acquire);
+        Log("pause physical release: key=%u sincePressMs=%llu",
+            static_cast<unsigned>(key),
+            static_cast<unsigned long long>(pressAt ? releaseAt - pressAt : 0));
         Forward(input, event, force);
-        if (!TryEnterCleanPause("Escape/Start release", false))
+        const bool barrier =
+            g_pauseBarrierObserved.exchange(false, std::memory_order_acq_rel);
+        Log("pause release vanilla dispatch returned; dispatchMs=%llu barrier=%s",
+            static_cast<unsigned long long>(GetTickCount64() - releaseAt),
+            barrier ? "true" : "false");
+
+        bool entered{};
+        if (barrier)
+            entered = TryEnterCleanPause(
+                "vanilla PauseGame barrier after Escape/Start release", false, false);
+        else
+            entered = TryEnterCleanPause("Escape/Start release", false);
+        if (!entered && g_gameplayHudSnapshot.captured)
             ArmPendingPauseAttempt();
+        g_pauseTransitionActive.store(false, std::memory_order_release);
         return;
     }
 
     Forward(input, event, force);
+}
+
+bool ResolveGameFramework(const RuntimeEnvironment& environment, void*& framework)
+{
+    framework = nullptr;
+    if (!environment.game || !environment.system
+        || !ValidateObjectVtable(environment.game, {kGameGetFrameworkSlot}))
+        return false;
+
+    const auto getFramework = VFunc<GetGameFrameworkFn>(
+        environment.game, kGameGetFrameworkSlot);
+    if (!getFramework || !IsExecutable(reinterpret_cast<void*>(getFramework)))
+        return false;
+
+    __try {
+        framework = getFramework(environment.game);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        framework = nullptr;
+    }
+    if (!framework || !ValidateObjectVtable(framework, {
+            kGameFrameworkPauseGameSlot, kGameFrameworkGetSystemSlot }))
+        return false;
+
+    // Identity proof: slot 19 is the verified IGameFramework::GetISystem accessor.
+    // Do not hook a merely shape-compatible object whose system does not match gEnv.
+    const auto getSystem = VFunc<GameFrameworkGetSystemFn>(
+        framework, kGameFrameworkGetSystemSlot);
+    void* frameworkSystem{};
+    __try {
+        frameworkSystem = getSystem ? getSystem(framework) : nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        frameworkSystem = nullptr;
+    }
+    return frameworkSystem == environment.system;
+}
+
+void __fastcall HookPauseGame(
+    void* framework,
+    bool pause,
+    bool force,
+    unsigned int fadeOutInMs)
+{
+    const bool observe = framework == g_gameFramework
+        && pause
+        && g_pendingPauseAttempt.load(std::memory_order_acquire)
+        && (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId);
+    const ULONGLONG enteredAt = observe ? GetTickCount64() : 0;
+
+    // Pending input correlation does not own presentation. Arm the narrow
+    // transaction only for the real vanilla pause call, so C_UIHudMask changes made
+    // inside PauseGame are rolled back in the same stack without doing 28-clip Flash
+    // work throughout the physical press/release window.
+    if (observe)
+        g_pauseTransitionActive.store(true, std::memory_order_release);
+
+    // KCD2 remains the sole pause owner and receives the exact vanilla arguments.
+    // If the trampoline is unexpectedly unavailable, fail open rather than publishing
+    // a barrier for a pause call that never reached vanilla.
+    if (!g_originalPauseGame) {
+        if (observe)
+            g_pauseTransitionActive.store(false, std::memory_order_release);
+        return;
+    }
+    g_originalPauseGame(framework, pause, force, fadeOutInMs);
+
+    if (!observe || !g_pendingPauseAttempt.load(std::memory_order_acquire)) {
+        if (observe)
+            g_pauseTransitionActive.store(false, std::memory_order_release);
+        return;
+    }
+
+    g_pauseBarrierObserved.store(true, std::memory_order_release);
+    const ULONGLONG pressAt = g_pausePressAtMs.load(std::memory_order_acquire);
+    Log(
+        "vanilla IGameFramework::PauseGame(true) returned during pending pause; force=%s fadeMs=%u callMs=%llu pressToPauseMs=%llu",
+        force ? "true" : "false",
+        fadeOutInMs,
+        static_cast<unsigned long long>(GetTickCount64() - enteredAt),
+        static_cast<unsigned long long>(pressAt ? enteredAt - pressAt : 0));
+}
+
+bool InstallPauseBarrierHook(const RuntimeEnvironment& environment)
+{
+    void* framework{};
+    if (!ResolveGameFramework(environment, framework)) {
+        Log("IGameFramework pause barrier unavailable: verified framework identity could not be resolved");
+        return false;
+    }
+
+    const auto target = reinterpret_cast<void*>(
+        VFunc<PauseGameFn>(framework, kGameFrameworkPauseGameSlot));
+    if (!target || !IsExecutable(target))
+        return false;
+
+    if (g_pauseGameTarget) {
+        if (target != g_pauseGameTarget)
+            return false;
+        g_gameFramework = framework;
+        return true;
+    }
+
+    const MH_STATUS create = MH_CreateHook(
+        target,
+        reinterpret_cast<void*>(&HookPauseGame),
+        reinterpret_cast<void**>(&g_originalPauseGame));
+    if (create != MH_OK) {
+        Log("MH_CreateHook(IGameFramework::PauseGame) failed: %d", static_cast<int>(create));
+        return false;
+    }
+    const MH_STATUS enable = MH_EnableHook(target);
+    if (enable != MH_OK) {
+        MH_RemoveHook(target);
+        Log("MH_EnableHook(IGameFramework::PauseGame) failed: %d", static_cast<int>(enable));
+        return false;
+    }
+
+    g_gameFramework = framework;
+    g_pauseGameTarget = target;
+    Log("vanilla IGameFramework::PauseGame observer active; framework=%p PauseGame=%p",
+        g_gameFramework, g_pauseGameTarget);
+    return true;
 }
 
 bool InstallInputHook(const RuntimeEnvironment& environment)
@@ -1007,6 +1497,10 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
         return false;
     }
 
+    // Optional event-driven pause barrier. If it cannot be validated, the existing
+    // Menu visibility path remains the fail-open compatibility behavior.
+    InstallPauseBarrierHook(environment);
+
     const MH_STATUS create = MH_CreateHook(
         g_postInputEventTarget,
         reinterpret_cast<void*>(&HookPostInputEvent),
@@ -1023,7 +1517,9 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
     }
 
     Log(
-        "KCD2 Clean Pause v0.1.0 active; env=%p input=%p game(IGame*)=%p flashUI=%p mainThread=%lu PostInputEvent=%p",
+        "KCD2 Clean Pause v%s build=%s active; env=%p input=%p game(IGame*)=%p flashUI=%p mainThread=%lu PostInputEvent=%p",
+        CLEAN_PAUSE_VERSION,
+        CLEAN_PAUSE_BUILD_ID,
         g_environment,
         g_input,
         g_game,
@@ -1035,7 +1531,8 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
 
 DWORD WINAPI BootstrapThread(void*)
 {
-    Log("native bootstrap started; target=KCD2 1.5.6 Windows retail; KCD2 Clean Pause v0.1.0");
+    Log("native bootstrap started; target=KCD2 1.5.6 Windows retail; KCD2 Clean Pause v%s build=%s",
+        CLEAN_PAUSE_VERSION, CLEAN_PAUSE_BUILD_ID);
 
     HMODULE whGame{};
     for (DWORD elapsed = 0; elapsed < kWaitForWhGameMs && !g_stopping.load(); elapsed += kPollMs) {
@@ -1049,6 +1546,8 @@ DWORD WINAPI BootstrapThread(void*)
         Log("WHGame.dll not found; Clean Pause disabled");
         return 0;
     }
+
+    LogWhGameFingerprint(whGame);
 
     RuntimeEnvironment environment{};
     for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs && !g_stopping.load(); elapsed += kPollMs) {

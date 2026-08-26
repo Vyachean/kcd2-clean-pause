@@ -6,13 +6,13 @@ Tested target: **KCD2 1.5.6**, primarily the PC Xbox Store / Xbox app / Game Pas
 
 ## Release status
 
-- **Current stable target:** `v0.2.0`.
-- **Retail-supported edition:** standalone `version.dll`.
-- **ASI edition:** experimental until someone completes a retail loader/coexistence check.
+- **Current stable release:** `v0.2.1`.
+- **Published v0.2.1 edition:** `KCD2CleanPause.asi`, retail-accepted with the upstream Ultimate ASI Loader.
+- **Standalone `version.dll`:** the v0.2.1 target is intentionally withheld while Defender investigation #38 is unresolved. The last published standalone package is v0.2.0.
 
-`v0.2.0` adds duplicate-load protection, blur-free Clean Pause presentation, and preservation of NPC overhead subtitles. The standalone path has been exercised in retail and normal pause/menu/resume behavior is accepted. The ASI package uses the same runtime but a different loader path and is therefore shipped as an unverified alternative rather than blocking the stable standalone release.
+`v0.2.1` fixes the remaining pause-entry discontinuity: picture/simulation and ongoing dialogue audio now pause together, while the gameplay HUD/subtitles remain retained without the previous hidden-HUD transition blink.
 
-Use the GitHub Releases page as the source of truth for versions that are actually published.
+Use the GitHub Releases page as the source of truth for versions and assets that are actually published.
 
 ## Behavior
 
@@ -28,9 +28,9 @@ Vanilla pause menu
   normal KCD2 controls -> resume / settings / save / quit
 ```
 
-Clean Pause uses KCD2's own pause lifecycle. World simulation and audio pause as they do in the normal game pause, while the pause-menu surface itself is not drawn. The mod restores the gameplay HUD state so subtitles that were visible at pause entry remain visible.
+Clean Pause uses KCD2's own pause lifecycle. The vanilla pause menu remains logically open, but its render surface is suppressed while the gameplay presentation is retained. The mod does not manufacture a second pause state.
 
-In `v0.2.0`, Clean Pause also removes the vanilla pause depth-of-field blur while hidden-menu presentation is active and preserves active NPC overhead speech bubbles. The previous `wh_cl_NearDof` and `r_DepthOfField` values are captured and restored before ordinary visible vanilla presentation resumes.
+The current release also removes the vanilla pause depth-of-field blur while Clean Pause is active and preserves normal dialogue subtitles plus active NPC overhead speech bubbles.
 
 ### Known behavior
 
@@ -40,62 +40,57 @@ Compatibility is currently claimed for **KCD2 1.5.6 only**. A game update requir
 
 ## Editions
 
-`v0.2.0` publishes two mutually exclusive packages built from the same runtime:
+Both native targets compile the same runtime and remain mutually exclusive installations.
 
-- **Standalone edition — supported:** `version.dll`; no separate ASI loader is required.
-- **ASI edition — experimental:** `KCD2CleanPause.asi`; intended for users who already have a compatible ASI loader or another mod owns `version.dll`.
+- **ASI edition — current supported v0.2.1 distribution:** `KCD2CleanPause.asi`; requires a compatible x64 ASI loader.
+- **Standalone edition — built and validated, but v0.2.1 not distributed:** `version.dll`; public distribution is blocked by Defender investigation #38.
 
-Do **not** intentionally install both Clean Pause editions at the same time. A process-wide guard prevents duplicate Clean Pause hooks if both editions are accidentally loaded, but dual installation is unsupported.
+Do **not** intentionally install both Clean Pause editions at the same time. A process-wide guard prevents duplicate hooks if both are accidentally loaded, but dual installation is unsupported.
 
-See [Dual native packages](docs/DUAL_PACKAGE.md) for the package contract and [ASI retail acceptance](docs/ASI_RETAIL_ACCEPTANCE.md) for the checks still missing for the ASI loading path.
+See [Dual native packages](docs/DUAL_PACKAGE.md) for the package contract.
 
-## Install — standalone version.dll edition
-
-1. Close KCD2.
-2. Remove/disable any older Clean Pause ASI installation.
-3. Copy `version.dll` from the `-version-dll.zip` release asset beside the KCD2 executable / `WHGame.dll`.
-4. Start the game normally.
-
-Do **not** overwrite another mod's unrelated `version.dll`. If another mod already owns that proxy DLL, the ASI edition is available as an experimental alternative.
-
-## Install — ASI edition (experimental)
+## Install — ASI edition
 
 1. Close KCD2.
-2. Remove the standalone Clean Pause `version.dll`.
-3. Install a compatible x64 ASI loader for KCD2, normally as `dinput8.dll` beside the KCD2 executable / `WHGame.dll`.
+2. Remove any standalone Clean Pause `version.dll` installation.
+3. Install a compatible x64 ASI loader for KCD2, normally the upstream Ultimate ASI Loader `dinput8.dll` beside the KCD2 executable / `WHGame.dll`.
 4. Copy `KCD2CleanPause.asi` from the `-asi.zip` release asset beside the loader.
 5. Start the game normally.
 
-Do not overwrite an existing `dinput8.dll` blindly. Multiple ASI plugins should share one compatible loader installation.
+Do not overwrite an existing `dinput8.dll` blindly. Multiple ASI plugins may share one compatible loader, but universal coexistence with every native plugin is not claimed.
+
+## Standalone version.dll edition
+
+The project still builds and validates the standalone proxy, but **v0.2.1 does not publish a standalone asset** while #38 is unresolved. Do not obtain or whitelist an unofficial v0.2.1 `version.dll` build to work around that release gate.
+
+The immutable v0.2.0 release still contains the older retail-proven standalone package, but it does not include the v0.2.1 transition fix.
 
 Both native editions write `kcd2_clean_pause_native.log` beside their own module.
 
 ## Uninstall
 
-Close KCD2 and remove only the installed Clean Pause edition plus the optional `kcd2_clean_pause_native.log`.
-
-For the ASI edition, remove `dinput8.dll` only if no other installed mod needs that ASI loader.
+Close KCD2 and remove `KCD2CleanPause.asi` plus the optional `kcd2_clean_pause_native.log`. Remove the ASI loader `dinput8.dll` only if no other installed mod needs it.
 
 ## Architecture
 
-The current production architecture deliberately keeps KCD2 as the sole pause owner:
+The production architecture deliberately keeps KCD2 as the sole pause owner:
 
-- the real Escape/Start event is forwarded to KCD2;
-- `Menu@0::IsVisible()` is used as the pause-lifecycle signal;
+- the physical Escape/Start event is forwarded to KCD2;
+- a validated `IGameFramework::PauseGame(true, ...)` hook observes the real vanilla pause transition but never synthesizes a pause and forwards the original arguments unchanged;
+- pending Start/release correlation alone performs no HUD replay;
+- HUD/subtitle preservation is armed only for the real vanilla pause transition;
 - `Menu@0` remains logically visible while only its `Render()` is suppressed during Clean Pause;
-- gameplay HUD child visibility is restored from boolean snapshots;
-- subtitle-clearing Flash calls are narrowly suppressed while Clean Pause owns presentation;
-- active NPC overhead subtitles are preserved separately;
-- pause DoF blur is temporarily removed and the prior values are restored before normal vanilla presentation;
+- authoritative `C_UIHudMask` visibility is retained for safe vanilla-menu handoff/fail-open;
+- exact root HUD visibility, dialogue subtitles, NPC overhead subtitles and DoF state are preserved;
 - unresolved core state fails open to the visible vanilla pause menu.
 
-No custom/inferred `PauseGame`, action-map replacement, fixed storefront-specific `WHGame.dll` RVA, replacement overlay, long-lived movieclip pointer, or synthetic B-resume replay is used.
+No action-map replacement, fixed storefront-specific `WHGame.dll` RVA, replacement overlay, long-lived movieclip pointer, destructive borrowed-handle release, or synthetic B-resume replay is used.
 
 See [Design](docs/DESIGN.md) for the complete production architecture.
 
 ## Versioning
 
-The project follows SemVer and a tag-driven GitHub release flow. Feature releases bump MINOR, fixes bump PATCH, and release candidates are used only when the supported release itself still needs acceptance. See [Release process](docs/RELEASE.md).
+The project follows SemVer and immutable tag-backed GitHub releases. Feature releases bump MINOR, fixes bump PATCH, and release candidates are used only when the supported release itself still needs acceptance. See [Release process](docs/RELEASE.md).
 
 ## Documentation
 

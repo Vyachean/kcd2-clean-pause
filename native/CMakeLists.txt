@@ -15,11 +15,30 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" CLEAN_PAUSE_VERSION)
+string(STRIP "${CLEAN_PAUSE_VERSION}" CLEAN_PAUSE_VERSION)
+find_package(Git QUIET)
+set(CLEAN_PAUSE_BUILD_ID "unknown")
+if(GIT_FOUND)
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse --short=12 HEAD
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    OUTPUT_VARIABLE CLEAN_PAUSE_BUILD_ID
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE CLEAN_PAUSE_GIT_RESULT
+  )
+  if(NOT CLEAN_PAUSE_GIT_RESULT EQUAL 0 OR CLEAN_PAUSE_BUILD_ID STREQUAL "")
+    set(CLEAN_PAUSE_BUILD_ID "unknown")
+  endif()
+endif()
+
 include(FetchContent)
 FetchContent_Declare(
   minhook
   GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
-  GIT_TAG v1.3.4
+  # MinHook v1.3.4, pinned to the immutable commit behind the release tag.
+  GIT_TAG c3fcafdc10146beb5919319d0683e44e3c30d537
   GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(minhook)
@@ -31,6 +50,8 @@ set(CLEAN_PAUSE_RUNTIME_SOURCES
   src/clean_pause_blur.h
   src/clean_pause_bubbles.cpp
   src/clean_pause_bubbles.h
+  src/clean_pause_hud_mask.cpp
+  src/clean_pause_hud_mask.h
   src/kcd2_abi.h
   src/process_guard.cpp
   src/process_guard.h
@@ -42,6 +63,8 @@ function(configure_clean_pause_target target)
     NOMINMAX
     UNICODE
     _UNICODE
+    CLEAN_PAUSE_VERSION="${CLEAN_PAUSE_VERSION}"
+    CLEAN_PAUSE_BUILD_ID="${CLEAN_PAUSE_BUILD_ID}"
   )
 
   target_compile_options(${target} PRIVATE

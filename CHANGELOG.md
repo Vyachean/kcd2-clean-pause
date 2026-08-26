@@ -4,6 +4,22 @@
 
 No unreleased changes yet.
 
+## v0.2.1 — 2026-08-26
+
+Patch release for the retail-accepted no-blink Clean Pause transition on KCD2 1.5.6.
+
+- Prevents KCD2's pause HUD-mask transition from rendering an intermediate hidden-HUD frame before Clean Pause presentation is established.
+- Narrows HUD/subtitle presentation pinning to the actual validated vanilla `PauseGame` transition instead of the whole Start press/release correlation window, eliminating the pre-pause visual stall while keeping dialogue/audio pause synchronized with the retained frame.
+- Uses KCD2's authoritative `C_UIHudMask` state for vanilla-menu handoff while keeping KCD2 as the sole logical pause/HUD owner.
+- Scopes globally patched HUD-mask and NPC-bubble method hooks to the exact runtime objects discovered from the current `hud@0` instance.
+- Preserves the root `hud@0` visibility state exactly, including configurations where `wh_ui_ShowHud` disables the whole HUD.
+- Strengthens transactional fail-open behavior so an internal-state read failure restores the last complete vanilla HUD state instead of exposing a mixed presentation.
+- Adds runtime `VERSION`, Git build id, and `WHGame.dll` PE fingerprint logging so retail evidence can be tied to a specific binary and future game-version compatibility gates.
+- Pins MinHook v1.3.4 to its immutable commit and includes the required MinHook/HDE redistribution notice in binary packages.
+- Expands validation to verify the complete 17-export standalone `version.dll` proxy surface.
+- Promotes the ASI loading path used with the upstream Ultimate ASI Loader to the supported v0.2.1 distribution after retail acceptance.
+- Withholds the v0.2.1 standalone `version.dll` asset while Microsoft Defender issue #38 remains unresolved; the standalone target continues to build and validate in CI but is not publicly distributed by this release.
+
 ## v0.2.0 — 2026-08-25
 
 Stable feature release for the retail-proven standalone Clean Pause path.
@@ -15,7 +31,7 @@ Stable feature release for the retail-proven standalone Clean Pause path.
 - Preserves normal dialogue subtitles and active NPC overhead subtitles across the vanilla-owned pause transition.
 - Keeps the accepted Start/Escape/B behavior and fail-open vanilla pause contract.
 - Marks the standalone `version.dll` edition supported after retail acceptance of normal pause/menu/resume behavior.
-- Keeps the ASI edition experimental until its loading path and shared-loader coexistence receive direct retail testing.
+- Keeps the ASI edition experimental until its loading path receives direct retail testing.
 
 The old `v0.1.1-rc.1` through `v0.1.1-rc.4` tags remain immutable historical prereleases. No stable `v0.1.1` is planned.
 

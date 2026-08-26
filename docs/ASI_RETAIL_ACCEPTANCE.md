@@ -1,37 +1,26 @@
 # ASI retail acceptance
 
-> **Status for v0.2.0:** optional follow-up. The standalone `version.dll` edition is the supported retail-proven release path. The ASI edition is shipped as **experimental** and does not block the stable standalone release.
+> **Status for v0.2.1:** core ASI loader/runtime path accepted on KCD2 1.5.6 Xbox Store / Xbox app using the upstream Ultimate ASI Loader. Broader coexistence with arbitrary native plugins remains a non-blocking follow-up.
 
-The ASI edition changes only the loading mechanism. It should not be described as supported until this acceptance pass succeeds on KCD2 1.5.6 Xbox Store / Xbox app.
+## Accepted installation baseline
 
-## Installation baseline
+- one compatible x64 Ultimate ASI Loader build as `dinput8.dll` beside the game executable / `WHGame.dll`;
+- `KCD2CleanPause.asi` beside that loader;
+- no Clean Pause standalone `version.dll` loaded at the same time.
 
-- install one compatible x64 ASI loader as `dinput8.dll` beside the game executable / `WHGame.dll`;
-- install `KCD2CleanPause.asi` beside that loader;
-- remove the Clean Pause standalone `version.dll` edition before launch.
+## Retail evidence
 
-## Acceptance
+Cumulative v0.2.1 candidate testing confirmed the ASI module loads and the native runtime is active. The final transition-scoped candidate confirms:
 
-- [ ] game starts normally;
-- [ ] `kcd2_clean_pause_native.log` is created beside `KCD2CleanPause.asi`;
-- [ ] log reports the Clean Pause runtime active;
-- [ ] Escape enters Clean Pause;
-- [ ] Xbox Start enters Clean Pause;
-- [ ] world simulation pauses;
-- [ ] audio/dialogue/cutscene progression pauses coherently;
-- [ ] current dialogue subtitle remains visible where applicable;
-- [ ] current NPC overhead subtitle remains visible where applicable;
-- [ ] retained Clean Pause presentation is sharp rather than using the vanilla pause DoF blur;
-- [ ] second Escape/Start reveals the vanilla pause menu;
-- [ ] Xbox B reveals the vanilla pause menu under the current product contract;
-- [ ] normal vanilla pause-menu controls remain functional;
-- [ ] returning to gameplay leaves controls and graphics behavior normal;
-- [ ] returning to the front end leaves controls normal.
+- Xbox Start enters Clean Pause;
+- world simulation and ongoing dialogue audio pause together immediately;
+- retained HUD/dialogue subtitles no longer show the previous hide/restore transition;
+- normal pause DoF is absent from the retained Clean Pause frame;
+- second Start or Xbox B reveals the vanilla pause menu;
+- normal menu resume returns to gameplay.
 
-Do not create a separate game launch solely to manufacture subtitle edge cases. Exercise subtitle checks when suitable dialogue occurs during the same acceptance session.
+This is sufficient for the tested ASI loading path to be the supported v0.2.1 distribution. It does not establish universal compatibility with every ASI plugin or loader fork.
 
 ## Coexistence follow-up
 
-After standalone ASI acceptance, repeat the core checks with at least one other real KCD2 ASI plugin installed through the same loader.
-
-Passing these checks is sufficient to remove the experimental label from the ASI edition in a later patch release if no runtime changes are needed. It does not establish universal compatibility with every native plugin.
+Repeat the core checks with representative real KCD2 ASI plugins sharing the same loader. Any conflict found there should be treated as plugin-coexistence compatibility debt rather than retroactively invalidating the already-tested single-loader/single-plugin path.
