@@ -44,7 +44,7 @@ If a qualifying `push` event is intentionally unavailable or suppressed by the c
 
 ## Bundled Ultimate ASI Loader
 
-ASI release packages generated after v0.2.1 include a complete first-install loader path rather than requiring a separate download.
+ASI release packages starting with v0.2.2 include a complete first-install loader path rather than requiring a separate download.
 
 The loader is treated as a pinned third-party release input, not as a floating dependency:
 
@@ -56,20 +56,21 @@ The loader is treated as a pinned third-party release input, not as a floating d
 - `ASI_LOADER_SOURCE.txt` records upstream version/commit plus archive and extracted-file hashes;
 - the upstream MIT license is copied into the ASI package as `ULTIMATE_ASI_LOADER_LICENSE.txt`.
 
-Users with an existing compatible ASI loader should keep it rather than blindly overwriting `dinput8.dll`. Bundling the tested loader improves first-install UX but does not claim universal compatibility with every native plugin combination.
+Users with an existing compatible ASI loader should keep it rather than blindly overwriting `dinput8.dll`.
 
 ## Edition-gated publication
 
 Build validation and public distribution are separate concerns. Both native targets remain continuously built so shared-runtime and proxy regressions are caught even if one edition has a temporary distribution blocker.
 
-For **v0.2.1**:
+For **v0.2.2**:
 
 - `KCD2CleanPause.asi` is the retail-accepted public edition;
+- its public ZIP includes the pinned official x64 Ultimate ASI Loader for fresh installation;
 - `version.dll` is still built, packaged and verified in Actions CI but is not attached to the public release while Defender investigation #38 remains unresolved;
 - `SHA256SUMS.txt` covers only public release assets;
 - `CI_SHA256SUMS.txt` covers both internally validated ZIPs and remains an Actions artifact rather than a public release asset.
 
-The immutable v0.2.1 ASI archive predates bundled-loader packaging. Subsequent generated ASI releases include the pinned loader described above.
+The immutable v0.2.1 ASI archive predates bundled-loader packaging.
 
 When #38 is resolved, standalone publication can be restored in a later release without changing the shared runtime architecture.
 
@@ -92,13 +93,10 @@ For an unpublished version on a qualifying main push or a manual dispatch from `
 
 The ASI and standalone editions are mutually exclusive installations of the same runtime.
 
-- **v0.2.1 ASI:** supported on the retail-tested KCD2 1.5.6 + upstream Ultimate ASI Loader path; its immutable archive does not contain the loader.
-- **subsequent ASI releases:** generated with the pinned official x64 Ultimate ASI Loader bundled for fresh installation.
-- **v0.2.1 standalone:** not publicly distributed until #38 is resolved.
-- **v0.2.0 standalone:** remains immutable historical release and was retail-proven for that version, but does not include the v0.2.1 transition fix.
+- **v0.2.2 ASI:** current public release target; generated with the pinned official x64 Ultimate ASI Loader bundled for fresh installation.
+- **new standalone builds:** not publicly distributed until #38 is resolved.
+- **v0.2.0 standalone:** remains immutable historical release and was retail-proven for that version, but does not include the later pause-transition fix.
 
-Support does not imply universal coexistence with every other native plugin.
+## Validation baseline
 
-## Version support
-
-Runtime compatibility is pinned to KCD2 **1.5.6** ABI facts. A future game update requires revalidation before support is claimed.
+Current retail evidence is from **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**. The runtime records build identity/fingerprint data so compatibility evidence can be expanded and revalidated as additional game builds are exercised.
