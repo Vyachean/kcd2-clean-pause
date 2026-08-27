@@ -2,15 +2,16 @@
 
 Clean Pause for **Kingdom Come: Deliverance II** on Windows.
 
-Tested target: **KCD2 1.5.6**, primarily the PC Xbox Store / Xbox app / Game Pass build with an Xbox controller.
+Tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbox controller.
 
 ## Release status
 
-- **Current stable release:** `v0.2.1`.
-- **Published v0.2.1 edition:** `KCD2CleanPause.asi`, retail-accepted with the upstream Ultimate ASI Loader.
-- **Standalone `version.dll`:** the v0.2.1 target is intentionally withheld while Defender investigation #38 is unresolved. The last published standalone package is v0.2.0.
+- **Release target:** `v0.2.2`.
+- **Published edition:** `KCD2CleanPause.asi`, using the upstream Ultimate ASI Loader.
+- The ASI package now includes the pinned official x64 Ultimate ASI Loader for a complete fresh installation.
+- **Standalone `version.dll`:** new standalone publication remains withheld while Defender investigation #38 is unresolved. The last published standalone package is v0.2.0.
 
-`v0.2.1` fixes the remaining pause-entry discontinuity: picture/simulation and ongoing dialogue audio now pause together, while the gameplay HUD/subtitles remain retained without the previous hidden-HUD transition blink.
+The Clean Pause runtime behavior is unchanged from the retail-accepted v0.2.1 runtime. `v0.2.2` improves distribution and installation by bundling the verified loader with provenance and license information.
 
 Use the GitHub Releases page as the source of truth for versions and assets that are actually published.
 
@@ -30,20 +31,18 @@ Vanilla pause menu
 
 Clean Pause uses KCD2's own pause lifecycle. The vanilla pause menu remains logically open, but its render surface is suppressed while the gameplay presentation is retained. The mod does not manufacture a second pause state.
 
-The current release also removes the vanilla pause depth-of-field blur while Clean Pause is active and preserves normal dialogue subtitles plus active NPC overhead speech bubbles.
+Clean Pause keeps the retained frame sharp by removing the vanilla pause depth-of-field blur and preserves normal dialogue subtitles plus active NPC overhead speech bubbles.
 
 ### Known behavior
 
-Xbox **B does not resume directly from Clean Pause**. It reveals the ordinary KCD2 pause menu; use the normal menu controls to resume. This is the accepted product contract.
-
-Compatibility is currently claimed for **KCD2 1.5.6 only**. A game update requires ABI revalidation before support is claimed.
+Xbox **B does not resume directly from Clean Pause**. It reveals the ordinary KCD2 pause menu; use the normal menu controls to resume.
 
 ## Editions
 
 Both native targets compile the same runtime and remain mutually exclusive installations.
 
-- **ASI edition — current supported v0.2.1 distribution:** `KCD2CleanPause.asi`; requires a compatible x64 ASI loader.
-- **Standalone edition — built and validated, but v0.2.1 not distributed:** `version.dll`; public distribution is blocked by Defender investigation #38.
+- **ASI edition — current public distribution:** `KCD2CleanPause.asi`, packaged with the pinned official x64 Ultimate ASI Loader `dinput8.dll` for fresh installation.
+- **Standalone edition — built and validated, but new builds are not distributed:** `version.dll`; public distribution remains blocked by Defender investigation #38.
 
 Do **not** intentionally install both Clean Pause editions at the same time. A process-wide guard prevents duplicate hooks if both are accidentally loaded, but dual installation is unsupported.
 
@@ -53,23 +52,26 @@ See [Dual native packages](docs/DUAL_PACKAGE.md) for the package contract.
 
 1. Close KCD2.
 2. Remove any standalone Clean Pause `version.dll` installation.
-3. Install a compatible x64 ASI loader for KCD2, normally the upstream Ultimate ASI Loader `dinput8.dll` beside the KCD2 executable / `WHGame.dll`.
-4. Copy `KCD2CleanPause.asi` from the `-asi.zip` release asset beside the loader.
-5. Start the game normally.
+3. Open the KCD2 directory containing the game executable / `WHGame.dll`.
+4. For a fresh ASI installation, copy both `dinput8.dll` and `KCD2CleanPause.asi` from the release ZIP into that directory.
+5. If a compatible `dinput8.dll` ASI loader is already installed, keep it and copy only `KCD2CleanPause.asi`.
+6. Start the game normally.
 
-Do not overwrite an existing `dinput8.dll` blindly. Multiple ASI plugins may share one compatible loader, but universal coexistence with every native plugin is not claimed.
+Do not overwrite an existing `dinput8.dll` blindly. Multiple ASI plugins may share one compatible loader.
+
+The package also contains `ASI_LOADER_SOURCE.txt` and `ULTIMATE_ASI_LOADER_LICENSE.txt` documenting the exact upstream loader release, provenance, hashes, and MIT license.
 
 ## Standalone version.dll edition
 
-The project still builds and validates the standalone proxy, but **v0.2.1 does not publish a standalone asset** while #38 is unresolved. Do not obtain or whitelist an unofficial v0.2.1 `version.dll` build to work around that release gate.
+The project still builds and validates the standalone proxy, but new standalone builds are not published while #38 is unresolved. Do not obtain or whitelist an unofficial standalone build to work around that release gate.
 
-The immutable v0.2.0 release still contains the older retail-proven standalone package, but it does not include the v0.2.1 transition fix.
+The immutable v0.2.0 release still contains the older retail-proven standalone package, but it does not contain the later pause-transition fix.
 
 Both native editions write `kcd2_clean_pause_native.log` beside their own module.
 
 ## Uninstall
 
-Close KCD2 and remove `KCD2CleanPause.asi` plus the optional `kcd2_clean_pause_native.log`. Remove the ASI loader `dinput8.dll` only if no other installed mod needs it.
+Close KCD2 and remove `KCD2CleanPause.asi` plus the optional `kcd2_clean_pause_native.log`. Remove `dinput8.dll` only if no other installed ASI mod needs that loader.
 
 ## Architecture
 
@@ -99,6 +101,7 @@ Start with the [documentation index](docs/README.md).
 Key current documents:
 
 - [Current status and release readiness](docs/STATUS_AND_PLAN.md)
+- [Nexus Mods publication copy](docs/NEXUS.md)
 - [Design](docs/DESIGN.md)
 - [Testing](docs/TESTING.md)
 - [Release process](docs/RELEASE.md)
