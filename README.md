@@ -6,7 +6,7 @@ Tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbo
 
 ## Release status
 
-- **Release target:** `v0.2.2`.
+- **Current stable release:** `v0.2.2`.
 - **Published edition:** `KCD2CleanPause.asi`, using the upstream Ultimate ASI Loader.
 - The ASI package now includes the pinned official x64 Ultimate ASI Loader for a complete fresh installation.
 - **Standalone `version.dll`:** new standalone publication remains withheld while Defender investigation #38 is unresolved. The last published standalone package is v0.2.0.
