@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-No unreleased changes yet.
+- Remove superseded Lua/profile prototype implementation, builders, fixtures, and retail-profile source data from the current production tree.
+- Move historical research and retail evidence under `docs/history/` so `native/` is unambiguously the supported runtime implementation.
 
 ## v0.2.2 — 2026-08-27
 
@@ -39,7 +40,7 @@ Stable feature release for the retail-proven standalone Clean Pause path.
 - Adds dual ASI / standalone `version.dll` distribution built from the same Clean Pause runtime.
 - Adds process-wide duplicate-load protection.
 - Keeps Clean Pause sharp by temporarily removing pause DoF blur and restoring the prior graphics state before normal vanilla presentation resumes.
-- Preserves normal dialogue subtitles and active NPC overhead subtitles across the vanilla-owned pause transition.
+- Preserves normal dialogue subtitles and active NPC overhead subtitles across the vanilla pause transition.
 - Keeps the accepted Start/Escape/B behavior and fail-open vanilla pause contract.
 - Marks the standalone `version.dll` edition supported after retail acceptance of normal pause/menu/resume behavior.
 - Keeps the ASI edition experimental until its loading path receives direct retail testing.
