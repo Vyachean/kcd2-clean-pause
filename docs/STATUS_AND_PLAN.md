@@ -2,7 +2,7 @@
 
 ## Release status
 
-**v0.2.2** is the current release target for the public ASI distribution.
+**v0.2.2** is the current public ASI release.
 
 The Clean Pause runtime is unchanged from v0.2.1 and was tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbox controller and the upstream Ultimate ASI Loader.
 
@@ -21,7 +21,7 @@ v0.2.2 is a packaging-only release:
 - includes loader provenance and its MIT license;
 - preserves the shared-loader installation path for users who already have a compatible `dinput8.dll`.
 
-No runtime retest is required solely for this packaging change because the Clean Pause binary behavior is unchanged from the accepted v0.2.1 runtime.
+No runtime retest was required solely for this packaging change because the Clean Pause binary behavior is unchanged from the accepted v0.2.1 runtime.
 
 ## Accepted runtime behavior
 
@@ -68,14 +68,14 @@ Direct `Clean Pause -> B -> Running` is not part of the current contract.
 
 ## Nexus Mods readiness
 
-After the v0.2.2 release-preparation PR passes Validate + Release CI and is merged:
+The GitHub release stage is complete:
 
-1. the immutable `v0.2.2` tag/release is generated automatically;
-2. upload `kcd2-clean-pause-v0.2.2-asi.zip` to Nexus Mods as the main file;
-3. use the prepared page copy and upload checklist in `docs/NEXUS.md`;
-4. do not upload the CI-only standalone `version.dll` package while #38 remains unresolved.
+- immutable tag/release `v0.2.2` has been published;
+- public main file: `kcd2-clean-pause-v0.2.2-asi.zip`;
+- Nexus page copy and upload checklist are prepared in `docs/NEXUS.md`;
+- the CI-only standalone `version.dll` package must not be uploaded while #38 remains unresolved.
 
-There is no remaining runtime blocker for publishing the ASI edition on Nexus Mods.
+There is no remaining runtime or packaging blocker for publishing the ASI edition on Nexus Mods.
 
 ## Remaining engineering work
 
