@@ -2,16 +2,28 @@
 
 ## Release status
 
-**v0.2.1** is the current stable release target for KCD2 1.5.6 Windows retail.
+**v0.2.2** is the current release target for the public ASI distribution.
 
-Support/distribution status is per edition:
+The Clean Pause runtime is unchanged from v0.2.1 and was tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbox controller and the upstream Ultimate ASI Loader.
 
-- **`KCD2CleanPause.asi`: supported / retail-accepted** on the primary PC Xbox Store / Xbox app target using the upstream Ultimate ASI Loader;
-- **standalone `version.dll`: built and validated but v0.2.1 distribution withheld** while Defender investigation #38 is unresolved. The last published standalone package remains v0.2.0.
+Distribution status is per edition:
 
-## v0.2.1 acceptance
+- **`KCD2CleanPause.asi`: supported / retail-accepted** and packaged with the pinned official x64 Ultimate ASI Loader for a complete fresh installation;
+- **standalone `version.dll`: built and validated but new distribution withheld** while Defender investigation #38 is unresolved. The last published standalone package remains v0.2.0.
 
-The accepted retail behavior is:
+## v0.2.2 scope
+
+v0.2.2 is a packaging-only release:
+
+- bundles the official x64 Ultimate ASI Loader with the ASI ZIP;
+- pins upstream v9.7.4, source commit, release asset, and SHA-256;
+- validates the upstream archive and extracted x64 `dinput8.dll` during release packaging;
+- includes loader provenance and its MIT license;
+- preserves the shared-loader installation path for users who already have a compatible `dinput8.dll`.
+
+No runtime retest is required solely for this packaging change because the Clean Pause binary behavior is unchanged from the accepted v0.2.1 runtime.
+
+## Accepted runtime behavior
 
 - Xbox Start enters the vanilla-owned Clean Pause without drawing the normal pause menu;
 - simulation/picture and ongoing dialogue audio pause together immediately;
@@ -54,29 +66,35 @@ Direct `Clean Pause -> B -> Running` is not part of the current contract.
 11. `wh_cl_NearDof` and `r_DepthOfField` are restored before visible vanilla presentation.
 12. Unresolved core state fails open to visible vanilla pause.
 
-## Release model
+## Nexus Mods readiness
 
-Both ASI and standalone targets are built and validated from the same runtime. Public assets are edition-gated: an edition with an unresolved safety/distribution blocker may remain a CI-only validated artifact while another retail-accepted edition is released.
+After the v0.2.2 release-preparation PR passes Validate + Release CI and is merged:
 
-For v0.2.1, only the ASI ZIP and its public checksum are attached to the GitHub Release. The standalone ZIP remains inside CI validation only until #38 is resolved.
+1. the immutable `v0.2.2` tag/release is generated automatically;
+2. upload `kcd2-clean-pause-v0.2.2-asi.zip` to Nexus Mods as the main file;
+3. use the prepared page copy and upload checklist in `docs/NEXUS.md`;
+4. do not upload the CI-only standalone `version.dll` package while #38 remains unresolved.
 
-## Remaining work
+There is no remaining runtime blocker for publishing the ASI edition on Nexus Mods.
 
-Blocking standalone v0.2.1 distribution:
+## Remaining engineering work
+
+Blocking new standalone distribution:
 
 - resolve Defender issue #38 and record an independent/Microsoft false-positive verdict before publishing a new `version.dll` asset.
 
-Compatibility debt:
+Compatibility hardening:
 
 - strict `WHGame.dll` fingerprint enforcement remains tracked in #36;
-- revalidate ABI facts on any KCD2 update from 1.5.6.
+- capture/revalidate ABI evidence when game builds change.
 
 Non-blocking follow-up:
 
-- verify coexistence with additional real KCD2 ASI plugins; current support is for the tested loader/runtime path, not universal plugin combinations;
+- verify coexistence with additional real KCD2 ASI plugins;
 - investigate safe direct B resume only if a canonical vanilla mechanism is found;
 - broader cutscene/dialogue and repeated-cycle/load-transition robustness;
-- process-lifetime hook/hot-unload policy remains tracked separately.
+- process-lifetime hook/hot-unload policy remains tracked in #37;
+- quarantine historical prototype paths as tracked in #35.
 
 ## Decision rule
 
