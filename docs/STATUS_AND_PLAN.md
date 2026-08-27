@@ -66,6 +66,10 @@ Direct `Clean Pause -> B -> Running` is not part of the current contract.
 11. `wh_cl_NearDof` and `r_DepthOfField` are restored before visible vanilla presentation.
 12. Unresolved core state fails open to visible vanilla pause.
 
+## Repository structure
+
+The supported implementation is the native runtime under `native/`. Superseded Lua/profile prototypes and their builders/fixtures are no longer present in the current production tree. Historical research and retail evidence are isolated under `docs/history/`.
+
 ## Nexus Mods readiness
 
 The GitHub release stage is complete:
@@ -93,8 +97,7 @@ Non-blocking follow-up:
 - verify coexistence with additional real KCD2 ASI plugins;
 - investigate safe direct B resume only if a canonical vanilla mechanism is found;
 - broader cutscene/dialogue and repeated-cycle/load-transition robustness;
-- process-lifetime hook/hot-unload policy remains tracked in #37;
-- quarantine historical prototype paths as tracked in #35.
+- process-lifetime hook/hot-unload policy remains tracked in #37.
 
 ## Decision rule
 
