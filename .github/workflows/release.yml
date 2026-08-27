@@ -24,6 +24,12 @@ on:
 permissions:
   contents: write
 
+env:
+  ULTIMATE_ASI_LOADER_VERSION: v9.7.4
+  ULTIMATE_ASI_LOADER_COMMIT: 6b440669144c4a0bef5718ab155df160d231cd42
+  ULTIMATE_ASI_LOADER_ASSET: Ultimate-ASI-Loader_x64.zip
+  ULTIMATE_ASI_LOADER_SHA256: 8272d83b2692662098746f2d0ad0e2d85f3c8358ab1d63f75fbe835c2c8135fd
+
 jobs:
   build:
     runs-on: windows-latest
@@ -101,14 +107,59 @@ jobs:
             }
           }
 
+          # The supported ASI package includes the exact upstream loader used for retail
+          # acceptance. Pin the tagged release and verify GitHub's published asset digest
+          # before extracting anything, so a mutable/latest download can never silently
+          # change a Clean Pause release.
+          $upstreamRoot = "release/upstream"
+          New-Item -ItemType Directory -Force -Path $upstreamRoot | Out-Null
+          $loaderArchive = Join-Path $upstreamRoot $env:ULTIMATE_ASI_LOADER_ASSET
+          $loaderUrl = "https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/download/$env:ULTIMATE_ASI_LOADER_VERSION/$env:ULTIMATE_ASI_LOADER_ASSET"
+          Invoke-WebRequest -Uri $loaderUrl -OutFile $loaderArchive
+          $loaderArchiveHash = (Get-FileHash $loaderArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($loaderArchiveHash -ne $env:ULTIMATE_ASI_LOADER_SHA256) {
+            throw "Ultimate ASI Loader archive hash mismatch: expected $env:ULTIMATE_ASI_LOADER_SHA256, got $loaderArchiveHash"
+          }
+
+          $loaderExtract = Join-Path $upstreamRoot "ultimate-asi-loader"
+          Expand-Archive -Path $loaderArchive -DestinationPath $loaderExtract -Force
+          $loaderCandidates = @(Get-ChildItem $loaderExtract -Recurse -File -Filter "dinput8.dll")
+          if ($loaderCandidates.Count -ne 1) {
+            throw "Expected exactly one upstream dinput8.dll, found $($loaderCandidates.Count)"
+          }
+          $loader = $loaderCandidates[0].FullName
+          $loaderHeaders = & $dumpbin /nologo /headers $loader | Out-String
+          if ($loaderHeaders -notmatch "machine \(x64\)") { throw "Bundled upstream dinput8.dll is not an x64 image" }
+          $loaderHash = (Get-FileHash $loader -Algorithm SHA256).Hash.ToLowerInvariant()
+
           New-Item -ItemType Directory -Force -Path release/asi | Out-Null
           New-Item -ItemType Directory -Force -Path release/version-dll | Out-Null
           Copy-Item $asi release/asi/KCD2CleanPause.asi
+          Copy-Item $loader release/asi/dinput8.dll
           Copy-Item native/INSTALL_ASI.txt release/asi/INSTALL.txt
           Copy-Item THIRD_PARTY_NOTICES.txt release/asi/THIRD_PARTY_NOTICES.txt
           Copy-Item $versionDll release/version-dll/version.dll
           Copy-Item native/INSTALL_VERSION_DLL.txt release/version-dll/INSTALL.txt
           Copy-Item THIRD_PARTY_NOTICES.txt release/version-dll/THIRD_PARTY_NOTICES.txt
+
+          $loaderLicenseUrl = "https://raw.githubusercontent.com/ThirteenAG/Ultimate-ASI-Loader/$env:ULTIMATE_ASI_LOADER_COMMIT/license"
+          Invoke-WebRequest -Uri $loaderLicenseUrl -OutFile release/asi/ULTIMATE_ASI_LOADER_LICENSE.txt
+          $loaderLicense = Get-Content release/asi/ULTIMATE_ASI_LOADER_LICENSE.txt -Raw
+          if ($loaderLicense -notmatch "MIT License" -or $loaderLicense -notmatch "ThirteenAG") {
+            throw "Unexpected Ultimate ASI Loader license content"
+          }
+
+          @(
+            "Ultimate ASI Loader",
+            "Version: $env:ULTIMATE_ASI_LOADER_VERSION",
+            "Source commit: $env:ULTIMATE_ASI_LOADER_COMMIT",
+            "Source release: https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases/tag/$env:ULTIMATE_ASI_LOADER_VERSION",
+            "Upstream asset: $env:ULTIMATE_ASI_LOADER_ASSET",
+            "Upstream asset SHA-256: $loaderArchiveHash",
+            "Bundled file: dinput8.dll",
+            "Bundled file SHA-256: $loaderHash",
+            "License: MIT (see ULTIMATE_ASI_LOADER_LICENSE.txt)"
+          ) | Set-Content release/asi/ASI_LOADER_SOURCE.txt -Encoding ascii
 
           $asiAsset = "kcd2-clean-pause-${{ steps.meta.outputs.tag }}-asi.zip"
           $versionAsset = "kcd2-clean-pause-${{ steps.meta.outputs.tag }}-version-dll.zip"
@@ -166,7 +217,7 @@ jobs:
           sha256sum -c SHA256SUMS.txt
           unzip -t "$ASI_ASSET"
           unzip -t "$VERSION_ASSET"
-          [[ "$(unzip -Z1 "$ASI_ASSET" | sort)" == $'INSTALL.txt\nKCD2CleanPause.asi\nTHIRD_PARTY_NOTICES.txt' ]]
+          [[ "$(unzip -Z1 "$ASI_ASSET" | sort)" == $'ASI_LOADER_SOURCE.txt\nINSTALL.txt\nKCD2CleanPause.asi\nTHIRD_PARTY_NOTICES.txt\nULTIMATE_ASI_LOADER_LICENSE.txt\ndinput8.dll' ]]
           [[ "$(unzip -Z1 "$VERSION_ASSET" | sort)" == $'INSTALL.txt\nTHIRD_PARTY_NOTICES.txt\nversion.dll' ]]
       - name: Ensure immutable release tag
         id: release_tag

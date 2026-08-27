@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-No unreleased changes yet.
+- Bundle the retail-tested official x64 Ultimate ASI Loader with generated ASI release packages for a complete fresh install.
+- Pin the upstream loader release/version, source commit and archive SHA-256; fail release packaging if provenance or x64 validation does not match.
+- Include loader provenance and its upstream MIT license in the ASI ZIP while preserving the existing-loader coexistence guidance.
 
 ## v0.2.1 — 2026-08-26
 

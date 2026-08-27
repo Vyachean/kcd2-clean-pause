@@ -1,5 +1,7 @@
 KCD2 Clean Pause third-party notices
 
+ASI release packages also redistribute the official x64 Ultimate ASI Loader from ThirteenAG under the MIT License. The exact upstream version, source commit and artifact hashes are recorded in ASI_LOADER_SOURCE.txt inside the ASI package, and the upstream MIT license is included as ULTIMATE_ASI_LOADER_LICENSE.txt.
+
 MinHook v1.3.4
 https://github.com/TsudaKageyu/minhook
 
