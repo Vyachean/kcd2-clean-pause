@@ -2,9 +2,18 @@
 
 ## Unreleased
 
-- Bundle the retail-tested official x64 Ultimate ASI Loader with generated ASI release packages for a complete fresh install.
-- Pin the upstream loader release/version, source commit and archive SHA-256; fail release packaging if provenance or x64 validation does not match.
-- Include loader provenance and its upstream MIT license in the ASI ZIP while preserving the existing-loader coexistence guidance.
+No unreleased changes yet.
+
+## v0.2.2 — 2026-08-27
+
+Packaging release for the supported ASI edition.
+
+- Bundles the retail-tested official x64 Ultimate ASI Loader with the generated ASI release package for a complete fresh installation.
+- Pins upstream Ultimate ASI Loader v9.7.4, its source commit, release asset, and SHA-256 instead of using a floating latest download.
+- Fails release packaging if the upstream archive digest or x64 loader validation does not match the reviewed input.
+- Includes loader provenance and the upstream MIT license in the ASI ZIP.
+- Preserves the existing-loader path: users who already have a compatible `dinput8.dll` can keep it and install only `KCD2CleanPause.asi`.
+- Does not change the Clean Pause runtime behavior accepted in v0.2.1.
 
 ## v0.2.1 — 2026-08-26
 
