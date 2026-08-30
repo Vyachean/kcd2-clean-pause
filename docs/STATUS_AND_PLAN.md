@@ -6,9 +6,11 @@
 
 The Clean Pause runtime is unchanged from v0.2.1 and was tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbox controller and the upstream Ultimate ASI Loader.
 
+**Steam compatibility has not yet been explicitly verified.** A Steam user report showed that the previous shared-loader instructions could leave `dinput8.dll` and `KCD2CleanPause.asi` in different directories, preventing Ultimate ASI Loader from discovering the plugin. A follow-up report also indicates a crash when the loader is placed where it can load the plugin; loader-only versus Clean-Pause isolation is required before attributing that crash to the mod runtime.
+
 Distribution status is per edition:
 
-- **`KCD2CleanPause.asi`: supported / retail-accepted** and packaged with the pinned official x64 Ultimate ASI Loader for a complete fresh installation;
+- **`KCD2CleanPause.asi`: supported / retail-accepted on the tested Xbox Store build** and packaged with the pinned official x64 Ultimate ASI Loader for a complete fresh installation;
 - **standalone `version.dll`: built and validated but new distribution withheld** while Defender investigation #38 is unresolved. The last published standalone package remains v0.2.0.
 
 ## v0.2.2 scope
@@ -19,9 +21,11 @@ v0.2.2 is a packaging-only release:
 - pins upstream v9.7.4, source commit, release asset, and SHA-256;
 - validates the upstream archive and extracted x64 `dinput8.dll` during release packaging;
 - includes loader provenance and its MIT license;
-- preserves the shared-loader installation path for users who already have a compatible `dinput8.dll`.
+- supports shared compatible ASI loaders, provided `KCD2CleanPause.asi` is installed in a plugin location that the existing loader actually scans.
 
-No runtime retest was required solely for this packaging change because the Clean Pause binary behavior is unchanged from the accepted v0.2.1 runtime.
+The post-release documentation was corrected after a Steam report exposed an ambiguity in the original shared-loader instructions: keeping an existing `dinput8.dll` does not imply that an ASI placed in a different directory will be discovered automatically.
+
+No runtime retest was required solely for the original packaging change because the Clean Pause binary behavior is unchanged from the accepted v0.2.1 runtime. Steam runtime compatibility remains a separate validation task.
 
 ## Accepted runtime behavior
 
@@ -77,9 +81,10 @@ The GitHub release stage is complete:
 - immutable tag/release `v0.2.2` has been published;
 - public main file: `kcd2-clean-pause-v0.2.2-asi.zip`;
 - Nexus page copy and upload checklist are prepared in `docs/NEXUS.md`;
+- current documentation now distinguishes fresh installation from shared-loader installation and explicitly marks Steam as not yet validated;
 - the CI-only standalone `version.dll` package must not be uploaded while #38 remains unresolved.
 
-There is no remaining runtime or packaging blocker for publishing the ASI edition on Nexus Mods.
+The existing immutable v0.2.2 ZIP still contains the earlier ambiguous `INSTALL.txt`; README/Nexus guidance should be treated as the corrected installation instructions until the next release package is published.
 
 ## Remaining engineering work
 
@@ -89,6 +94,9 @@ Blocking new standalone distribution:
 
 Compatibility hardening:
 
+- isolate the reported Steam startup crash with loader-only versus `KCD2CleanPause.asi` testing;
+- obtain a Steam native log / `WHGame.dll` fingerprint if Clean Pause loads far enough to create one;
+- explicitly validate the Steam runtime before claiming Steam support;
 - strict `WHGame.dll` fingerprint enforcement remains tracked in #36;
 - capture/revalidate ABI evidence when game builds change.
 
