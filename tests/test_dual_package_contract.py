@@ -89,9 +89,12 @@ class DualPackageContractTests(unittest.TestCase):
 
     def test_asi_install_supports_fresh_and_shared_loader_installations(self):
         self.assertIn("includes the retail-tested x64 Ultimate ASI Loader", ASI_INSTALL)
-        self.assertIn("copy both dinput8.dll and KCD2CleanPause.asi", ASI_INSTALL)
-        self.assertIn("keep the existing loader and copy only KCD2CleanPause.asi", ASI_INSTALL)
-        self.assertIn("Do not overwrite an existing dinput8.dll blindly", ASI_INSTALL)
+        self.assertIn("Copy both dinput8.dll and KCD2CleanPause.asi", ASI_INSTALL)
+        self.assertIn("do not overwrite it blindly", ASI_INSTALL)
+        self.assertIn("where that existing ASI loader actually searches for plugins", ASI_INSTALL)
+        self.assertIn("place KCD2CleanPause.asi beside the existing dinput8.dll", ASI_INSTALL)
+        self.assertIn("scripts/ and plugins/ directories", ASI_INSTALL)
+        self.assertIn("unless that loader is explicitly configured to scan the latter location", ASI_INSTALL)
 
 
 if __name__ == "__main__":
