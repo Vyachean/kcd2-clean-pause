@@ -1,6 +1,6 @@
 # Nexus Mods publication copy — KCD2 Clean Pause v0.2.2
 
-Prepared for the first Nexus Mods publication of the ASI edition.
+Prepared for the Nexus Mods publication of the ASI edition.
 
 ## Page metadata
 
@@ -23,6 +23,10 @@ Pause Kingdom Come: Deliverance II without covering the current gameplay view, k
 **Tested version**
 
 Kingdom Come: Deliverance II 1.5.6 — PC Xbox Store / Xbox app version, tested with an Xbox controller.
+
+**Steam status**
+
+Steam compatibility has not yet been explicitly verified. Steam crash/load reports should include the native log when available and the exact ASI-loader/plugin locations.
 
 ## Description
 
@@ -55,16 +59,24 @@ Clean Pause does not create a separate pause system. KCD2 remains the owner of t
 
 The main v0.2.2 package includes the official x64 **Ultimate ASI Loader** used by the tested setup.
 
+### Fresh installation
+
 1. Close Kingdom Come: Deliverance II.
-2. Open the game directory containing the game executable / `WHGame.dll`.
-3. If you do not already use an ASI loader, copy both:
+2. Open the directory containing the game executable / `WHGame.dll`.
+3. Copy both files from the package into that same directory:
    - `dinput8.dll`
    - `KCD2CleanPause.asi`
-   into that directory.
-4. If you already have a compatible `dinput8.dll` ASI loader installed, keep it and copy only `KCD2CleanPause.asi`.
-5. Start the game normally.
+4. Start the game normally.
 
-Do not blindly overwrite an existing `dinput8.dll`. Multiple ASI plugins can share a compatible loader.
+### Existing ASI loader
+
+If another mod already installed a compatible `dinput8.dll`, **do not overwrite it blindly**.
+
+`KCD2CleanPause.asi` must be placed where that existing ASI loader actually searches for plugins. With Ultimate ASI Loader, the simplest shared-loader layout is to put `KCD2CleanPause.asi` beside the existing `dinput8.dll`. Ultimate ASI Loader can also load plugins from its `scripts/` and `plugins/` directories.
+
+Do not leave `dinput8.dll` in one directory and put `KCD2CleanPause.asi` beside `WHGame.dll` in another directory unless the existing loader is explicitly configured to scan that location.
+
+Multiple ASI plugins can share one compatible loader, but the loader location and plugin search paths still matter.
 
 ## Uninstall
 
@@ -77,9 +89,31 @@ Remove `dinput8.dll` only if no other installed ASI mod needs it.
 
 ## Troubleshooting
 
-The mod writes `kcd2_clean_pause_native.log` beside `KCD2CleanPause.asi`.
+When Clean Pause is successfully loaded, it writes `kcd2_clean_pause_native.log` beside `KCD2CleanPause.asi`.
 
-If Clean Pause does not activate or the game falls back to the normal pause menu, include that log when reporting the problem together with the game version and storefront/build you tested.
+### No native log is created
+
+If `kcd2_clean_pause_native.log` is not created at all, first verify that the ASI loader is actually loading `KCD2CleanPause.asi` from its configured plugin location. An ASI file placed beside `WHGame.dll` is not automatically discovered by a loader located elsewhere.
+
+### Game crashes while loading native mods
+
+Isolate the loader from Clean Pause:
+
+1. Keep the ASI loader in the location being tested.
+2. Temporarily remove `KCD2CleanPause.asi` and any other `.asi` files from that loader's search path.
+3. Start the game.
+4. If the game starts normally, add only `KCD2CleanPause.asi` and test again.
+
+If the game works with the loader alone but crashes after adding Clean Pause, report it as a Clean Pause compatibility issue and include:
+
+- game version;
+- storefront/build — Steam, Xbox Store / Xbox app, or another build;
+- location of `dinput8.dll`;
+- location of `KCD2CleanPause.asi`;
+- whether the game starts with the loader present and Clean Pause removed;
+- `kcd2_clean_pause_native.log`, if one was created before the crash.
+
+Steam has not yet been explicitly validated against the current runtime, so Steam reports with the native log are especially useful.
 
 Do not install the ASI edition together with an old standalone Clean Pause `version.dll` edition.
 
@@ -130,7 +164,7 @@ Do **not** upload the CI-only standalone `version.dll` package while issue #38 r
 - Bundles the official x64 Ultimate ASI Loader for a complete fresh installation.
 - Pins and verifies the upstream loader release and SHA-256 during packaging.
 - Includes upstream loader provenance and MIT license.
-- Keeps existing ASI-loader installations supported: users can retain their current `dinput8.dll` and install only `KCD2CleanPause.asi`.
+- Supports shared compatible ASI loaders, with the plugin installed in that loader's actual plugin search path.
 - Clean Pause runtime behavior is unchanged from v0.2.1.
 
 ### 0.2.1 runtime changes included in this release
