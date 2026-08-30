@@ -16,7 +16,11 @@ kcd2-clean-pause-v<VERSION>-asi.zip
 
 The release package includes the exact x64 Ultimate ASI Loader used by the supported retail path. The release workflow downloads it directly from the official `ThirteenAG/Ultimate-ASI-Loader` tagged release, pins the upstream version/source commit, verifies the published archive SHA-256 before extraction, verifies that the bundled `dinput8.dll` is x64, and records both archive and extracted-file provenance in `ASI_LOADER_SOURCE.txt`.
 
-A user who already has a compatible `dinput8.dll` for other ASI plugins should keep that loader and install only `KCD2CleanPause.asi`; the bundled loader is primarily for a complete fresh installation.
+For a fresh installation, the bundled `dinput8.dll` and `KCD2CleanPause.asi` are installed together beside the KCD2 executable / `WHGame.dll`.
+
+A user who already has a compatible `dinput8.dll` for other ASI plugins should keep that loader rather than overwrite it. `KCD2CleanPause.asi` must then be installed in a plugin location that the existing loader actually scans. With Ultimate ASI Loader, the simplest shared-loader layout is to place the ASI beside the existing `dinput8.dll`; its `scripts/` and `plugins/` directories are also supported.
+
+The bundled loader is primarily for a complete fresh installation. Shared-loader compatibility does not mean an ASI placed beside `WHGame.dll` will be discovered by a loader located in another directory unless that loader is configured to scan that location.
 
 ## Standalone version.dll edition
 
