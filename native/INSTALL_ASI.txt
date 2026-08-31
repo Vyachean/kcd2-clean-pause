@@ -1,8 +1,10 @@
 KCD2 Clean Pause — ASI installation
 
-This package includes the retail-tested x64 Ultimate ASI Loader dinput8.dll from the official ThirteenAG release. See ASI_LOADER_SOURCE.txt for the pinned upstream version, source commit and SHA-256 provenance, and ULTIMATE_ASI_LOADER_LICENSE.txt for its MIT license.
+This package includes the x64 Ultimate ASI Loader dinput8.dll from the official ThirteenAG release. See ASI_LOADER_SOURCE.txt for the pinned upstream version, source commit and SHA-256 provenance, and ULTIMATE_ASI_LOADER_LICENSE.txt for its MIT license.
 
-Tested runtime: Kingdom Come: Deliverance II 1.5.6 on the PC Xbox Store / Xbox app version. Steam compatibility has not yet been explicitly verified.
+Runtime status:
+- The current public v0.2.2 release was runtime-tested with Kingdom Come: Deliverance II 1.5.6 on the PC Xbox Store / Xbox app version.
+- The current development runtime also contains fail-closed 1.5.6 profiles for Steam, GOG and Epic Games Store. Their build/ABI mappings are statically and automatically validated, but in-game Clean Pause smoke QA is still required before those storefronts are described as runtime-tested by this project.
 
 Fresh installation:
 1. Close Kingdom Come: Deliverance II.
@@ -31,7 +33,9 @@ If the game crashes while loading native mods:
 3. Start the game.
 4. If the game starts normally, add only KCD2CleanPause.asi and test again.
 
-If the game works with the loader alone but crashes after adding Clean Pause, report the KCD2 version, storefront/build, locations of dinput8.dll and KCD2CleanPause.asi, and kcd2_clean_pause_native.log if one was created before the crash.
+If the game works with the loader alone but crashes after adding Clean Pause, report the KCD2 version, storefront/build (Steam, GOG, Epic Games Store, Xbox / Microsoft Store, or another build), locations of dinput8.dll and KCD2CleanPause.asi, and kcd2_clean_pause_native.log if one was created before the crash.
+
+The current profiled runtime logs the detected PE fingerprint/storefront/build identity and refuses to install version-specific hooks when its build or ABI gates do not validate.
 
 Do not install this ASI package together with the standalone Clean Pause version.dll package. They contain the same mod and would load it twice.
 
