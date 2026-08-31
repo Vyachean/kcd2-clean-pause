@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace kcd2::runtime {
@@ -17,11 +18,6 @@ struct ImageView {
     unsigned sectionCount{};
 };
 
-// KCD2 is currently sold for PC through four binary distributions. Steam, GOG
-// and Epic have independent release_1_5 Address Library mappings; the Xbox /
-// Microsoft Store build is tracked from Clean Pause's own retail capture.
-// A known storefront is not automatically a supported build: exact fingerprint
-// registration remains mandatory before hooks can be installed.
 const std::array<StorefrontDescriptor, 4> kKnownStorefronts{{
     {Storefront::Steam, "Steam", &Release15AbiProfile(), true},
     {Storefront::EpicGamesStore, "Epic Games Store", &Release15AbiProfile(), true},
@@ -29,15 +25,20 @@ const std::array<StorefrontDescriptor, 4> kKnownStorefronts{{
     {Storefront::XboxMicrosoftStore, "Xbox / Microsoft Store", &Release15AbiProfile(), false},
 }};
 
-// Exact builds Clean Pause can identify safely today. Epic and GOG are deliberately
-// not added with timestamp-only or inferred fingerprints. Adding support for either
-// requires one complete PE fingerprint row; the storefront/ABI architecture is
-// already present and no mature pause/HUD code needs to change.
-const std::array<BuildProfile, 2> kSupportedBuilds{{
+// Build identity is deliberately layered. When a complete PE fingerprint is known,
+// use it. For GOG/Epic, public KCSE/Address-Library evidence identifies the shipped
+// binary by distribution + Warhorse Assembly.Id/Branch build code. Those profiles
+// are then additionally gated by the exact cross-distribution gEnv RVA during
+// environment resolution and by the strong runtime identity checks in the bootstrap.
+const std::array<BuildProfile, 4> kSupportedBuilds{{
     {
         Storefront::XboxMicrosoftStore,
         "Xbox / Microsoft Store 1.5.6",
+        BuildIdentityStrategy::ExactPeFingerprint,
         {0x6a391f7b, 0x05bf2000, 0x00000000},
+        nullptr,
+        0,
+        0,
         EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan,
         &Release15AbiProfile(),
         BuildValidationLevel::RuntimeTested,
@@ -45,10 +46,38 @@ const std::array<BuildProfile, 2> kSupportedBuilds{{
     {
         Storefront::Steam,
         "Steam 1.5.6 release_1_5-15693",
+        BuildIdentityStrategy::ExactPeFingerprint,
         {0x6a350e20, 0x05b2d000, 0x00000000},
+        "release_1_5-15693",
+        0,
+        0x0492d7f8,
         EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor,
         &Release15AbiProfile(),
         BuildValidationLevel::StaticReverseEngineering,
+    },
+    {
+        Storefront::GOG,
+        "GOG 1.5.6 release_1_5-15693",
+        BuildIdentityStrategy::StorefrontBuildCode,
+        {},
+        "release_1_5-15693",
+        0,
+        0x049177f8,
+        EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor,
+        &Release15AbiProfile(),
+        BuildValidationLevel::ExternalRuntimeEvidence,
+    },
+    {
+        Storefront::EpicGamesStore,
+        "Epic Games Store 1.5.6 release_1_5-15693",
+        BuildIdentityStrategy::StorefrontBuildCode,
+        {},
+        "release_1_5-15693",
+        0x6a34f917,
+        0x0491d8b8,
+        EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor,
+        &Release15AbiProfile(),
+        BuildValidationLevel::ExternalRuntimeEvidence,
     },
 }};
 
@@ -148,6 +177,124 @@ std::uint8_t* FindAscii(const ImageView& image, const char* text)
     return nullptr;
 }
 
+bool ResolveStorefront(const ImageView& image, Storefront& out)
+{
+    out = Storefront::Unknown;
+    struct Marker {
+        const char* text;
+        Storefront storefront;
+    };
+    static constexpr std::array<Marker, 3> kMarkers{{
+        {"steam_api64.dll", Storefront::Steam},
+        {"Galaxy64.dll", Storefront::GOG},
+        {"EOSSDK-Win64-Shipping.dll", Storefront::EpicGamesStore},
+    }};
+
+    unsigned matches{};
+    for (const auto& marker : kMarkers) {
+        if (!FindAscii(image, marker.text))
+            continue;
+        out = marker.storefront;
+        ++matches;
+    }
+    if (matches != 1) {
+        out = Storefront::Unknown;
+        return false;
+    }
+    return true;
+}
+
+std::wstring ParentPath(std::wstring path)
+{
+    while (!path.empty() && (path.back() == L'\\' || path.back() == L'/'))
+        path.pop_back();
+    const auto separator = path.find_last_of(L"\\/");
+    if (separator == std::wstring::npos)
+        return {};
+    path.resize(separator);
+    return path;
+}
+
+bool ReadSmallTextFile(const std::wstring& path, std::string& out)
+{
+    out.clear();
+    HANDLE file = CreateFileW(
+        path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return false;
+
+    LARGE_INTEGER size{};
+    const bool sizeOk = GetFileSizeEx(file, &size) != FALSE
+        && size.QuadPart > 0 && size.QuadPart <= 4 * 1024 * 1024;
+    if (!sizeOk) {
+        CloseHandle(file);
+        return false;
+    }
+
+    out.resize(static_cast<std::size_t>(size.QuadPart));
+    DWORD bytesRead{};
+    const bool readOk = ReadFile(
+        file, out.data(), static_cast<DWORD>(out.size()), &bytesRead, nullptr) != FALSE;
+    CloseHandle(file);
+    if (!readOk || bytesRead != out.size()) {
+        out.clear();
+        return false;
+    }
+    return true;
+}
+
+std::string JsonStringAfter(const std::string& json, const char* anchor, const char* key)
+{
+    const auto anchorPos = json.find(anchor);
+    if (anchorPos == std::string::npos)
+        return {};
+    const auto keyPos = json.find(key, anchorPos);
+    if (keyPos == std::string::npos)
+        return {};
+    const auto colon = json.find(':', keyPos + std::strlen(key));
+    if (colon == std::string::npos)
+        return {};
+    const auto firstQuote = json.find('"', colon);
+    if (firstQuote == std::string::npos)
+        return {};
+    const auto secondQuote = json.find('"', firstQuote + 1);
+    if (secondQuote == std::string::npos)
+        return {};
+    return json.substr(firstQuote + 1, secondQuote - firstQuote - 1);
+}
+
+std::string JsonNumberAfter(const std::string& json, const char* anchor, const char* key)
+{
+    const auto anchorPos = json.find(anchor);
+    if (anchorPos == std::string::npos)
+        return {};
+    const auto keyPos = json.find(key, anchorPos);
+    if (keyPos == std::string::npos)
+        return {};
+    const auto colon = json.find(':', keyPos + std::strlen(key));
+    if (colon == std::string::npos)
+        return {};
+
+    auto pos = colon + 1;
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t'))
+        ++pos;
+    const auto begin = pos;
+    while (pos < json.size() && json[pos] >= '0' && json[pos] <= '9')
+        ++pos;
+    return json.substr(begin, pos - begin);
+}
+
+bool BuildCodeMatches(const BuildProfile& profile, const DetectedBuildIdentity& identity)
+{
+    if (identity.storefront != profile.storefront || !profile.buildCode)
+        return false;
+    if (identity.buildCode != profile.buildCode)
+        return false;
+    return profile.requiredTimestamp == 0
+        || identity.fingerprint.timestamp == profile.requiredTimestamp;
+}
+
 std::vector<std::uint8_t*> FindLeaXrefs(const ImageView& image, const std::uint8_t* target)
 {
     std::vector<std::uint8_t*> matches;
@@ -232,7 +379,7 @@ bool ResolveUniqueConsoleStorage(const ImageView& image, std::uint8_t*& storage)
             continue;
         }
         if (candidate != storage)
-            return false; // Ambiguous anchor: fail closed instead of choosing first.
+            return false;
     }
     return storage != nullptr;
 }
@@ -252,11 +399,71 @@ bool ReadFingerprint(HMODULE whGame, Fingerprint& out)
     return true;
 }
 
-const BuildProfile* MatchSupportedBuild(const Fingerprint& fingerprint)
+bool DetectStorefront(HMODULE whGame, Storefront& out)
+{
+    ImageView image{};
+    if (!GetImageView(whGame, image)) {
+        out = Storefront::Unknown;
+        return false;
+    }
+    return ResolveStorefront(image, out);
+}
+
+bool ReadBuildCode(HMODULE whGame, std::string& out)
+{
+    out.clear();
+    wchar_t modulePath[32768]{};
+    const DWORD length = GetModuleFileNameW(whGame, modulePath, static_cast<DWORD>(std::size(modulePath)));
+    if (!length || length >= std::size(modulePath))
+        return false;
+
+    std::wstring directory = ParentPath(std::wstring(modulePath, length));
+    for (unsigned depth = 0; depth < 5 && !directory.empty(); ++depth) {
+        std::string json;
+        if (ReadSmallTextFile(directory + L"\\whdlversions.json", json)) {
+            const std::string branch = JsonStringAfter(json, "\"Branch\"", "\"Name\"");
+            const std::string assemblyId = JsonNumberAfter(json, "\"Assembly\"", "\"Id\"");
+            if (!branch.empty() && !assemblyId.empty()) {
+                out = branch + "-" + assemblyId;
+                return true;
+            }
+        }
+        directory = ParentPath(directory);
+    }
+    return false;
+}
+
+bool ReadBuildIdentity(HMODULE whGame, DetectedBuildIdentity& out)
+{
+    out = {};
+    if (!ReadFingerprint(whGame, out.fingerprint))
+        return false;
+
+    Storefront storefront{};
+    if (DetectStorefront(whGame, storefront))
+        out.storefront = storefront;
+
+    std::string buildCode;
+    if (ReadBuildCode(whGame, buildCode))
+        out.buildCode = std::move(buildCode);
+    return true;
+}
+
+const BuildProfile* MatchSupportedBuild(const DetectedBuildIdentity& identity)
 {
     for (const auto& profile : kSupportedBuilds) {
-        if (FingerprintsEqual(profile.fingerprint, fingerprint))
-            return &profile;
+        switch (profile.identityStrategy) {
+        case BuildIdentityStrategy::ExactPeFingerprint:
+            if (FingerprintsEqual(profile.exactFingerprint, identity.fingerprint))
+                return &profile;
+            break;
+        case BuildIdentityStrategy::StorefrontBuildCode:
+            if (BuildCodeMatches(profile, identity))
+                return &profile;
+            break;
+        default:
+            break;
+        }
     }
     return nullptr;
 }
@@ -282,6 +489,18 @@ const char* StorefrontName(Storefront storefront)
     return descriptor ? descriptor->name : "Unknown storefront";
 }
 
+const char* BuildIdentityStrategyName(BuildIdentityStrategy strategy)
+{
+    switch (strategy) {
+    case BuildIdentityStrategy::ExactPeFingerprint:
+        return "exact-pe-fingerprint";
+    case BuildIdentityStrategy::StorefrontBuildCode:
+        return "storefront-build-code";
+    default:
+        return "unknown-build-identity";
+    }
+}
+
 const char* EnvironmentLocatorName(EnvironmentLocatorStrategy strategy)
 {
     switch (strategy) {
@@ -301,6 +520,8 @@ const char* BuildValidationName(BuildValidationLevel validation)
         return "runtime-tested";
     case BuildValidationLevel::StaticReverseEngineering:
         return "static-reverse-engineering";
+    case BuildValidationLevel::ExternalRuntimeEvidence:
+        return "external-runtime-evidence";
     default:
         return "unknown-validation";
     }
@@ -324,16 +545,16 @@ bool ResolveCanonicalEnvironmentBase(
         image.nt->FileHeader.TimeDateStamp,
         image.nt->OptionalHeader.SizeOfImage,
         image.nt->OptionalHeader.CheckSum};
-    if (!FingerprintsEqual(actual, profile.fingerprint))
+    if (profile.identityStrategy == BuildIdentityStrategy::ExactPeFingerprint
+        && !FingerprintsEqual(actual, profile.exactFingerprint))
+        return false;
+    if (profile.requiredTimestamp && actual.timestamp != profile.requiredTimestamp)
         return false;
 
     std::uint8_t* consoleStorage{};
     if (!ResolveUniqueConsoleStorage(image, consoleStorage))
         return false;
 
-    // The locator is build-specific, while the field displacement belongs to the
-    // selected ABI. This distinction lets Steam/GOG/Epic share one release_1_5 ABI
-    // even when their absolute gEnv addresses and PE fingerprints differ.
     const auto consoleOffset = profile.abi->environment.consoleOffset;
     const auto environmentSize = profile.abi->environment.size;
     const auto storageAddress = reinterpret_cast<std::uintptr_t>(consoleStorage);
@@ -351,6 +572,12 @@ bool ResolveCanonicalEnvironmentBase(
         return false;
     if (candidate + consoleOffset != consoleStorage)
         return false;
+
+    if (profile.expectedEnvironmentRva) {
+        const auto candidateRva = static_cast<std::uint64_t>(candidate - image.base);
+        if (candidateRva != profile.expectedEnvironmentRva)
+            return false;
+    }
 
     environmentBase = candidate;
     return true;
