@@ -14,6 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+option(CLEAN_PAUSE_BUILD_RUNTIME_TESTS "Build executable runtime-profile tests" OFF)
 
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" CLEAN_PAUSE_VERSION)
 string(STRIP "${CLEAN_PAUSE_VERSION}" CLEAN_PAUSE_VERSION)
@@ -106,8 +107,8 @@ set_target_properties(kcd2_clean_pause_asi PROPERTIES
   SUFFIX ".asi"
 )
 
-include(CTest)
-if(BUILD_TESTING)
+if(CLEAN_PAUSE_BUILD_RUNTIME_TESTS)
+  enable_testing()
   add_executable(kcd2_runtime_profile_tests
     tests/runtime_profile_tests.cpp
     src/kcd2_runtime_profile.cpp
