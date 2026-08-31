@@ -2,7 +2,7 @@
 
 Prepared for the currently published ASI edition.
 
-> Development note: v0.2.2 remains the immutable Xbox / Microsoft Store-tested public release. PR #44 implements fail-closed KCD2 1.5.6 profiles for Steam, GOG and Epic Games Store as well as Xbox / Microsoft Store. Those new storefront profiles must not be advertised here as Clean Pause runtime-tested until the corresponding in-game smoke QA is complete and a new release is published.
+> Release-candidate note: v0.2.2 remains the immutable Xbox / Microsoft Store-tested Nexus/stable release. GitHub prerelease v0.3.0-rc.1 contains fail-closed KCD2 1.5.6 profiles for Steam, GOG, Epic Games Store and Xbox / Microsoft Store. Do not promote the Nexus compatibility claim until the intended in-game smoke QA is complete and stable v0.3.0 is published.
 
 ## Page metadata
 
@@ -28,7 +28,7 @@ Kingdom Come: Deliverance II 1.5.6 — PC Xbox Store / Xbox app version, tested 
 
 **Other storefronts**
 
-The current source/development runtime has explicit 1.5.6 compatibility profiles for Steam, GOG and Epic Games Store backed by public reverse-engineering/runtime evidence and automated Windows validation. These profiles are intended for the next release and still require Clean Pause in-game smoke QA before the Nexus compatibility claim is expanded.
+GitHub prerelease v0.3.0-rc.1 contains explicit 1.5.6 compatibility profiles for Steam, GOG and Epic Games Store backed by public reverse-engineering/runtime evidence and automated Windows validation. Steam is the current Clean Pause smoke-test target; GOG/Epic should not yet be described as Clean Pause runtime-tested by this project.
 
 ## Description
 
@@ -115,7 +115,7 @@ If the game works with the loader alone but crashes after adding Clean Pause, re
 - whether the game starts with the loader present and Clean Pause removed;
 - `kcd2_clean_pause_native.log`, if one was created before the crash.
 
-For builds from the development multi-store runtime, the native log also records the detected fingerprint/storefront/build profile and whether the fail-closed runtime gates reached hook installation.
+For v0.3.0-rc.1, the native log records the detected fingerprint/storefront/build profile and whether the fail-closed runtime gates reached hook installation.
 
 Do not install the ASI edition together with an old standalone Clean Pause `version.dll` edition.
 
@@ -192,10 +192,12 @@ Do **not** upload a CI/development build as v0.2.2 and do **not** upload the CI-
 
 Before changing the Nexus compatibility claim for Steam/GOG/Epic:
 
-- use the final PR #44-derived release candidate, not an earlier diagnostic probe;
-- complete the intended in-game Clean Pause smoke QA for each storefront being claimed as runtime-tested;
-- update the page version/changelog and tested-storefront wording together;
-- retain the fail-closed wording for unknown/mismatched KCD2 builds.
+- test the published GitHub prerelease v0.3.0-rc.1 rather than an earlier diagnostic/CI build;
+- complete the intended Clean Pause in-game smoke QA for every storefront being claimed as runtime-tested;
+- if the Steam RC is accepted, publish stable v0.3.0 through the normal immutable GitHub release workflow;
+- update the Nexus page version/changelog and tested-storefront wording together;
+- upload only the stable v0.3.0 GitHub ASI artifact, not the RC artifact;
+- retain fail-closed wording for unknown/mismatched KCD2 builds.
 
 ## Optional presentation asset
 
