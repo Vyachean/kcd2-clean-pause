@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace kcd2::runtime {
 
@@ -20,6 +21,12 @@ enum class Storefront {
     EpicGamesStore,
     GOG,
     XboxMicrosoftStore,
+    Unknown,
+};
+
+enum class BuildIdentityStrategy {
+    ExactPeFingerprint,
+    StorefrontBuildCode,
 };
 
 enum class EnvironmentLocatorStrategy {
@@ -30,6 +37,7 @@ enum class EnvironmentLocatorStrategy {
 enum class BuildValidationLevel {
     RuntimeTested,
     StaticReverseEngineering,
+    ExternalRuntimeEvidence,
 };
 
 struct StorefrontDescriptor {
@@ -39,21 +47,35 @@ struct StorefrontDescriptor {
     bool publicRelease15AddressLibrary{};
 };
 
+struct DetectedBuildIdentity {
+    Fingerprint fingerprint{};
+    Storefront storefront{Storefront::Unknown};
+    std::string buildCode{};
+};
+
 struct BuildProfile {
     Storefront storefront{};
     const char* name{};
-    Fingerprint fingerprint{};
+    BuildIdentityStrategy identityStrategy{};
+    Fingerprint exactFingerprint{};
+    const char* buildCode{};
+    std::uint32_t requiredTimestamp{};
+    std::uint32_t expectedEnvironmentRva{};
     EnvironmentLocatorStrategy environmentLocator{};
     const AbiProfile* abi{};
     BuildValidationLevel validation{};
 };
 
 bool ReadFingerprint(HMODULE whGame, Fingerprint& out);
-const BuildProfile* MatchSupportedBuild(const Fingerprint& fingerprint);
+bool DetectStorefront(HMODULE whGame, Storefront& out);
+bool ReadBuildCode(HMODULE whGame, std::string& out);
+bool ReadBuildIdentity(HMODULE whGame, DetectedBuildIdentity& out);
+const BuildProfile* MatchSupportedBuild(const DetectedBuildIdentity& identity);
 
 const StorefrontDescriptor* KnownStorefronts(std::size_t& count);
 const StorefrontDescriptor* FindStorefront(Storefront storefront);
 const char* StorefrontName(Storefront storefront);
+const char* BuildIdentityStrategyName(BuildIdentityStrategy strategy);
 const char* EnvironmentLocatorName(EnvironmentLocatorStrategy strategy);
 const char* BuildValidationName(BuildValidationLevel validation);
 
