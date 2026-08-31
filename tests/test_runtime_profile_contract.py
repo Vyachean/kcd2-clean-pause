@@ -20,13 +20,23 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("xbox store 1.5.6", profile)
         self.assertIn("steam 1.5.6 release_1_5-15693", profile)
 
-    def test_canonical_environment_uses_code_anchor_not_writable_scan(self):
+    def test_steam_uses_canonical_anchor_discovery(self):
         self.assertIn('"exec autoexec.cfg"', PROFILE)
         self.assertIn("ResolveUniqueConsoleStorage", PROFILE)
         self.assertIn("kEnvConsoleOffset", PROFILE)
         self.assertIn("kEnvConsoleOffset = 0xB0", ABI)
+        self.assertIn("StorefrontProfile::Steam15693", BOOTSTRAP)
         self.assertIn("ResolveCanonicalEnvironmentBase", BOOTSTRAP)
-        self.assertIn("LegacyFindRuntimeEnvironment_Unreachable", BOOTSTRAP)
+
+    def test_xbox_legacy_discovery_is_profile_scoped(self):
+        self.assertIn("LegacyFindRuntimeEnvironment_Xbox156Only", BOOTSTRAP)
+        self.assertIn("StorefrontProfile::XboxStore156", BOOTSTRAP)
+        xbox_case = BOOTSTRAP[
+            BOOTSTRAP.index("case kcd2::runtime::StorefrontProfile::XboxStore156"):
+            BOOTSTRAP.index("case kcd2::runtime::StorefrontProfile::Steam15693")
+        ]
+        self.assertIn("LegacyFindRuntimeEnvironment_Xbox156Only", xbox_case)
+        self.assertIn("StronglyValidateEnvironment", BOOTSTRAP)
         self.assertNotIn("src/clean_pause_native.cpp\n", CMAKE)
         self.assertIn("src/clean_pause_native_profiled.cpp", CMAKE)
         self.assertIn("for (std::size_t offset = 0; offset <= limit", LEGACY)
