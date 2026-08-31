@@ -2,8 +2,24 @@
 
 ## Unreleased
 
-- Remove superseded Lua/profile prototype implementation, builders, fixtures, and retail-profile source data from the current production tree.
-- Move historical research and retail evidence under `docs/history/` so `native/` is unambiguously the supported runtime implementation.
+## v0.3.0-rc.1 — 2026-08-31
+
+Release candidate for multi-store KCD2 1.5.6 compatibility.
+
+- Adds fail-closed runtime profiles for all four known PC storefronts: Steam, GOG, Epic Games Store, and Xbox / Microsoft Store.
+- Separates storefront metadata, shipped-build identity, ABI, and environment-locator strategy so one ASI can support different store binaries without treating storefront as ABI.
+- Fixes the Steam v0.2.2 failure where the legacy writable-memory `gEnv` scan could accept a false-positive runtime object and then observe invalid framework/input/UI state.
+- Uses exact distribution-specific canonical `gEnv` evidence for Steam/GOG/Epic, with an additional one-time code-anchor cross-check on the captured Steam build.
+- Keeps the already runtime-tested Xbox / Microsoft Store 1.5.6 discovery path behind its exact PE fingerprint and stronger live identity checks.
+- Requires the resolved main-thread ID to belong to the current process and verifies `IGame -> IGameFramework -> ISystem` identity before installing version-specific hooks.
+- Rejects unknown/mismatched builds and unsupported future ABIs before hook installation.
+- Adds executable Windows tests for storefront/build matching, exact environment resolution, fail-closed behavior, and real `whdlversions.json` path/parsing fixtures.
+- Fixes shared ASI-loader installation guidance so plugin placement follows the loader's actual search path.
+- Removes superseded Lua/profile prototype implementation, builders, fixtures, and retail-profile source data from the current production tree.
+- Moves historical research and retail evidence under `docs/history/` so `native/` is unambiguously the supported runtime implementation.
+- Publishes only the ASI package; new standalone `version.dll` publication remains withheld while Defender investigation #38 is unresolved.
+
+This candidate is intended for focused Steam smoke QA before promoting the same runtime to stable v0.3.0. GOG/Epic profiles are backed by public reverse-engineering and external runtime evidence but are not yet claimed as Clean Pause runtime-tested by this project.
 
 ## v0.2.2 — 2026-08-27
 
