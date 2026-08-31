@@ -57,6 +57,8 @@ set(CLEAN_PAUSE_RUNTIME_SOURCES
   src/clean_pause_hud_mask.cpp
   src/clean_pause_hud_mask.h
   src/kcd2_abi.h
+  src/kcd2_abi_profile.cpp
+  src/kcd2_abi_profile.h
   src/kcd2_runtime_profile.cpp
   src/kcd2_runtime_profile.h
   src/process_guard.cpp
@@ -111,6 +113,8 @@ if(CLEAN_PAUSE_BUILD_RUNTIME_TESTS)
   enable_testing()
   add_executable(kcd2_runtime_profile_tests
     tests/runtime_profile_tests.cpp
+    src/kcd2_abi_profile.cpp
+    src/kcd2_abi_profile.h
     src/kcd2_runtime_profile.cpp
     src/kcd2_runtime_profile.h
     src/kcd2_abi.h
