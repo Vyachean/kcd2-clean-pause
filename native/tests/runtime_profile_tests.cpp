@@ -267,9 +267,9 @@ bool TestGogAndEpicBuildIdentity()
     wrongEpicTimestamp.fingerprint.timestamp ^= 1;
     CHECK(kcd2::runtime::MatchSupportedBuild(wrongEpicTimestamp) == nullptr);
 
-    auto wrongStore = epic;
-    wrongStore.storefront = kcd2::runtime::Storefront::GOG;
-    CHECK(kcd2::runtime::MatchSupportedBuild(wrongStore) == nullptr);
+    auto unknownStore = epic;
+    unknownStore.storefront = kcd2::runtime::Storefront::Unknown;
+    CHECK(kcd2::runtime::MatchSupportedBuild(unknownStore) == nullptr);
     return true;
 }
 
