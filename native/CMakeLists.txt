@@ -105,3 +105,27 @@ set_target_properties(kcd2_clean_pause_asi PROPERTIES
   OUTPUT_NAME "KCD2CleanPause"
   SUFFIX ".asi"
 )
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(kcd2_runtime_profile_tests
+    tests/runtime_profile_tests.cpp
+    src/kcd2_runtime_profile.cpp
+    src/kcd2_runtime_profile.h
+    src/kcd2_abi.h
+  )
+  target_include_directories(kcd2_runtime_profile_tests PRIVATE src)
+  target_compile_definitions(kcd2_runtime_profile_tests PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    UNICODE
+    _UNICODE
+  )
+  target_compile_options(kcd2_runtime_profile_tests PRIVATE
+    /W4
+    /permissive-
+    /EHsc
+    /utf-8
+  )
+  add_test(NAME runtime-profile COMMAND kcd2_runtime_profile_tests)
+endif()
