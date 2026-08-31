@@ -8,8 +8,8 @@ The project follows Semantic Versioning with immutable tag-backed releases.
 
 - Stable releases use vMAJOR.MINOR.PATCH.
 - Prereleases use vMAJOR.MINOR.PATCH-rc.N (or alpha / beta where appropriate).
-- Before 1.0, backward-compatible features increment MINOR; backward-compatible fixes increment PATCH.
-- A release candidate number increments only when another candidate for the same target release is needed.
+- Before 1.0, backward-compatible features increment **MINOR**; backward-compatible fixes increment **PATCH**.
+- A release candidate number increments only when another candidate for the same target release is needed. It is not incremented for every merged PR.
 - Published tags/releases are immutable and are never moved or recycled.
 
 The current multi-store compatibility work is a feature-level change, so its target stable version is v0.3.0. The first acceptance build is v0.3.0-rc.1.
@@ -41,7 +41,7 @@ A PR never publishes a GitHub Release. A release-preparation merge to main with 
 4. Update docs/RELEASE_NOTES.md and current support/distribution documentation.
 5. If changing the bundled Ultimate ASI Loader, review an official tagged upstream release and update its pinned version, source commit and published asset SHA-256 together in .github/workflows/release.yml.
 6. Merge only after release-shaped CI is green.
-7. The successful main workflow automatically creates the exact v<VERSION> tag and GitHub Release.
+7. The successful main workflow automatically creates the exact `v<VERSION>` tag and GitHub Release.
 
 If a qualifying push event is intentionally unavailable or suppressed, workflow_dispatch on main is the supported recovery path. Dispatches from non-main refs cannot publish.
 
