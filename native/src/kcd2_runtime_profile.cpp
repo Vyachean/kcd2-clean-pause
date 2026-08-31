@@ -94,7 +94,7 @@ bool AddressInSection(
         const auto rawSize = static_cast<std::size_t>(section.SizeOfRawData);
         const auto sectionSize = (std::max)(virtualSize, rawSize);
         const auto end = begin + sectionSize;
-        if (end < begin || value < begin)
+        if (end < begin || value < begin || value > end)
             continue;
         if (size <= end - value)
             return true;
