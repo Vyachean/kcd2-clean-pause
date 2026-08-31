@@ -59,16 +59,19 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("switch (profile.environmentLocator)", BOOTSTRAP)
         self.assertIn("MatureRuntimeSupports(*profile->abi)", BOOTSTRAP)
 
-    def test_gog_and_epic_use_independent_distribution_and_build_evidence(self):
+    def test_gog_and_epic_use_independent_distribution_build_and_rva_evidence(self):
         self.assertIn('"steam_api64.dll"', PROFILE)
         self.assertIn('"Galaxy64.dll"', PROFILE)
         self.assertIn('"EOSSDK-Win64-Shipping.dll"', PROFILE)
+        self.assertIn('FindAsciiInSection(image, ".rdata", marker.text)', PROFILE)
         self.assertIn("whdlversions.json", PROFILE)
         self.assertIn('branch + "-" + assemblyId', PROFILE)
+        self.assertIn("ParseWarhorseBuildCode", PROFILE)
+        self.assertIn("ReadBuildCodeFromModulePath", PROFILE)
         self.assertGreaterEqual(PROFILE.count('"release_1_5-15693"'), 3)
         self.assertIn("BuildIdentityStrategy::StorefrontBuildCode", PROFILE)
+        self.assertIn("EnvironmentLocatorStrategy::ExactEnvironmentRva", PROFILE)
         self.assertIn("profile.expectedEnvironmentRva", PROFILE)
-        self.assertIn("candidateRva != profile.expectedEnvironmentRva", PROFILE)
 
     def test_release15_abi_profile_captures_runtime_binary_contract(self):
         self.assertIn("struct EnvironmentLayout", ABI_PROFILE_H)
@@ -101,13 +104,23 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("kUIElementRenderSlot = 24", LEGACY)
         self.assertIn("kUIElementCallFunctionByNameSlot = 69", LEGACY)
 
-    def test_release15_non_xbox_builds_use_abi_driven_anchor_discovery(self):
+    def test_profiled_non_xbox_environment_resolution_is_one_time_and_evidence_specific(self):
+        self.assertIn("EnvironmentLocatorStrategy::ExactEnvironmentRva", PROFILE)
+        self.assertIn("EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation", PROFILE)
         self.assertIn('"exec autoexec.cfg"', PROFILE)
         self.assertIn("ResolveUniqueConsoleStorage", PROFILE)
-        self.assertIn("profile.abi->environment.consoleOffset", PROFILE)
-        self.assertIn("profile.abi->environment.size", PROFILE)
-        self.assertIn("EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor", BOOTSTRAP)
-        self.assertIn("ResolveCanonicalEnvironmentBase", BOOTSTRAP)
+        self.assertIn("ResolveProfileEnvironmentBase", PROFILE)
+        self.assertIn("image.base + environmentRva", PROFILE)
+        self.assertIn("anchorConsoleStorage != expectedConsoleStorage", PROFILE)
+
+        marker = "DWORD WINAPI BootstrapThread(void*)"
+        bootstrap = BOOTSTRAP[BOOTSTRAP.index(marker):]
+        self.assertEqual(bootstrap.count("ResolveProfileEnvironmentBase("), 1)
+        resolve = bootstrap.index("ResolveProfileEnvironmentBase")
+        poll_loop = bootstrap.index("for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs")
+        self.assertLess(resolve, poll_loop)
+        self.assertIn("PollRuntimeEnvironment", bootstrap[poll_loop:])
+        self.assertNotIn("ResolveProfileEnvironmentBase", bootstrap[poll_loop:])
 
     def test_xbox_legacy_discovery_is_locator_scoped(self):
         self.assertIn("LegacyFindRuntimeEnvironment_Xbox156Only", BOOTSTRAP)
@@ -123,12 +136,14 @@ class RuntimeProfileContractTests(unittest.TestCase):
         read_identity = bootstrap.index("ReadBuildIdentity")
         match = bootstrap.index("MatchSupportedBuild")
         abi_gate = bootstrap.index("MatureRuntimeSupports")
-        discover = bootstrap.index("FindRuntimeEnvironment")
+        resolve = bootstrap.index("ResolveProfileEnvironmentBase")
+        poll = bootstrap.index("PollRuntimeEnvironment")
         install = bootstrap.index("InstallInputHook")
         self.assertLess(read_identity, match)
         self.assertLess(match, abi_gate)
-        self.assertLess(abi_gate, discover)
-        self.assertLess(discover, install)
+        self.assertLess(abi_gate, resolve)
+        self.assertLess(resolve, poll)
+        self.assertLess(poll, install)
         self.assertIn("unsupported WHGame build; Clean Pause disabled; no hooks installed", bootstrap)
 
     def test_candidate_identity_is_strongly_validated(self):
@@ -142,7 +157,7 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("src/kcd2_abi_profile.h", CMAKE)
         self.assertIn("src/kcd2_runtime_profile.cpp", CMAKE)
         self.assertIn("src/kcd2_runtime_profile.h", CMAKE)
-        self.assertIn("ResolveCanonicalEnvironmentBase", PROFILE_H)
+        self.assertIn("ResolveProfileEnvironmentBase", PROFILE_H)
 
 
 if __name__ == "__main__":
