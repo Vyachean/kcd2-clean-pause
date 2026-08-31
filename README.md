@@ -2,18 +2,20 @@
 
 Clean Pause for **Kingdom Come: Deliverance II** on Windows.
 
-Tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbox controller.
+The current public release, **v0.2.2**, was runtime-tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbox controller.
 
-**Steam compatibility has not yet been explicitly verified.** If you use the Steam version and encounter a crash or the mod does not load, see the troubleshooting notes below and include the native log when available.
+The current development runtime also contains fail-closed KCD2 1.5.6 profiles for **Steam, GOG, and Epic Games Store**. Their binary identity, release_1_5 ABI and distribution-specific engine mappings are backed by public reverse-engineering/runtime evidence and automated Windows tests; an in-game Clean Pause smoke test is still required before this project describes those storefronts as runtime-tested.
 
 ## Release status
 
 - **Current stable release:** `v0.2.2`.
 - **Published edition:** `KCD2CleanPause.asi`, using the upstream Ultimate ASI Loader.
 - The ASI package includes the pinned official x64 Ultimate ASI Loader for a complete fresh installation.
+- **Stable runtime acceptance:** Xbox / Microsoft Store KCD2 1.5.6.
+- **Unreleased compatibility work:** Steam, GOG and Epic KCD2 1.5.6 profiles are implemented under PR #44; Clean Pause smoke QA remains pending on those storefronts.
 - **Standalone `version.dll`:** new standalone publication remains withheld while Defender investigation #38 is unresolved. The last published standalone package is v0.2.0.
 
-The Clean Pause runtime behavior is unchanged from the retail-accepted v0.2.1 runtime. `v0.2.2` improves distribution and installation by bundling the verified loader with provenance and license information.
+The public v0.2.2 Clean Pause runtime behavior is unchanged from the retail-accepted v0.2.1 runtime. v0.2.2 improves distribution and installation by bundling the verified loader with provenance and license information.
 
 Use the GitHub Releases page as the source of truth for versions and assets that are actually published.
 
@@ -88,11 +90,11 @@ If the game crashes while loading native mods, isolate the loader from the plugi
 If the game works with the loader alone but crashes after adding Clean Pause, report it as a Clean Pause compatibility issue and include:
 
 - KCD2 version;
-- storefront/build (Steam, Xbox Store / Xbox app, or other);
+- storefront/build (Steam, GOG, Epic Games Store, Xbox / Microsoft Store, or another build);
 - locations of `dinput8.dll` and `KCD2CleanPause.asi`;
 - `kcd2_clean_pause_native.log`, if one was created before the crash.
 
-Steam is not yet an explicitly validated runtime target, so Steam reports with the native log are especially useful.
+For the unreleased multi-store runtime, the log records the PE fingerprint, detected storefront/build metadata, selected ABI/profile, environment-validation strategy and whether the profile reached hook installation.
 
 ## Standalone version.dll edition
 
@@ -117,11 +119,13 @@ The production architecture deliberately keeps KCD2 as the sole pause owner:
 - `Menu@0` remains logically visible while only its `Render()` is suppressed during Clean Pause;
 - authoritative `C_UIHudMask` visibility is retained for safe vanilla-menu handoff/fail-open;
 - exact root HUD visibility, dialogue subtitles, NPC overhead subtitles and DoF state are preserved;
-- unresolved core state fails open to the visible vanilla pause menu.
+- supported native builds are selected by explicit build profiles, with storefront, build identity, ABI and environment discovery modeled separately;
+- known distribution-specific canonical `gEnv` RVAs may be used only behind the matching build profile and strong live object identity checks;
+- unknown or mismatched builds install no version-specific Clean Pause hooks.
 
-No action-map replacement, fixed storefront-specific `WHGame.dll` RVA, replacement overlay, long-lived movieclip pointer, destructive borrowed-handle release, or synthetic B-resume replay is used.
+No action-map replacement, replacement overlay, long-lived movieclip pointer, destructive borrowed-handle release, synthetic B-resume replay, or unguarded cross-store binary assumption is used.
 
-See [Design](docs/DESIGN.md) for the complete production architecture.
+See [Runtime compatibility](docs/RUNTIME_COMPATIBILITY.md) and [Design](docs/DESIGN.md) for the complete production architecture.
 
 ## Versioning
 
@@ -134,6 +138,7 @@ Start with the [documentation index](docs/README.md).
 Key current documents:
 
 - [Current status and release readiness](docs/STATUS_AND_PLAN.md)
+- [Runtime compatibility](docs/RUNTIME_COMPATIBILITY.md)
 - [Nexus Mods publication copy](docs/NEXUS.md)
 - [Design](docs/DESIGN.md)
 - [Testing](docs/TESTING.md)
