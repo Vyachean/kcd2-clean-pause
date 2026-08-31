@@ -2,8 +2,9 @@
 
 // Keep the mature Clean Pause implementation intact while replacing only its
 // bootstrap/runtime-discovery boundary. The original scanner is retained solely
-// for the exact, retail-validated Xbox Store 1.5.6 fingerprint. Steam and future
-// profiles must use explicit profile discovery and unknown builds never reach it.
+// behind an explicit locator strategy used by the exact retail-validated Xbox /
+// Microsoft Store 1.5.6 build. Storefront identity itself never selects runtime
+// behavior; the matched BuildProfile chooses an ABI and a locator independently.
 #define Start LegacyStart_Unreachable
 #define Stop LegacyStop_Unreachable
 #define BootstrapThread LegacyBootstrapThread_Unreachable
@@ -101,17 +102,16 @@ bool FindRuntimeEnvironment(
     result = {};
     RuntimeEnvironment candidate{};
 
-    switch (profile.id) {
-    case kcd2::runtime::StorefrontProfile::XboxStore156:
-        // Preserve the exact discovery path already proven on the captured Xbox
-        // Store 1.5.6 binary. It is now unreachable on Steam/future binaries because
-        // profile matching happens first, and the result receives stronger identity
-        // checks than v0.2.2 had.
+    switch (profile.environmentLocator) {
+    case kcd2::runtime::EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan:
+        // This strategy exists only to preserve the already-proven Xbox 1.5.6
+        // discovery behavior. It is selected by a BuildProfile, not by storefront
+        // branching, so another binary can never reach it unless explicitly registered.
         if (!LegacyFindRuntimeEnvironment_Xbox156Only(whGame, candidate))
             return false;
         break;
 
-    case kcd2::runtime::StorefrontProfile::Steam15693: {
+    case kcd2::runtime::EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor: {
         std::uint8_t* canonicalEnvironment{};
         if (!kcd2::runtime::ResolveCanonicalEnvironmentBase(
                 whGame, profile, canonicalEnvironment))
@@ -130,7 +130,7 @@ bool FindRuntimeEnvironment(
 
 DWORD WINAPI BootstrapThread(void*)
 {
-    Log("native bootstrap started; target=KCD2 1.5.6 Windows retail; KCD2 Clean Pause v%s build=%s",
+    Log("native bootstrap started; target=KCD2 Windows retail profiles; KCD2 Clean Pause v%s build=%s",
         CLEAN_PAUSE_VERSION, CLEAN_PAUSE_BUILD_ID);
 
     HMODULE whGame{};
@@ -163,7 +163,19 @@ DWORD WINAPI BootstrapThread(void*)
         Log("unsupported WHGame build; Clean Pause disabled; no hooks installed");
         return 0;
     }
-    Log("WHGame profile accepted: %s", profile->name);
+    if (!profile->abi || !kcd2::runtime::MatureRuntimeSupports(*profile->abi)) {
+        Log("matched build %s selects an ABI unsupported by this Clean Pause runtime; no hooks installed",
+            profile->name);
+        return 0;
+    }
+
+    Log(
+        "WHGame profile accepted: %s; storefront=%s abi=%s locator=%s evidence=%s",
+        profile->name,
+        kcd2::runtime::StorefrontName(profile->storefront),
+        profile->abi->name,
+        kcd2::runtime::EnvironmentLocatorName(profile->environmentLocator),
+        kcd2::runtime::BuildValidationName(profile->validation));
 
     RuntimeEnvironment environment{};
     for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs && !g_stopping.load(); elapsed += kPollMs) {
