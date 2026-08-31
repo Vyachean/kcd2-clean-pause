@@ -27,11 +27,9 @@ const std::array<StorefrontDescriptor, 4> kKnownStorefronts{{
     {Storefront::XboxMicrosoftStore, "Xbox / Microsoft Store", &Release15AbiProfile(), false},
 }};
 
-// Build identity is deliberately layered. When a complete PE fingerprint is known,
-// use it. For GOG/Epic, public KCSE/Address-Library evidence identifies the shipped
-// binary by distribution + Warhorse Assembly.Id/Branch build code. Those profiles
-// are then additionally gated by the exact cross-distribution gEnv RVA during
-// environment resolution and by the strong runtime identity checks in the bootstrap.
+// Build identity and engine-object discovery are independent. Full PE identity is
+// retained where captured. GOG/Epic use KCSE's shipped-build identity model and are
+// then gated by independently cross-validated distribution-specific gEnv RVAs.
 const std::array<BuildProfile, 4> kSupportedBuilds{{
     {
         Storefront::XboxMicrosoftStore,
@@ -53,7 +51,7 @@ const std::array<BuildProfile, 4> kSupportedBuilds{{
         "release_1_5-15693",
         0,
         0x0492d7f8,
-        EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor,
+        EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation,
         &Release15AbiProfile(),
         BuildValidationLevel::StaticReverseEngineering,
     },
@@ -65,7 +63,7 @@ const std::array<BuildProfile, 4> kSupportedBuilds{{
         "release_1_5-15693",
         0,
         0x049177f8,
-        EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor,
+        EnvironmentLocatorStrategy::ExactEnvironmentRva,
         &Release15AbiProfile(),
         BuildValidationLevel::ExternalRuntimeEvidence,
     },
@@ -77,7 +75,7 @@ const std::array<BuildProfile, 4> kSupportedBuilds{{
         "release_1_5-15693",
         0x6a34f917,
         0x0491d8b8,
-        EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor,
+        EnvironmentLocatorStrategy::ExactEnvironmentRva,
         &Release15AbiProfile(),
         BuildValidationLevel::ExternalRuntimeEvidence,
     },
@@ -108,17 +106,30 @@ bool GetImageView(HMODULE module, ImageView& view)
         return false;
 
     auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0)
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE
+        || dos->e_lfanew <= 0
+        || dos->e_lfanew > 0x10000)
         return false;
 
     auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
-    if (!IsReadable(nt, sizeof(*nt)) || nt->Signature != IMAGE_NT_SIGNATURE)
+    if (!IsReadable(nt, sizeof(*nt))
+        || nt->Signature != IMAGE_NT_SIGNATURE
+        || nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64
+        || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+        return false;
+
+    const unsigned sectionCount = nt->FileHeader.NumberOfSections;
+    if (sectionCount == 0 || sectionCount > 96)
+        return false;
+
+    auto* sections = IMAGE_FIRST_SECTION(nt);
+    if (!IsReadable(sections, sectionCount * sizeof(IMAGE_SECTION_HEADER)))
         return false;
 
     view.base = base;
     view.nt = nt;
-    view.sections = IMAGE_FIRST_SECTION(nt);
-    view.sectionCount = nt->FileHeader.NumberOfSections;
+    view.sections = sections;
+    view.sectionCount = sectionCount;
     return true;
 }
 
@@ -127,6 +138,13 @@ bool FingerprintsEqual(const Fingerprint& left, const Fingerprint& right)
     return left.timestamp == right.timestamp
         && left.imageSize == right.imageSize
         && left.checksum == right.checksum;
+}
+
+bool SectionNameEquals(const IMAGE_SECTION_HEADER& section, const char* expected)
+{
+    char name[IMAGE_SIZEOF_SHORT_NAME + 1]{};
+    std::memcpy(name, section.Name, IMAGE_SIZEOF_SHORT_NAME);
+    return std::strcmp(name, expected) == 0;
 }
 
 bool AddressInSection(
@@ -158,23 +176,31 @@ bool AddressInSection(
     return false;
 }
 
-std::uint8_t* FindAscii(const ImageView& image, const char* text)
+std::uint8_t* FindAsciiInSection(
+    const ImageView& image,
+    const char* sectionName,
+    const char* text)
 {
     const std::size_t textSize = std::strlen(text);
+    if (textSize == 0)
+        return nullptr;
+
     for (unsigned index = 0; index < image.sectionCount; ++index) {
         const auto& section = image.sections[index];
-        if (!(section.Characteristics & IMAGE_SCN_MEM_READ))
+        if (!SectionNameEquals(section, sectionName)
+            || !(section.Characteristics & IMAGE_SCN_MEM_READ))
             continue;
 
         auto* start = image.base + section.VirtualAddress;
         const std::size_t size = section.Misc.VirtualSize;
         if (size < textSize || !IsReadable(start, size))
-            continue;
+            return nullptr;
 
         for (std::size_t offset = 0; offset + textSize <= size; ++offset) {
             if (std::memcmp(start + offset, text, textSize) == 0)
                 return start + offset;
         }
+        return nullptr;
     }
     return nullptr;
 }
@@ -194,7 +220,7 @@ bool ResolveStorefront(const ImageView& image, Storefront& out)
 
     unsigned matches{};
     for (const auto& marker : kMarkers) {
-        if (!FindAscii(image, marker.text))
+        if (!FindAsciiInSection(image, ".rdata", marker.text))
             continue;
         out = marker.storefront;
         ++matches;
@@ -367,7 +393,7 @@ bool TryResolveConsoleStorage(
 bool ResolveUniqueConsoleStorage(const ImageView& image, std::uint8_t*& storage)
 {
     storage = nullptr;
-    auto* anchor = FindAscii(image, "exec autoexec.cfg");
+    auto* anchor = FindAsciiInSection(image, ".rdata", "exec autoexec.cfg");
     if (!anchor)
         return false;
 
@@ -411,28 +437,39 @@ bool DetectStorefront(HMODULE whGame, Storefront& out)
     return ResolveStorefront(image, out);
 }
 
+bool ParseWarhorseBuildCode(const std::string& json, std::string& out)
+{
+    out.clear();
+    const std::string branch = JsonStringAfter(json, "\"Branch\"", "\"Name\"");
+    const std::string assemblyId = JsonNumberAfter(json, "\"Assembly\"", "\"Id\"");
+    if (branch.empty() || assemblyId.empty())
+        return false;
+    out = branch + "-" + assemblyId;
+    return true;
+}
+
+bool ReadBuildCodeFromModulePath(const std::wstring& modulePath, std::string& out)
+{
+    out.clear();
+    std::wstring directory = ParentPath(modulePath);
+    for (unsigned depth = 0; depth < 6 && !directory.empty(); ++depth) {
+        std::string json;
+        if (ReadSmallTextFile(directory + L"\\whdlversions.json", json))
+            return ParseWarhorseBuildCode(json, out);
+        directory = ParentPath(directory);
+    }
+    return false;
+}
+
 bool ReadBuildCode(HMODULE whGame, std::string& out)
 {
     out.clear();
     wchar_t modulePath[32768]{};
-    const DWORD length = GetModuleFileNameW(whGame, modulePath, static_cast<DWORD>(std::size(modulePath)));
+    const DWORD length = GetModuleFileNameW(
+        whGame, modulePath, static_cast<DWORD>(std::size(modulePath)));
     if (!length || length >= std::size(modulePath))
         return false;
-
-    std::wstring directory = ParentPath(std::wstring(modulePath, length));
-    for (unsigned depth = 0; depth < 5 && !directory.empty(); ++depth) {
-        std::string json;
-        if (ReadSmallTextFile(directory + L"\\whdlversions.json", json)) {
-            const std::string branch = JsonStringAfter(json, "\"Branch\"", "\"Name\"");
-            const std::string assemblyId = JsonNumberAfter(json, "\"Assembly\"", "\"Id\"");
-            if (!branch.empty() && !assemblyId.empty()) {
-                out = branch + "-" + assemblyId;
-                return true;
-            }
-        }
-        directory = ParentPath(directory);
-    }
-    return false;
+    return ReadBuildCodeFromModulePath(std::wstring(modulePath, length), out);
 }
 
 bool ReadBuildIdentity(HMODULE whGame, DetectedBuildIdentity& out)
@@ -506,8 +543,10 @@ const char* BuildIdentityStrategyName(BuildIdentityStrategy strategy)
 const char* EnvironmentLocatorName(EnvironmentLocatorStrategy strategy)
 {
     switch (strategy) {
-    case EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor:
-        return "canonical-pConsole-code-anchor";
+    case EnvironmentLocatorStrategy::ExactEnvironmentRva:
+        return "exact-environment-rva";
+    case EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation:
+        return "exact-environment-rva+anchor-validation";
     case EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan:
         return "legacy-xbox-1.5.6-validated-scan";
     default:
@@ -529,14 +568,17 @@ const char* BuildValidationName(BuildValidationLevel validation)
     }
 }
 
-bool ResolveCanonicalEnvironmentBase(
+bool ResolveProfileEnvironmentBase(
     HMODULE whGame,
     const BuildProfile& profile,
     std::uint8_t*& environmentBase)
 {
     environmentBase = nullptr;
-    if (!profile.abi
-        || profile.environmentLocator != EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor)
+    if (!profile.abi || !profile.expectedEnvironmentRva)
+        return false;
+    if (profile.environmentLocator != EnvironmentLocatorStrategy::ExactEnvironmentRva
+        && profile.environmentLocator
+            != EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation)
         return false;
 
     ImageView image{};
@@ -553,31 +595,37 @@ bool ResolveCanonicalEnvironmentBase(
     if (profile.requiredTimestamp && actual.timestamp != profile.requiredTimestamp)
         return false;
 
-    std::uint8_t* consoleStorage{};
-    if (!ResolveUniqueConsoleStorage(image, consoleStorage))
-        return false;
-
-    const auto consoleOffset = profile.abi->environment.consoleOffset;
     const auto environmentSize = profile.abi->environment.size;
-    const auto storageAddress = reinterpret_cast<std::uintptr_t>(consoleStorage);
-    if (storageAddress < consoleOffset)
+    const auto imageSize = static_cast<std::size_t>(image.nt->OptionalHeader.SizeOfImage);
+    const auto environmentRva = static_cast<std::size_t>(profile.expectedEnvironmentRva);
+    if (environmentRva >= imageSize || environmentSize > imageSize - environmentRva)
         return false;
-    auto* candidate = reinterpret_cast<std::uint8_t*>(storageAddress - consoleOffset);
 
+    auto* candidate = image.base + environmentRva;
     if (!AddressInSection(
             image,
             candidate,
             environmentSize,
-            IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE))
-        return false;
-    if (!IsReadable(candidate, environmentSize))
-        return false;
-    if (candidate + consoleOffset != consoleStorage)
+            IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE)
+        || !IsReadable(candidate, environmentSize))
         return false;
 
-    if (profile.expectedEnvironmentRva) {
-        const auto candidateRva = static_cast<std::uint64_t>(candidate - image.base);
-        if (candidateRva != profile.expectedEnvironmentRva)
+    const auto consoleOffset = profile.abi->environment.consoleOffset;
+    if (consoleOffset > environmentSize - sizeof(void*))
+        return false;
+    auto* expectedConsoleStorage = candidate + consoleOffset;
+    if (!AddressInSection(
+            image,
+            expectedConsoleStorage,
+            sizeof(void*),
+            IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE))
+        return false;
+
+    if (profile.environmentLocator
+        == EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation) {
+        std::uint8_t* anchorConsoleStorage{};
+        if (!ResolveUniqueConsoleStorage(image, anchorConsoleStorage)
+            || anchorConsoleStorage != expectedConsoleStorage)
             return false;
     }
 
