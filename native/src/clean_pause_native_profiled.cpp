@@ -1,13 +1,13 @@
 #include "kcd2_runtime_profile.h"
 
 // Keep the mature Clean Pause implementation intact while replacing only its
-// bootstrap/runtime-discovery boundary. The legacy scanner remains compiled as
-// an unreachable fallback implementation for now, but production Start() below
-// never calls it. This keeps the Steam compatibility change small and reviewable.
+// bootstrap/runtime-discovery boundary. The original scanner is retained solely
+// for the exact, retail-validated Xbox Store 1.5.6 fingerprint. Steam and future
+// profiles must use explicit profile discovery and unknown builds never reach it.
 #define Start LegacyStart_Unreachable
 #define Stop LegacyStop_Unreachable
 #define BootstrapThread LegacyBootstrapThread_Unreachable
-#define FindRuntimeEnvironment LegacyFindRuntimeEnvironment_Unreachable
+#define FindRuntimeEnvironment LegacyFindRuntimeEnvironment_Xbox156Only
 #include "clean_pause_native.cpp"
 #undef FindRuntimeEnvironment
 #undef BootstrapThread
@@ -80,19 +80,9 @@ bool ValidateGameAndFrameworkIdentity(const RuntimeEnvironment& environment)
     return frameworkSystem == environment.system;
 }
 
-bool FindRuntimeEnvironment(
-    HMODULE whGame,
-    const kcd2::runtime::BuildProfile& profile,
-    RuntimeEnvironment& result)
+bool StronglyValidateEnvironment(RuntimeEnvironment& candidate, RuntimeEnvironment& result)
 {
-    result = {};
-    std::uint8_t* canonicalEnvironment{};
-    if (!kcd2::runtime::ResolveCanonicalEnvironmentBase(
-            whGame, profile, canonicalEnvironment))
-        return false;
-
-    RuntimeEnvironment candidate{};
-    if (!ValidateEnvironmentCandidate(canonicalEnvironment, candidate))
+    if (!candidate.base)
         return false;
     if (!ThreadBelongsToCurrentProcess(candidate.mainThreadId))
         return false;
@@ -101,6 +91,41 @@ bool FindRuntimeEnvironment(
 
     result = candidate;
     return true;
+}
+
+bool FindRuntimeEnvironment(
+    HMODULE whGame,
+    const kcd2::runtime::BuildProfile& profile,
+    RuntimeEnvironment& result)
+{
+    result = {};
+    RuntimeEnvironment candidate{};
+
+    switch (profile.id) {
+    case kcd2::runtime::StorefrontProfile::XboxStore156:
+        // Preserve the exact discovery path already proven on the captured Xbox
+        // Store 1.5.6 binary. It is now unreachable on Steam/future binaries because
+        // profile matching happens first, and the result receives stronger identity
+        // checks than v0.2.2 had.
+        if (!LegacyFindRuntimeEnvironment_Xbox156Only(whGame, candidate))
+            return false;
+        break;
+
+    case kcd2::runtime::StorefrontProfile::Steam15693: {
+        std::uint8_t* canonicalEnvironment{};
+        if (!kcd2::runtime::ResolveCanonicalEnvironmentBase(
+                whGame, profile, canonicalEnvironment))
+            return false;
+        if (!ValidateEnvironmentCandidate(canonicalEnvironment, candidate))
+            return false;
+        break;
+    }
+
+    default:
+        return false;
+    }
+
+    return StronglyValidateEnvironment(candidate, result);
 }
 
 DWORD WINAPI BootstrapThread(void*)
@@ -153,7 +178,7 @@ DWORD WINAPI BootstrapThread(void*)
         return 0;
     }
 
-    Log("canonical gEnv validated for %s; env=%p mainThread=%lu",
+    Log("runtime environment validated for %s; env=%p mainThread=%lu",
         profile->name,
         environment.base,
         static_cast<unsigned long>(environment.mainThreadId));
