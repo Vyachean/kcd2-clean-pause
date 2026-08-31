@@ -30,7 +30,8 @@ enum class BuildIdentityStrategy {
 };
 
 enum class EnvironmentLocatorStrategy {
-    CanonicalPConsoleCodeAnchor,
+    ExactEnvironmentRva,
+    ExactEnvironmentRvaWithAnchorValidation,
     LegacyXbox156ValidatedScan,
 };
 
@@ -68,6 +69,8 @@ struct BuildProfile {
 
 bool ReadFingerprint(HMODULE whGame, Fingerprint& out);
 bool DetectStorefront(HMODULE whGame, Storefront& out);
+bool ParseWarhorseBuildCode(const std::string& json, std::string& out);
+bool ReadBuildCodeFromModulePath(const std::wstring& modulePath, std::string& out);
 bool ReadBuildCode(HMODULE whGame, std::string& out);
 bool ReadBuildIdentity(HMODULE whGame, DetectedBuildIdentity& out);
 const BuildProfile* MatchSupportedBuild(const DetectedBuildIdentity& identity);
@@ -79,7 +82,9 @@ const char* BuildIdentityStrategyName(BuildIdentityStrategy strategy);
 const char* EnvironmentLocatorName(EnvironmentLocatorStrategy strategy);
 const char* BuildValidationName(BuildValidationLevel validation);
 
-bool ResolveCanonicalEnvironmentBase(
+// Resolves immutable build-level environment identity once. The caller may then
+// poll object readiness at the returned address without rescanning WHGame.dll.
+bool ResolveProfileEnvironmentBase(
     HMODULE whGame,
     const BuildProfile& profile,
     std::uint8_t*& environmentBase);
