@@ -1,5 +1,4 @@
 #include "kcd2_runtime_profile.h"
-#include "kcd2_abi.h"
 
 #include <algorithm>
 #include <array>
@@ -18,13 +17,39 @@ struct ImageView {
     unsigned sectionCount{};
 };
 
-// Xbox Store / Xbox app 1.5.6 was captured from the reviewed retail runtime
-// tracked in issue #36. Steam is the independently identified release_1_5-15693
-// build. Storefronts stay separate even though their verified KCD2 1.5.6 ABI is
-// currently the same.
-constexpr std::array<BuildProfile, 2> kSupportedBuilds{{
-    {StorefrontProfile::XboxStore156, "Xbox Store 1.5.6", {0x6a391f7b, 0x05bf2000, 0x00000000}},
-    {StorefrontProfile::Steam15693, "Steam 1.5.6 release_1_5-15693", {0x6a350e20, 0x05b2d000, 0x00000000}},
+// KCD2 is currently sold for PC through four binary distributions. Steam, GOG
+// and Epic have independent release_1_5 Address Library mappings; the Xbox /
+// Microsoft Store build is tracked from Clean Pause's own retail capture.
+// A known storefront is not automatically a supported build: exact fingerprint
+// registration remains mandatory before hooks can be installed.
+const std::array<StorefrontDescriptor, 4> kKnownStorefronts{{
+    {Storefront::Steam, "Steam", &Release15AbiProfile(), true},
+    {Storefront::EpicGamesStore, "Epic Games Store", &Release15AbiProfile(), true},
+    {Storefront::GOG, "GOG", &Release15AbiProfile(), true},
+    {Storefront::XboxMicrosoftStore, "Xbox / Microsoft Store", &Release15AbiProfile(), false},
+}};
+
+// Exact builds Clean Pause can identify safely today. Epic and GOG are deliberately
+// not added with timestamp-only or inferred fingerprints. Adding support for either
+// requires one complete PE fingerprint row; the storefront/ABI architecture is
+// already present and no mature pause/HUD code needs to change.
+const std::array<BuildProfile, 2> kSupportedBuilds{{
+    {
+        Storefront::XboxMicrosoftStore,
+        "Xbox / Microsoft Store 1.5.6",
+        {0x6a391f7b, 0x05bf2000, 0x00000000},
+        EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan,
+        &Release15AbiProfile(),
+        BuildValidationLevel::RuntimeTested,
+    },
+    {
+        Storefront::Steam,
+        "Steam 1.5.6 release_1_5-15693",
+        {0x6a350e20, 0x05b2d000, 0x00000000},
+        EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor,
+        &Release15AbiProfile(),
+        BuildValidationLevel::StaticReverseEngineering,
+    },
 }};
 
 bool IsReadable(const void* ptr, std::size_t size = 1)
@@ -236,12 +261,60 @@ const BuildProfile* MatchSupportedBuild(const Fingerprint& fingerprint)
     return nullptr;
 }
 
+const StorefrontDescriptor* KnownStorefronts(std::size_t& count)
+{
+    count = kKnownStorefronts.size();
+    return kKnownStorefronts.data();
+}
+
+const StorefrontDescriptor* FindStorefront(Storefront storefront)
+{
+    for (const auto& descriptor : kKnownStorefronts) {
+        if (descriptor.id == storefront)
+            return &descriptor;
+    }
+    return nullptr;
+}
+
+const char* StorefrontName(Storefront storefront)
+{
+    const auto* descriptor = FindStorefront(storefront);
+    return descriptor ? descriptor->name : "Unknown storefront";
+}
+
+const char* EnvironmentLocatorName(EnvironmentLocatorStrategy strategy)
+{
+    switch (strategy) {
+    case EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor:
+        return "canonical-pConsole-code-anchor";
+    case EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan:
+        return "legacy-xbox-1.5.6-validated-scan";
+    default:
+        return "unknown-locator";
+    }
+}
+
+const char* BuildValidationName(BuildValidationLevel validation)
+{
+    switch (validation) {
+    case BuildValidationLevel::RuntimeTested:
+        return "runtime-tested";
+    case BuildValidationLevel::StaticReverseEngineering:
+        return "static-reverse-engineering";
+    default:
+        return "unknown-validation";
+    }
+}
+
 bool ResolveCanonicalEnvironmentBase(
     HMODULE whGame,
     const BuildProfile& profile,
     std::uint8_t*& environmentBase)
 {
     environmentBase = nullptr;
+    if (!profile.abi
+        || profile.environmentLocator != EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor)
+        return false;
 
     ImageView image{};
     if (!GetImageView(whGame, image))
@@ -258,24 +331,25 @@ bool ResolveCanonicalEnvironmentBase(
     if (!ResolveUniqueConsoleStorage(image, consoleStorage))
         return false;
 
-    // Public KCD2 1.5.6 RE establishes the canonical SSystemGlobalEnvironment
-    // base with pConsole at +0xB0. Some engine code keeps/uses a gEnv+8 pointer,
-    // which makes the same field appear as +0xA8 in code-coordinate notes. Always
-    // normalize back to the canonical struct base here before applying ABI offsets.
+    // The locator is build-specific, while the field displacement belongs to the
+    // selected ABI. This distinction lets Steam/GOG/Epic share one release_1_5 ABI
+    // even when their absolute gEnv addresses and PE fingerprints differ.
+    const auto consoleOffset = profile.abi->environment.consoleOffset;
+    const auto environmentSize = profile.abi->environment.size;
     const auto storageAddress = reinterpret_cast<std::uintptr_t>(consoleStorage);
-    if (storageAddress < kEnvConsoleOffset)
+    if (storageAddress < consoleOffset)
         return false;
-    auto* candidate = reinterpret_cast<std::uint8_t*>(storageAddress - kEnvConsoleOffset);
+    auto* candidate = reinterpret_cast<std::uint8_t*>(storageAddress - consoleOffset);
 
     if (!AddressInSection(
             image,
             candidate,
-            kEnvSize,
+            environmentSize,
             IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE))
         return false;
-    if (!IsReadable(candidate, kEnvSize))
+    if (!IsReadable(candidate, environmentSize))
         return false;
-    if (candidate + kEnvConsoleOffset != consoleStorage)
+    if (candidate + consoleOffset != consoleStorage)
         return false;
 
     environmentBase = candidate;
