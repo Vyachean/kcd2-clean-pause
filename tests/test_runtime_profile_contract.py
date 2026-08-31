@@ -8,6 +8,8 @@ ABI_PROFILE = (ROOT / "native/src/kcd2_abi_profile.cpp").read_text(encoding="utf
 ABI_PROFILE_H = (ROOT / "native/src/kcd2_abi_profile.h").read_text(encoding="utf-8")
 BOOTSTRAP = (ROOT / "native/src/clean_pause_native_profiled.cpp").read_text(encoding="utf-8")
 LEGACY = (ROOT / "native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
+BUBBLES = (ROOT / "native/src/clean_pause_bubbles.cpp").read_text(encoding="utf-8")
+HUD_MASK = (ROOT / "native/src/clean_pause_hud_mask.cpp").read_text(encoding="utf-8")
 ABI = (ROOT / "native/src/kcd2_abi.h").read_text(encoding="utf-8")
 CMAKE = (ROOT / "native/CMakeLists.txt").read_text(encoding="utf-8")
 
@@ -59,6 +61,25 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("presentation.hudListenersOffset == 0x1D0", ABI_PROFILE)
         self.assertIn("presentation.maskSourceMonitorOffset == 0x60", ABI_PROFILE)
         self.assertIn("input.size != sizeof(InputEvent)", ABI_PROFILE)
+
+    def test_mature_presentation_adapter_literals_stay_in_sync_with_profile(self):
+        for source in (BUBBLES, HUD_MASK):
+            self.assertIn("kHudListenersOffset = 0x1D0", source)
+        self.assertIn("kBubbleListenerOffset = 0x10", BUBBLES)
+        self.assertIn("kBubbleInterfaceOffset = 0x58", BUBBLES)
+        self.assertIn("kBubbleUpdateSlot = 1", BUBBLES)
+        self.assertIn("kBubbleReleaseSlot = 3", BUBBLES)
+        self.assertIn("kMaskListenerOffset = 0x10", HUD_MASK)
+        self.assertIn("kMaskVisibilityInterfaceOffset = 0x58", HUD_MASK)
+        self.assertIn("kMaskSourceMonitorOffset = 0x60", HUD_MASK)
+        self.assertIn("kMaskOnModuleMessageSlot = 3", HUD_MASK)
+        self.assertIn("kMaskIsElementVisibleSlot = 1", HUD_MASK)
+        self.assertIn("kModuleMessageIdOffset = 0x08", HUD_MASK)
+        self.assertIn("kHudRefreshModuleMessageId = 52", HUD_MASK)
+        self.assertIn("kFlashDisplayInfoSize = 0x38", LEGACY)
+        self.assertIn("kFlashDisplayInfoVisibleOffset = 0x28", LEGACY)
+        self.assertIn("kUIElementRenderSlot = 24", LEGACY)
+        self.assertIn("kUIElementCallFunctionByNameSlot = 69", LEGACY)
 
     def test_steam_uses_abi_driven_canonical_anchor_discovery(self):
         self.assertIn('"exec autoexec.cfg"', PROFILE)
