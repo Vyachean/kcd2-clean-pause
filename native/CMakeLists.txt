@@ -44,7 +44,10 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(minhook)
 
 set(CLEAN_PAUSE_RUNTIME_SOURCES
-  src/clean_pause_native.cpp
+  # Production entry compiles the mature runtime through a small profiled wrapper
+  # that replaces only build gating/environment discovery. Do not compile
+  # clean_pause_native.cpp separately: it is included by this translation unit.
+  src/clean_pause_native_profiled.cpp
   src/clean_pause_native.h
   src/clean_pause_blur.cpp
   src/clean_pause_blur.h
