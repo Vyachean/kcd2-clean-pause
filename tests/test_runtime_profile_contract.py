@@ -4,7 +4,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = (ROOT / "native/src/kcd2_runtime_profile.cpp").read_text(encoding="utf-8")
 PROFILE_H = (ROOT / "native/src/kcd2_runtime_profile.h").read_text(encoding="utf-8")
-NATIVE = (ROOT / "native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
+BOOTSTRAP = (ROOT / "native/src/clean_pause_native_profiled.cpp").read_text(encoding="utf-8")
+LEGACY = (ROOT / "native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
 ABI = (ROOT / "native/src/kcd2_abi.h").read_text(encoding="utf-8")
 CMAKE = (ROOT / "native/CMakeLists.txt").read_text(encoding="utf-8")
 
@@ -24,11 +25,15 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("ResolveUniqueConsoleStorage", PROFILE)
         self.assertIn("kEnvConsoleOffset", PROFILE)
         self.assertIn("kEnvConsoleOffset = 0xB0", ABI)
-        self.assertIn("ResolveCanonicalEnvironmentBase", NATIVE)
-        self.assertNotIn("for (std::size_t offset = 0; offset <= limit; offset += alignof(void*))", NATIVE)
+        self.assertIn("ResolveCanonicalEnvironmentBase", BOOTSTRAP)
+        self.assertIn("LegacyFindRuntimeEnvironment_Unreachable", BOOTSTRAP)
+        self.assertNotIn("src/clean_pause_native.cpp\n", CMAKE)
+        self.assertIn("src/clean_pause_native_profiled.cpp", CMAKE)
+        self.assertIn("for (std::size_t offset = 0; offset <= limit", LEGACY)
 
     def test_unknown_build_is_rejected_before_runtime_discovery(self):
-        bootstrap = NATIVE[NATIVE.index("DWORD WINAPI BootstrapThread"):]
+        marker = "DWORD WINAPI BootstrapThread(void*)"
+        bootstrap = BOOTSTRAP[BOOTSTRAP.index(marker):]
         match = bootstrap.index("MatchSupportedBuild")
         discover = bootstrap.index("FindRuntimeEnvironment")
         install = bootstrap.index("InstallInputHook")
@@ -36,14 +41,17 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertLess(discover, install)
         self.assertIn("unsupported WHGame build; Clean Pause disabled; no hooks installed", bootstrap)
 
-    def test_candidate_thread_must_belong_to_current_process(self):
-        self.assertIn("GetProcessIdOfThread", NATIVE)
-        self.assertIn("GetCurrentProcessId", NATIVE)
+    def test_candidate_identity_is_strongly_validated(self):
+        self.assertIn("GetProcessIdOfThread", BOOTSTRAP)
+        self.assertIn("GetCurrentProcessId", BOOTSTRAP)
+        self.assertIn('std::strcmp(gameName, "kcd2") == 0', BOOTSTRAP)
+        self.assertIn("frameworkSystem == environment.system", BOOTSTRAP)
 
     def test_profile_sources_are_compiled_into_both_runtime_artifacts(self):
         self.assertIn("src/kcd2_runtime_profile.cpp", CMAKE)
         self.assertIn("src/kcd2_runtime_profile.h", CMAKE)
-        self.assertIn("kcd2_runtime_profile.h", PROFILE_H)
+        self.assertIn("enum class StorefrontProfile", PROFILE_H)
+        self.assertIn("ResolveCanonicalEnvironmentBase", PROFILE_H)
 
 
 if __name__ == "__main__":
