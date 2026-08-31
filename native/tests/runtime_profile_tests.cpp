@@ -8,7 +8,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <string>
+#include <system_error>
+#include <vector>
 
 namespace {
 
@@ -87,7 +92,7 @@ private:
         nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
         nt->FileHeader.TimeDateStamp = 0x6a350e20;
         nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
-        nt->OptionalHeader.SizeOfImage = 0x05b2d000;
+        nt->OptionalHeader.SizeOfImage = static_cast<DWORD>(kAllocationSize);
         nt->OptionalHeader.CheckSum = 0;
 
         auto* sections = IMAGE_FIRST_SECTION(nt);
@@ -160,6 +165,41 @@ private:
     std::uint8_t* environment_{};
 };
 
+class TemporaryBuildMetadata {
+public:
+    TemporaryBuildMetadata()
+    {
+        const auto unique = std::to_wstring(GetCurrentProcessId())
+            + L"-" + std::to_wstring(GetTickCount64());
+        root_ = std::filesystem::temp_directory_path()
+            / (L"kcd2-clean-pause-runtime-profile-" + unique);
+        gameRoot_ = root_ / L"Kingdom Come Deliverance II";
+        std::filesystem::create_directories(gameRoot_);
+
+        std::ofstream metadata(gameRoot_ / L"whdlversions.json", std::ios::binary);
+        metadata
+            << R"({"Assembly":{"Id":15693,"DateTestedData":0},)"
+            << R"("Preset":{"Branch":{"Id":9,"Name":"release_1_5"}}})";
+    }
+
+    ~TemporaryBuildMetadata()
+    {
+        std::error_code error;
+        std::filesystem::remove_all(root_, error);
+    }
+
+    std::filesystem::path modulePath(const std::filesystem::path& relativeDirectory) const
+    {
+        const auto directory = gameRoot_ / relativeDirectory;
+        std::filesystem::create_directories(directory);
+        return directory / L"WHGame.dll";
+    }
+
+private:
+    std::filesystem::path root_{};
+    std::filesystem::path gameRoot_{};
+};
+
 bool TestKnownStorefrontRegistryAndAbiSeparation()
 {
     std::size_t count{};
@@ -203,34 +243,66 @@ bool TestStorefrontMarkerDetection()
     image.SetStorefrontMarker("EOSSDK-Win64-Shipping.dll");
     CHECK(kcd2::runtime::DetectStorefront(image.module(), storefront));
     CHECK(storefront == kcd2::runtime::Storefront::EpicGamesStore);
+
+    image.SetStorefrontMarker(nullptr);
+    CHECK(!kcd2::runtime::DetectStorefront(image.module(), storefront));
+    CHECK(storefront == kcd2::runtime::Storefront::Unknown);
     return true;
 }
 
-bool TestSteamExactFingerprintAndCanonicalEnvironment()
+bool TestBuildCodeParsingAndPathDiscovery()
+{
+    std::string buildCode;
+    CHECK(kcd2::runtime::ParseWarhorseBuildCode(
+        R"({"Assembly":{"Id":15693},"Preset":{"Branch":{"Name":"release_1_5"}}})",
+        buildCode));
+    CHECK(buildCode == "release_1_5-15693");
+
+    CHECK(!kcd2::runtime::ParseWarhorseBuildCode(
+        R"({"Assembly":{"Id":15693},"Preset":{}})", buildCode));
+    CHECK(buildCode.empty());
+
+    TemporaryBuildMetadata fixture;
+    const std::vector<std::filesystem::path> layouts{
+        std::filesystem::path(L"Bin") / L"Win64MasterMasterSteamPGO",
+        std::filesystem::path{},
+        std::filesystem::path(L"Bin") / L"Win64MasterMasterEpicPGO",
+    };
+    for (const auto& layout : layouts) {
+        buildCode.clear();
+        CHECK(kcd2::runtime::ReadBuildCodeFromModulePath(
+            fixture.modulePath(layout).wstring(), buildCode));
+        CHECK(buildCode == "release_1_5-15693");
+    }
+    return true;
+}
+
+bool TestSteamExactFingerprintAndEnvironmentValidation()
 {
     SyntheticWhGame image;
     CHECK(image.valid());
 
     kcd2::runtime::DetectedBuildIdentity identity{};
-    CHECK(kcd2::runtime::ReadFingerprint(image.module(), identity.fingerprint));
+    identity.fingerprint = {0x6a350e20, 0x05b2d000, 0};
     const auto* steam = kcd2::runtime::MatchSupportedBuild(identity);
     CHECK(steam != nullptr);
     CHECK(steam->storefront == kcd2::runtime::Storefront::Steam);
     CHECK(steam->identityStrategy == kcd2::runtime::BuildIdentityStrategy::ExactPeFingerprint);
     CHECK(steam->environmentLocator
-        == kcd2::runtime::EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor);
+        == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation);
     CHECK(steam->abi == &kcd2::runtime::Release15AbiProfile());
 
     auto syntheticProfile = *steam;
+    syntheticProfile.exactFingerprint = {0x6a350e20, 0x6000, 0};
     syntheticProfile.expectedEnvironmentRva = image.environmentRva();
     std::uint8_t* environment{};
-    CHECK(kcd2::runtime::ResolveCanonicalEnvironmentBase(
+    CHECK(kcd2::runtime::ResolveProfileEnvironmentBase(
         image.module(), syntheticProfile, environment));
     CHECK(environment == image.environment());
 
     syntheticProfile.expectedEnvironmentRva += 8;
     environment = reinterpret_cast<std::uint8_t*>(1);
-    CHECK(!kcd2::runtime::ResolveCanonicalEnvironmentBase(
+    CHECK(!kcd2::runtime::ResolveProfileEnvironmentBase(
         image.module(), syntheticProfile, environment));
     CHECK(environment == nullptr);
     return true;
@@ -246,6 +318,8 @@ bool TestGogAndEpicBuildIdentity()
     CHECK(gogProfile != nullptr);
     CHECK(gogProfile->storefront == kcd2::runtime::Storefront::GOG);
     CHECK(gogProfile->identityStrategy == kcd2::runtime::BuildIdentityStrategy::StorefrontBuildCode);
+    CHECK(gogProfile->environmentLocator
+        == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva);
     CHECK(gogProfile->expectedEnvironmentRva == 0x049177f8);
     CHECK(gogProfile->validation == kcd2::runtime::BuildValidationLevel::ExternalRuntimeEvidence);
 
@@ -260,6 +334,8 @@ bool TestGogAndEpicBuildIdentity()
     const auto* epicProfile = kcd2::runtime::MatchSupportedBuild(epic);
     CHECK(epicProfile != nullptr);
     CHECK(epicProfile->storefront == kcd2::runtime::Storefront::EpicGamesStore);
+    CHECK(epicProfile->environmentLocator
+        == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva);
     CHECK(epicProfile->requiredTimestamp == 0x6a34f917);
     CHECK(epicProfile->expectedEnvironmentRva == 0x0491d8b8);
 
@@ -270,6 +346,27 @@ bool TestGogAndEpicBuildIdentity()
     auto unknownStore = epic;
     unknownStore.storefront = kcd2::runtime::Storefront::Unknown;
     CHECK(kcd2::runtime::MatchSupportedBuild(unknownStore) == nullptr);
+    return true;
+}
+
+bool TestExactRvaLocatorDoesNotDependOnUnverifiedAnchorShape()
+{
+    SyntheticWhGame image;
+    CHECK(image.valid());
+    image.AddAmbiguousConsoleReference();
+
+    kcd2::runtime::DetectedBuildIdentity gogIdentity{};
+    gogIdentity.storefront = kcd2::runtime::Storefront::GOG;
+    gogIdentity.buildCode = "release_1_5-15693";
+    const auto* gog = kcd2::runtime::MatchSupportedBuild(gogIdentity);
+    CHECK(gog != nullptr);
+
+    auto syntheticProfile = *gog;
+    syntheticProfile.expectedEnvironmentRva = image.environmentRva();
+    std::uint8_t* environment{};
+    CHECK(kcd2::runtime::ResolveProfileEnvironmentBase(
+        image.module(), syntheticProfile, environment));
+    CHECK(environment == image.environment());
     return true;
 }
 
@@ -291,21 +388,22 @@ bool TestUnknownAndMismatchedBuildsFailClosed()
     return true;
 }
 
-bool TestAmbiguousAnchorFailsClosed()
+bool TestAmbiguousAnchorFailsClosedForSteam()
 {
     SyntheticWhGame image;
     CHECK(image.valid());
 
     kcd2::runtime::DetectedBuildIdentity identity{};
-    CHECK(kcd2::runtime::ReadFingerprint(image.module(), identity.fingerprint));
+    identity.fingerprint = {0x6a350e20, 0x05b2d000, 0};
     const auto* steam = kcd2::runtime::MatchSupportedBuild(identity);
     CHECK(steam != nullptr);
 
     auto syntheticProfile = *steam;
+    syntheticProfile.exactFingerprint = {0x6a350e20, 0x6000, 0};
     syntheticProfile.expectedEnvironmentRva = image.environmentRva();
     image.AddAmbiguousConsoleReference();
     std::uint8_t* environment = reinterpret_cast<std::uint8_t*>(1);
-    CHECK(!kcd2::runtime::ResolveCanonicalEnvironmentBase(
+    CHECK(!kcd2::runtime::ResolveProfileEnvironmentBase(
         image.module(), syntheticProfile, environment));
     CHECK(environment == nullptr);
     return true;
@@ -319,14 +417,18 @@ int main()
         return 1;
     if (!TestStorefrontMarkerDetection())
         return 2;
-    if (!TestSteamExactFingerprintAndCanonicalEnvironment())
+    if (!TestBuildCodeParsingAndPathDiscovery())
         return 3;
-    if (!TestGogAndEpicBuildIdentity())
+    if (!TestSteamExactFingerprintAndEnvironmentValidation())
         return 4;
-    if (!TestUnknownAndMismatchedBuildsFailClosed())
+    if (!TestGogAndEpicBuildIdentity())
         return 5;
-    if (!TestAmbiguousAnchorFailsClosed())
+    if (!TestExactRvaLocatorDoesNotDependOnUnverifiedAnchorShape())
         return 6;
+    if (!TestUnknownAndMismatchedBuildsFailClosed())
+        return 7;
+    if (!TestAmbiguousAnchorFailsClosedForSteam())
+        return 8;
 
     std::puts("runtime profile tests passed");
     return 0;
