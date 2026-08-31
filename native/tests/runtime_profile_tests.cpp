@@ -45,6 +45,18 @@ public:
     bool valid() const { return base_ != nullptr; }
     HMODULE module() const { return reinterpret_cast<HMODULE>(base_); }
     std::uint8_t* environment() const { return environment_; }
+    std::uint32_t environmentRva() const
+    {
+        return static_cast<std::uint32_t>(environment_ - base_);
+    }
+
+    void SetStorefrontMarker(const char* marker)
+    {
+        auto* destination = base_ + kRdataRva + 0x300;
+        std::memset(destination, 0, 128);
+        if (marker)
+            std::memcpy(destination, marker, std::strlen(marker) + 1);
+    }
 
     void AddAmbiguousConsoleReference()
     {
@@ -174,53 +186,108 @@ bool TestKnownStorefrontRegistryAndAbiSeparation()
     return true;
 }
 
-bool TestFingerprintAndCanonicalEnvironment()
+bool TestStorefrontMarkerDetection()
 {
     SyntheticWhGame image;
     CHECK(image.valid());
 
-    kcd2::runtime::Fingerprint fingerprint{};
-    CHECK(kcd2::runtime::ReadFingerprint(image.module(), fingerprint));
-    CHECK(fingerprint.timestamp == 0x6a350e20);
-    CHECK(fingerprint.imageSize == 0x05b2d000);
-    CHECK(fingerprint.checksum == 0);
+    kcd2::runtime::Storefront storefront{};
+    image.SetStorefrontMarker("steam_api64.dll");
+    CHECK(kcd2::runtime::DetectStorefront(image.module(), storefront));
+    CHECK(storefront == kcd2::runtime::Storefront::Steam);
 
-    const auto* steam = kcd2::runtime::MatchSupportedBuild(fingerprint);
+    image.SetStorefrontMarker("Galaxy64.dll");
+    CHECK(kcd2::runtime::DetectStorefront(image.module(), storefront));
+    CHECK(storefront == kcd2::runtime::Storefront::GOG);
+
+    image.SetStorefrontMarker("EOSSDK-Win64-Shipping.dll");
+    CHECK(kcd2::runtime::DetectStorefront(image.module(), storefront));
+    CHECK(storefront == kcd2::runtime::Storefront::EpicGamesStore);
+    return true;
+}
+
+bool TestSteamExactFingerprintAndCanonicalEnvironment()
+{
+    SyntheticWhGame image;
+    CHECK(image.valid());
+
+    kcd2::runtime::DetectedBuildIdentity identity{};
+    CHECK(kcd2::runtime::ReadFingerprint(image.module(), identity.fingerprint));
+    const auto* steam = kcd2::runtime::MatchSupportedBuild(identity);
     CHECK(steam != nullptr);
     CHECK(steam->storefront == kcd2::runtime::Storefront::Steam);
+    CHECK(steam->identityStrategy == kcd2::runtime::BuildIdentityStrategy::ExactPeFingerprint);
     CHECK(steam->environmentLocator
         == kcd2::runtime::EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor);
     CHECK(steam->abi == &kcd2::runtime::Release15AbiProfile());
-    CHECK(steam->validation == kcd2::runtime::BuildValidationLevel::StaticReverseEngineering);
 
+    auto syntheticProfile = *steam;
+    syntheticProfile.expectedEnvironmentRva = image.environmentRva();
     std::uint8_t* environment{};
     CHECK(kcd2::runtime::ResolveCanonicalEnvironmentBase(
-        image.module(), *steam, environment));
+        image.module(), syntheticProfile, environment));
     CHECK(environment == image.environment());
+
+    syntheticProfile.expectedEnvironmentRva += 8;
+    environment = reinterpret_cast<std::uint8_t*>(1);
+    CHECK(!kcd2::runtime::ResolveCanonicalEnvironmentBase(
+        image.module(), syntheticProfile, environment));
+    CHECK(environment == nullptr);
+    return true;
+}
+
+bool TestGogAndEpicBuildIdentity()
+{
+    kcd2::runtime::DetectedBuildIdentity gog{};
+    gog.fingerprint = {0x12345678, 0x01000000, 0};
+    gog.storefront = kcd2::runtime::Storefront::GOG;
+    gog.buildCode = "release_1_5-15693";
+    const auto* gogProfile = kcd2::runtime::MatchSupportedBuild(gog);
+    CHECK(gogProfile != nullptr);
+    CHECK(gogProfile->storefront == kcd2::runtime::Storefront::GOG);
+    CHECK(gogProfile->identityStrategy == kcd2::runtime::BuildIdentityStrategy::StorefrontBuildCode);
+    CHECK(gogProfile->expectedEnvironmentRva == 0x049177f8);
+    CHECK(gogProfile->validation == kcd2::runtime::BuildValidationLevel::ExternalRuntimeEvidence);
+
+    auto wrongGog = gog;
+    wrongGog.buildCode = "release_1_5-99999";
+    CHECK(kcd2::runtime::MatchSupportedBuild(wrongGog) == nullptr);
+
+    kcd2::runtime::DetectedBuildIdentity epic{};
+    epic.fingerprint = {0x6a34f917, 0x01000000, 0};
+    epic.storefront = kcd2::runtime::Storefront::EpicGamesStore;
+    epic.buildCode = "release_1_5-15693";
+    const auto* epicProfile = kcd2::runtime::MatchSupportedBuild(epic);
+    CHECK(epicProfile != nullptr);
+    CHECK(epicProfile->storefront == kcd2::runtime::Storefront::EpicGamesStore);
+    CHECK(epicProfile->requiredTimestamp == 0x6a34f917);
+    CHECK(epicProfile->expectedEnvironmentRva == 0x0491d8b8);
+
+    auto wrongEpicTimestamp = epic;
+    wrongEpicTimestamp.fingerprint.timestamp ^= 1;
+    CHECK(kcd2::runtime::MatchSupportedBuild(wrongEpicTimestamp) == nullptr);
+
+    auto wrongStore = epic;
+    wrongStore.storefront = kcd2::runtime::Storefront::GOG;
+    CHECK(kcd2::runtime::MatchSupportedBuild(wrongStore) == nullptr);
     return true;
 }
 
 bool TestUnknownAndMismatchedBuildsFailClosed()
 {
-    SyntheticWhGame image;
-    CHECK(image.valid());
-
-    kcd2::runtime::Fingerprint unknown{0x11111111, 0x05b2d000, 0};
+    kcd2::runtime::DetectedBuildIdentity unknown{};
+    unknown.fingerprint = {0x11111111, 0x05b2d000, 0};
     CHECK(kcd2::runtime::MatchSupportedBuild(unknown) == nullptr);
 
-    const kcd2::runtime::Fingerprint xboxFingerprint{0x6a391f7b, 0x05bf2000, 0};
-    const auto* xbox = kcd2::runtime::MatchSupportedBuild(xboxFingerprint);
-    CHECK(xbox != nullptr);
-    CHECK(xbox->storefront == kcd2::runtime::Storefront::XboxMicrosoftStore);
-    CHECK(xbox->environmentLocator
+    kcd2::runtime::DetectedBuildIdentity xbox{};
+    xbox.fingerprint = {0x6a391f7b, 0x05bf2000, 0};
+    const auto* xboxProfile = kcd2::runtime::MatchSupportedBuild(xbox);
+    CHECK(xboxProfile != nullptr);
+    CHECK(xboxProfile->storefront == kcd2::runtime::Storefront::XboxMicrosoftStore);
+    CHECK(xboxProfile->identityStrategy == kcd2::runtime::BuildIdentityStrategy::ExactPeFingerprint);
+    CHECK(xboxProfile->environmentLocator
         == kcd2::runtime::EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan);
-    CHECK(xbox->abi == &kcd2::runtime::Release15AbiProfile());
-    CHECK(xbox->validation == kcd2::runtime::BuildValidationLevel::RuntimeTested);
-
-    std::uint8_t* environment = reinterpret_cast<std::uint8_t*>(1);
-    CHECK(!kcd2::runtime::ResolveCanonicalEnvironmentBase(
-        image.module(), *xbox, environment));
-    CHECK(environment == nullptr);
+    CHECK(xboxProfile->validation == kcd2::runtime::BuildValidationLevel::RuntimeTested);
     return true;
 }
 
@@ -229,15 +296,17 @@ bool TestAmbiguousAnchorFailsClosed()
     SyntheticWhGame image;
     CHECK(image.valid());
 
-    kcd2::runtime::Fingerprint fingerprint{};
-    CHECK(kcd2::runtime::ReadFingerprint(image.module(), fingerprint));
-    const auto* steam = kcd2::runtime::MatchSupportedBuild(fingerprint);
+    kcd2::runtime::DetectedBuildIdentity identity{};
+    CHECK(kcd2::runtime::ReadFingerprint(image.module(), identity.fingerprint));
+    const auto* steam = kcd2::runtime::MatchSupportedBuild(identity);
     CHECK(steam != nullptr);
 
+    auto syntheticProfile = *steam;
+    syntheticProfile.expectedEnvironmentRva = image.environmentRva();
     image.AddAmbiguousConsoleReference();
     std::uint8_t* environment = reinterpret_cast<std::uint8_t*>(1);
     CHECK(!kcd2::runtime::ResolveCanonicalEnvironmentBase(
-        image.module(), *steam, environment));
+        image.module(), syntheticProfile, environment));
     CHECK(environment == nullptr);
     return true;
 }
@@ -248,12 +317,16 @@ int main()
 {
     if (!TestKnownStorefrontRegistryAndAbiSeparation())
         return 1;
-    if (!TestFingerprintAndCanonicalEnvironment())
+    if (!TestStorefrontMarkerDetection())
         return 2;
-    if (!TestUnknownAndMismatchedBuildsFailClosed())
+    if (!TestSteamExactFingerprintAndCanonicalEnvironment())
         return 3;
-    if (!TestAmbiguousAnchorFailsClosed())
+    if (!TestGogAndEpicBuildIdentity())
         return 4;
+    if (!TestUnknownAndMismatchedBuildsFailClosed())
+        return 5;
+    if (!TestAmbiguousAnchorFailsClosed())
+        return 6;
 
     std::puts("runtime profile tests passed");
     return 0;
