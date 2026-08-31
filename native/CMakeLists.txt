@@ -53,6 +53,8 @@ set(CLEAN_PAUSE_RUNTIME_SOURCES
   src/clean_pause_hud_mask.cpp
   src/clean_pause_hud_mask.h
   src/kcd2_abi.h
+  src/kcd2_runtime_profile.cpp
+  src/kcd2_runtime_profile.h
   src/process_guard.cpp
   src/process_guard.h
 )
