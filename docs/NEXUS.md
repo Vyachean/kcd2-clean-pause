@@ -1,6 +1,8 @@
 # Nexus Mods publication copy — KCD2 Clean Pause v0.2.2
 
-Prepared for the Nexus Mods publication of the ASI edition.
+Prepared for the currently published ASI edition.
+
+> Development note: v0.2.2 remains the immutable Xbox / Microsoft Store-tested public release. PR #44 implements fail-closed KCD2 1.5.6 profiles for Steam, GOG and Epic Games Store as well as Xbox / Microsoft Store. Those new storefront profiles must not be advertised here as Clean Pause runtime-tested until the corresponding in-game smoke QA is complete and a new release is published.
 
 ## Page metadata
 
@@ -20,13 +22,13 @@ User Interface
 
 Pause Kingdom Come: Deliverance II without covering the current gameplay view, keeping the HUD and subtitles visible while the game is paused.
 
-**Tested version**
+**Runtime-tested version for v0.2.2**
 
 Kingdom Come: Deliverance II 1.5.6 — PC Xbox Store / Xbox app version, tested with an Xbox controller.
 
-**Steam status**
+**Other storefronts**
 
-Steam compatibility has not yet been explicitly verified. Steam crash/load reports should include the native log when available and the exact ASI-loader/plugin locations.
+The current source/development runtime has explicit 1.5.6 compatibility profiles for Steam, GOG and Epic Games Store backed by public reverse-engineering/runtime evidence and automated Windows validation. These profiles are intended for the next release and still require Clean Pause in-game smoke QA before the Nexus compatibility claim is expanded.
 
 ## Description
 
@@ -107,13 +109,13 @@ Isolate the loader from Clean Pause:
 If the game works with the loader alone but crashes after adding Clean Pause, report it as a Clean Pause compatibility issue and include:
 
 - game version;
-- storefront/build — Steam, Xbox Store / Xbox app, or another build;
+- storefront/build — Steam, GOG, Epic Games Store, Xbox Store / Xbox app, or another build;
 - location of `dinput8.dll`;
 - location of `KCD2CleanPause.asi`;
 - whether the game starts with the loader present and Clean Pause removed;
 - `kcd2_clean_pause_native.log`, if one was created before the crash.
 
-Steam has not yet been explicitly validated against the current runtime, so Steam reports with the native log are especially useful.
+For builds from the development multi-store runtime, the native log also records the detected fingerprint/storefront/build profile and whether the fail-closed runtime gates reached hook installation.
 
 Do not install the ASI edition together with an old standalone Clean Pause `version.dll` edition.
 
@@ -155,7 +157,7 @@ KCD2 Clean Pause v0.2.2 — ASI
 
 Main ASI release. Includes KCD2 Clean Pause, the pinned official x64 Ultimate ASI Loader for fresh installation, installation instructions, provenance/hashes, and required third-party license notices.
 
-Do **not** upload the CI-only standalone `version.dll` package while issue #38 remains unresolved.
+Do **not** upload a CI/development build as v0.2.2 and do **not** upload the CI-only standalone `version.dll` package while issue #38 remains unresolved.
 
 ## Changelog
 
@@ -175,9 +177,9 @@ Do **not** upload the CI-only standalone `version.dll` package while issue #38 r
 - Keeps the retained frame sharp without pause DoF blur.
 - Keeps KCD2 as the sole logical pause owner with a fail-open vanilla-menu fallback.
 
-## Nexus upload checklist — 2026-08-27
+## Nexus upload checklist — v0.2.2 historical release
 
-- Upload only the GitHub Release `kcd2-clean-pause-v0.2.2-asi.zip`, not a local/CI rebuild.
+- Upload only the immutable GitHub Release `kcd2-clean-pause-v0.2.2-asi.zip`, not a local/CI rebuild.
 - Category: **User Interface**.
 - Add relevant UI / Quality of Life tags if available.
 - Apply the required **AI-Generated Content** tag because generative AI was used for code development.
@@ -185,6 +187,15 @@ Do **not** upload the CI-only standalone `version.dll` package while issue #38 r
 - Keep the page hidden/unpublished until the uploaded file has completed Nexus security scanning.
 - If the file is quarantined, do not delete/reupload it repeatedly; retain the file and provide the GitHub release/provenance information to Nexus moderation.
 - Before pressing Publish, confirm the displayed Nexus file version is **0.2.2** and the archive contains no nested archives.
+
+## Next-release compatibility checklist
+
+Before changing the Nexus compatibility claim for Steam/GOG/Epic:
+
+- use the final PR #44-derived release candidate, not an earlier diagnostic probe;
+- complete the intended in-game Clean Pause smoke QA for each storefront being claimed as runtime-tested;
+- update the page version/changelog and tested-storefront wording together;
+- retain the fail-closed wording for unknown/mismatched KCD2 builds.
 
 ## Optional presentation asset
 
