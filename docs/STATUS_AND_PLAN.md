@@ -2,125 +2,109 @@
 
 ## Release status
 
-**v0.2.2** is the current public ASI release.
+- **Stable:** v0.2.2 ASI, runtime-tested on KCD2 1.5.6 Xbox / Microsoft Store.
+- **GitHub prerelease candidate:** v0.3.0-rc.1 ASI, prepared from PR #44 for multi-store KCD2 1.5.6 compatibility.
+- **Standalone version.dll:** still built and validated, but new public distribution remains blocked by Defender investigation #38. The last published standalone package is v0.2.0.
 
-The public v0.2.2 runtime is unchanged from v0.2.1 and was runtime-tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbox controller and the upstream Ultimate ASI Loader.
+v0.3.0-rc.1 is intentionally a prerelease. Its immediate purpose is to let the Steam reporter test the final profiled runtime through the normal GitHub release artifact rather than through an ad-hoc diagnostic build.
 
-PR #44 is the current unreleased compatibility candidate. It fixes the Steam failure reported against v0.2.2 and adds fail-closed KCD2 1.5.6 build profiles for all four known PC storefronts: Steam, GOG, Epic Games Store and Xbox / Microsoft Store.
-
-Distribution status is per edition:
-
-- **`KCD2CleanPause.asi`: current public distribution**, with v0.2.2 runtime-accepted on the Xbox / Microsoft Store 1.5.6 build;
-- **unreleased profiled ASI runtime:** Steam/GOG/Epic 1.5.6 binary compatibility is implemented and covered by public RE evidence plus automated Windows tests, but Clean Pause in-game smoke QA remains pending before those storefronts are advertised as runtime-tested by this project;
-- **standalone `version.dll`: built and validated but new distribution withheld** while Defender investigation #38 is unresolved. The last published standalone package remains v0.2.0.
+If the Steam smoke test confirms accepted Clean Pause behavior, prepare a separate immutable stable v0.3.0 release using the same runtime implementation, then update Nexus Mods from that stable GitHub artifact. Do not upload the RC itself to Nexus as the final release.
 
 ## Steam report and root cause
 
-The Steam report exposed two separate problems in v0.2.2:
+The Steam report exposed two separate v0.2.2 problems:
 
-1. the original shared-loader instructions could leave `dinput8.dll` and `KCD2CleanPause.asi` in different directories, so Ultimate ASI Loader never discovered the plugin;
-2. after the loader and plugin were colocated correctly, the native log showed that v0.2.2's writable-memory `gEnv` scanner accepted a false positive on Steam (`mainThread=8`, invalid framework/UI identity, impossible-looking input events).
+1. the old shared-loader instructions could leave dinput8.dll and KCD2CleanPause.asi in different directories, so Ultimate ASI Loader never discovered the plugin;
+2. after correct loading, v0.2.2's writable-memory gEnv scanner could accept a false-positive object on Steam, producing invalid framework/input/UI observations.
 
-The user's later isolation test launched normally with the loader and plugin arrangement under test, while Clean Pause still did not work. The resulting native log provided the Steam PE fingerprint and enough evidence to identify the runtime-discovery defect. Further iterative probe builds are not required for reverse engineering.
+The report provided the Steam KCD2 1.5.6 fingerprint and enough evidence to identify the discovery defect. PR #44 replaces that unsafe cross-build assumption with explicit build/storefront/ABI profiles and fail-closed validation.
 
-PR #44 replaces that unsafe cross-build assumption with explicit build/storefront/ABI profiles and strong fail-closed validation.
+## v0.3.0-rc.1 compatibility profiles
 
-## v0.2.2 scope
+| Storefront | KCD2 build evidence | Clean Pause status |
+| --- | --- | --- |
+| Xbox / Microsoft Store | exact PE fingerprint 0x6a391f7b / 0x05bf2000 / 0 | runtime-tested baseline |
+| Steam | exact PE fingerprint 0x6a350e20 / 0x05b2d000 / 0; canonical gEnv RVA 0x492D7F8 | RC smoke-test target |
+| GOG | Galaxy64.dll marker + release_1_5-15693; canonical gEnv RVA 0x49177F8 | profile implemented; Clean Pause smoke QA pending |
+| Epic Games Store | EOSSDK-Win64-Shipping.dll marker + release_1_5-15693 + timestamp 0x6A34F917; canonical gEnv RVA 0x491D8B8 | profile implemented; Clean Pause smoke QA pending |
 
-v0.2.2 remains an immutable packaging-only release:
-
-- bundles the official x64 Ultimate ASI Loader with the ASI ZIP;
-- pins upstream v9.7.4, source commit, release asset, and SHA-256;
-- validates the upstream archive and extracted x64 `dinput8.dll` during release packaging;
-- includes loader provenance and its MIT license;
-- supports shared compatible ASI loaders, provided `KCD2CleanPause.asi` is installed in a plugin location that the existing loader actually scans.
-
-The existing immutable v0.2.2 ZIP still contains the earlier ambiguous `INSTALL.txt`; current README/Nexus guidance is the corrected installation guidance. The archive itself is not rewritten.
-
-## Accepted runtime behavior
-
-On the runtime-tested Xbox / Microsoft Store build:
-
-- Xbox Start enters the vanilla-owned Clean Pause without drawing the normal pause menu;
-- simulation/picture and ongoing dialogue audio pause together immediately;
-- main HUD and dialogue subtitles remain retained without the previous hide/restore blink;
-- the retained frame is sharp without vanilla pause DoF blur;
-- active NPC overhead subtitles remain preserved;
-- second Start or B reveals the already-open vanilla pause menu;
-- closing the menu and resuming returns to normal gameplay.
-
-The transition fix restricts HUD/subtitle presentation ownership to KCD2's actual validated `IGameFramework::PauseGame(true, ...)` transition. Pending Start/release correlation by itself performs no Flash replay.
-
-## Product contract
-
-```text
-Running
-  Escape / Xbox Start -> Clean Pause
-
-Clean Pause
-  sharp retained frame, no pause DoF blur
-  visible dialogue subtitles remain visible
-  active NPC overhead subtitles remain visible
-  Escape / Xbox Start -> visible vanilla pause menu
-  Xbox B               -> visible vanilla pause menu
-```
-
-Direct `Clean Pause -> B -> Running` is not part of the current contract.
+Steam/GOG/Epic share the documented release_1_5 ABI family but use separate shipped binaries and distribution-specific environment evidence.
 
 ## Runtime compatibility architecture
 
 1. KCD2 remains the sole pause owner.
-2. Storefront, shipped build identity, ABI and environment discovery are separate dimensions.
-3. The mature runtime adapter supports the documented KCD2 `release_1_5 / 1.5.6` ABI only; a future incompatible ABI is rejected by `MatureRuntimeSupports()` before hooks.
-4. Xbox / Microsoft Store 1.5.6 is selected by its captured full PE fingerprint and retains the already runtime-tested discovery path behind stronger identity checks.
-5. Steam 1.5.6 is selected by its captured full PE fingerprint and uses exact canonical `gEnv` RVA `0x492D7F8`, additionally cross-checked once through the known `exec autoexec.cfg` / `pConsole` code anchor.
-6. GOG 1.5.6 is selected by the GOG binary marker plus Warhorse build `release_1_5-15693` and exact canonical `gEnv` RVA `0x49177F8`.
-7. Epic 1.5.6 is selected by the Epic binary marker plus build `release_1_5-15693`, timestamp `0x6A34F917`, and exact canonical `gEnv` RVA `0x491D8B8`.
-8. Profiled Steam/GOG/Epic `gEnv` identity is resolved once before runtime readiness polling; the 100 ms poll no longer rescans the large `WHGame.dll` code/data image.
-9. The main-thread ID must belong to the current process, `IGame::GetName()` must identify `kcd2`, and `IGame -> IGameFramework -> ISystem` must resolve to the same `ISystem` as `gEnv`.
-10. Unknown/mismatched builds install no version-specific Clean Pause hooks.
+2. Storefront, shipped-build identity, ABI and environment discovery are separate dimensions.
+3. The mature runtime adapter supports the documented KCD2 release_1_5 / 1.5.6 ABI only; an incompatible future ABI is rejected before hooks.
+4. Steam/GOG/Epic use explicit distribution-specific canonical gEnv evidence. Steam additionally cross-checks the captured code anchor once.
+5. Xbox keeps the already runtime-tested discovery path only behind the exact Xbox fingerprint.
+6. Profiled immutable environment identity is resolved once before readiness polling; the 100 ms loop no longer repeatedly scans WHGame.dll.
+7. The main-thread ID must belong to the current process, IGame must identify kcd2, and IGame -> IGameFramework -> ISystem must resolve back to the same ISystem as gEnv.
+8. Unknown/mismatched builds install no version-specific Clean Pause hooks.
 
-See `docs/RUNTIME_COMPATIBILITY.md` for the evidence model and coverage matrix.
+See docs/RUNTIME_COMPATIBILITY.md for the full evidence and extension model.
 
-## Automated validation in PR #44
+## Automated validation
 
-The compatibility candidate includes:
+The v0.3.0-rc.1 candidate is covered by:
 
-- source-contract tests for Storefront / BuildProfile / AbiProfile / locator separation;
-- executable Windows tests for PE parsing, storefront-marker detection and fail-closed matching;
-- real parser/path tests for Warhorse `whdlversions.json` using temporary game-directory fixtures rather than preconstructed build IDs only;
-- exact-RVA environment tests;
-- Steam one-time anchor/RVA cross-validation and ambiguous-anchor rejection;
-- GOG/Epic tests that do not assume the Steam-specific instruction pattern when their independent evidence is the exact distribution-specific RVA;
-- MSVC x64 builds and validation of both native editions;
-- full release packaging validation.
+- repository/source contract tests;
+- x64 MSVC production builds;
+- executable Windows runtime-profile tests;
+- PE/storefront/build matching and fail-closed tests;
+- exact environment-RVA validation;
+- Steam one-time anchor/RVA agreement and ambiguity rejection;
+- real whdlversions.json parser/path fixtures for build-code detection;
+- validation of both ASI and standalone native artifacts;
+- full release-shaped packaging checks.
 
-## Nexus Mods readiness
+## Steam acceptance test
 
-The currently published Nexus/GitHub artifact remains v0.2.2 and should continue to be described as Xbox / Microsoft Store runtime-tested only.
+For v0.3.0-rc.1:
 
-The next native release should update the public compatibility claim only after the intended smoke-QA level is reached. Until then, Steam/GOG/Epic should be described as implemented/validated compatibility candidates, not as Clean Pause runtime-tested storefronts.
+1. game reaches the main menu and loads gameplay;
+2. Escape enters Clean Pause without covering the gameplay view;
+3. HUD/dialogue subtitles and active overhead speech remain preserved as applicable;
+4. retained frame remains sharp without pause DoF blur;
+5. second Escape reveals the ordinary vanilla pause menu;
+6. Xbox Start/B path behaves according to the accepted contract when a controller is available;
+7. normal resume works;
+8. native log shows the Steam profile was selected and validated without compatibility fallback/errors.
 
-The CI-only standalone `version.dll` package must not be uploaded while #38 remains unresolved.
+A single successful focused Steam test is sufficient to proceed to stable v0.3.0 unless it exposes a new issue.
+
+## Nexus Mods plan
+
+Nexus currently remains on stable v0.2.2 and should continue to describe Xbox / Microsoft Store as the runtime-tested storefront for that immutable release.
+
+After Steam acceptance:
+
+1. prepare stable v0.3.0 from the accepted RC runtime;
+2. publish the stable GitHub release through the normal immutable release workflow;
+3. update Nexus copy/version/compatibility wording;
+4. upload only the stable v0.3.0 ASI GitHub release artifact.
+
+GOG/Epic may be described as implemented compatibility profiles unless/until Clean Pause-specific smoke QA supports the stronger runtime-tested wording.
 
 ## Remaining engineering work
 
-Before advertising the new storefront profiles as Clean Pause runtime-tested:
+Before stable v0.3.0:
 
-- run one focused Steam smoke test of the final PR #44 ASI candidate (load to gameplay, enter Clean Pause, reveal vanilla menu, resume, inspect native log);
-- GOG/Epic Clean Pause smoke tests remain desirable before making equally strong storefront-specific runtime-tested claims, although their release_1_5 native ABI/mapping evidence is independently established.
+- complete the focused Steam v0.3.0-rc.1 smoke test;
+- review the resulting native log if anything is unexpected;
+- promote to stable only if no runtime change is needed.
 
 Blocking new standalone distribution:
 
-- resolve Defender issue #38 and record an independent/Microsoft false-positive verdict before publishing a new `version.dll` asset.
+- resolve Defender issue #38 before publishing a new standalone version.dll asset.
 
 Non-blocking follow-up:
 
-- verify coexistence with additional real KCD2 ASI plugins;
-- investigate safe direct B resume only if a canonical vanilla mechanism is found;
+- GOG/Epic Clean Pause-specific smoke QA;
+- coexistence with additional real KCD2 ASI plugins;
 - broader cutscene/dialogue and repeated-cycle/load-transition robustness;
-- process-lifetime hook/hot-unload policy remains tracked in #37;
-- after #44 lands, close or rewrite #36 because its original strict-build-gating goal is implemented by the profile architecture.
+- process-lifetime hook/hot-unload policy in #37;
+- remove the profiled translation-unit wrapper in #45 after compatibility smoke QA;
+- close/rewrite #36 when #44 lands because its strict-build-gating goal is implemented by the profile architecture.
 
 ## Decision rule
 
