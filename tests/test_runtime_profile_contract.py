@@ -10,19 +10,27 @@ BOOTSTRAP = (ROOT / "native/src/clean_pause_native_profiled.cpp").read_text(enco
 LEGACY = (ROOT / "native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
 BUBBLES = (ROOT / "native/src/clean_pause_bubbles.cpp").read_text(encoding="utf-8")
 HUD_MASK = (ROOT / "native/src/clean_pause_hud_mask.cpp").read_text(encoding="utf-8")
-ABI = (ROOT / "native/src/kcd2_abi.h").read_text(encoding="utf-8")
 CMAKE = (ROOT / "native/CMakeLists.txt").read_text(encoding="utf-8")
 
 
 class RuntimeProfileContractTests(unittest.TestCase):
-    def test_supported_retail_fingerprints_are_explicit(self):
+    def test_all_release15_store_builds_are_registered_with_evidence(self):
         profile = PROFILE.lower()
+        for name in (
+            "xbox / microsoft store 1.5.6",
+            "steam 1.5.6 release_1_5-15693",
+            "gog 1.5.6 release_1_5-15693",
+            "epic games store 1.5.6 release_1_5-15693",
+        ):
+            self.assertIn(name, profile)
         self.assertIn("0x6a391f7b", profile)
         self.assertIn("0x05bf2000", profile)
         self.assertIn("0x6a350e20", profile)
         self.assertIn("0x05b2d000", profile)
-        self.assertIn("xbox / microsoft store 1.5.6", profile)
-        self.assertIn("steam 1.5.6 release_1_5-15693", profile)
+        self.assertIn("0x6a34f917", profile)
+        self.assertIn("0x0492d7f8", profile)
+        self.assertIn("0x049177f8", profile)
+        self.assertIn("0x0491d8b8", profile)
 
     def test_all_known_pc_storefronts_are_first_class(self):
         for token in (
@@ -33,22 +41,34 @@ class RuntimeProfileContractTests(unittest.TestCase):
         ):
             self.assertIn(token, PROFILE)
         self.assertIn("enum class Storefront", PROFILE_H)
-        self.assertIn("Steam", PROFILE_H)
-        self.assertIn("EpicGamesStore", PROFILE_H)
-        self.assertIn("GOG", PROFILE_H)
-        self.assertIn("XboxMicrosoftStore", PROFILE_H)
         self.assertIn("KnownStorefronts", PROFILE_H)
         self.assertIn("publicRelease15AddressLibrary", PROFILE_H)
 
-    def test_build_storefront_locator_and_abi_are_separate_dimensions(self):
+    def test_build_identity_storefront_locator_and_abi_are_separate_dimensions(self):
+        self.assertIn("enum class BuildIdentityStrategy", PROFILE_H)
+        self.assertIn("ExactPeFingerprint", PROFILE_H)
+        self.assertIn("StorefrontBuildCode", PROFILE_H)
         self.assertIn("Storefront storefront", PROFILE_H)
+        self.assertIn("BuildIdentityStrategy identityStrategy", PROFILE_H)
+        self.assertIn("Fingerprint exactFingerprint", PROFILE_H)
+        self.assertIn("const char* buildCode", PROFILE_H)
+        self.assertIn("expectedEnvironmentRva", PROFILE_H)
         self.assertIn("EnvironmentLocatorStrategy environmentLocator", PROFILE_H)
         self.assertIn("const AbiProfile* abi", PROFILE_H)
-        self.assertIn("BuildValidationLevel validation", PROFILE_H)
         self.assertNotIn("StorefrontProfile", PROFILE_H)
-        self.assertNotIn("switch (profile.id)", BOOTSTRAP)
         self.assertIn("switch (profile.environmentLocator)", BOOTSTRAP)
         self.assertIn("MatureRuntimeSupports(*profile->abi)", BOOTSTRAP)
+
+    def test_gog_and_epic_use_independent_distribution_and_build_evidence(self):
+        self.assertIn('"steam_api64.dll"', PROFILE)
+        self.assertIn('"Galaxy64.dll"', PROFILE)
+        self.assertIn('"EOSSDK-Win64-Shipping.dll"', PROFILE)
+        self.assertIn('"whdlversions.json"', PROFILE)
+        self.assertIn('branch + "-" + assemblyId', PROFILE)
+        self.assertGreaterEqual(PROFILE.count('"release_1_5-15693"'), 3)
+        self.assertIn("BuildIdentityStrategy::StorefrontBuildCode", PROFILE)
+        self.assertIn("profile.expectedEnvironmentRva", PROFILE)
+        self.assertIn("candidateRva != profile.expectedEnvironmentRva", PROFILE)
 
     def test_release15_abi_profile_captures_runtime_binary_contract(self):
         self.assertIn("struct EnvironmentLayout", ABI_PROFILE_H)
@@ -81,7 +101,7 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("kUIElementRenderSlot = 24", LEGACY)
         self.assertIn("kUIElementCallFunctionByNameSlot = 69", LEGACY)
 
-    def test_steam_uses_abi_driven_canonical_anchor_discovery(self):
+    def test_release15_non_xbox_builds_use_abi_driven_anchor_discovery(self):
         self.assertIn('"exec autoexec.cfg"', PROFILE)
         self.assertIn("ResolveUniqueConsoleStorage", PROFILE)
         self.assertIn("profile.abi->environment.consoleOffset", PROFILE)
@@ -100,10 +120,12 @@ class RuntimeProfileContractTests(unittest.TestCase):
     def test_unknown_build_is_rejected_before_abi_or_runtime_discovery(self):
         marker = "DWORD WINAPI BootstrapThread(void*)"
         bootstrap = BOOTSTRAP[BOOTSTRAP.index(marker):]
+        read_identity = bootstrap.index("ReadBuildIdentity")
         match = bootstrap.index("MatchSupportedBuild")
         abi_gate = bootstrap.index("MatureRuntimeSupports")
         discover = bootstrap.index("FindRuntimeEnvironment")
         install = bootstrap.index("InstallInputHook")
+        self.assertLess(read_identity, match)
         self.assertLess(match, abi_gate)
         self.assertLess(abi_gate, discover)
         self.assertLess(discover, install)
@@ -121,7 +143,6 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("src/kcd2_runtime_profile.cpp", CMAKE)
         self.assertIn("src/kcd2_runtime_profile.h", CMAKE)
         self.assertIn("ResolveCanonicalEnvironmentBase", PROFILE_H)
-        self.assertIn("kcd2_abi_profile.cpp", CMAKE)
 
 
 if __name__ == "__main__":
