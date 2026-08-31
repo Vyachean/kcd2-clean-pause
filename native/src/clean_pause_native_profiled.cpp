@@ -104,9 +104,6 @@ bool FindRuntimeEnvironment(
 
     switch (profile.environmentLocator) {
     case kcd2::runtime::EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan:
-        // This strategy exists only to preserve the already-proven Xbox 1.5.6
-        // discovery behavior. It is selected by a BuildProfile, not by storefront
-        // branching, so another binary can never reach it unless explicitly registered.
         if (!LegacyFindRuntimeEnvironment_Xbox156Only(whGame, candidate))
             return false;
         break;
@@ -146,19 +143,23 @@ DWORD WINAPI BootstrapThread(void*)
         return 0;
     }
 
-    kcd2::runtime::Fingerprint fingerprint{};
-    if (!kcd2::runtime::ReadFingerprint(whGame, fingerprint)) {
-        Log("WHGame fingerprint unavailable; Clean Pause disabled; no hooks installed");
+    kcd2::runtime::DetectedBuildIdentity identity{};
+    if (!kcd2::runtime::ReadBuildIdentity(whGame, identity)) {
+        Log("WHGame build identity unavailable; Clean Pause disabled; no hooks installed");
         return 0;
     }
 
     Log(
         "WHGame fingerprint: TimeDateStamp=0x%08lx SizeOfImage=0x%08lx CheckSum=0x%08lx",
-        static_cast<unsigned long>(fingerprint.timestamp),
-        static_cast<unsigned long>(fingerprint.imageSize),
-        static_cast<unsigned long>(fingerprint.checksum));
+        static_cast<unsigned long>(identity.fingerprint.timestamp),
+        static_cast<unsigned long>(identity.fingerprint.imageSize),
+        static_cast<unsigned long>(identity.fingerprint.checksum));
+    Log(
+        "WHGame metadata: storefront=%s build=%s",
+        kcd2::runtime::StorefrontName(identity.storefront),
+        identity.buildCode.empty() ? "<unavailable>" : identity.buildCode.c_str());
 
-    const auto* profile = kcd2::runtime::MatchSupportedBuild(fingerprint);
+    const auto* profile = kcd2::runtime::MatchSupportedBuild(identity);
     if (!profile) {
         Log("unsupported WHGame build; Clean Pause disabled; no hooks installed");
         return 0;
@@ -170,9 +171,10 @@ DWORD WINAPI BootstrapThread(void*)
     }
 
     Log(
-        "WHGame profile accepted: %s; storefront=%s abi=%s locator=%s evidence=%s",
+        "WHGame profile candidate: %s; storefront=%s identity=%s abi=%s locator=%s evidence=%s",
         profile->name,
         kcd2::runtime::StorefrontName(profile->storefront),
+        kcd2::runtime::BuildIdentityStrategyName(profile->identityStrategy),
         profile->abi->name,
         kcd2::runtime::EnvironmentLocatorName(profile->environmentLocator),
         kcd2::runtime::BuildValidationName(profile->validation));
@@ -185,12 +187,12 @@ DWORD WINAPI BootstrapThread(void*)
     }
 
     if (!environment.base) {
-        Log("supported %s runtime environment could not be strongly validated; no hooks installed",
+        Log("matched %s runtime environment could not be strongly validated; no hooks installed",
             profile->name);
         return 0;
     }
 
-    Log("runtime environment validated for %s; env=%p mainThread=%lu",
+    Log("runtime profile validated for %s; env=%p mainThread=%lu",
         profile->name,
         environment.base,
         static_cast<unsigned long>(environment.mainThreadId));
