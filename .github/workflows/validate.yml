@@ -28,12 +28,13 @@ jobs:
         run: cmake -S native -B native/build -A x64
       - name: Build x64 Release
         run: cmake --build native/build --config Release --parallel
-      - name: Validate both native artifacts
+      - name: Validate native artifacts
         shell: pwsh
         run: |
           $versionDll = "native/build/Release/version.dll"
           $asi = "native/build/Release/KCD2CleanPause.asi"
-          foreach ($artifact in @($versionDll, $asi)) {
+          $steamProbe = "native/build/Release/KCD2CleanPauseSteamProbe.asi"
+          foreach ($artifact in @($versionDll, $asi, $steamProbe)) {
             if (-not (Test-Path $artifact)) { throw "Missing $artifact" }
             if ((Get-Item $artifact).Length -lt 10240) { throw "$artifact is unexpectedly small" }
           }
@@ -56,7 +57,7 @@ jobs:
             if ($exports -notmatch [regex]::Escape($name)) { throw "version.dll proxy export missing: $name" }
           }
 
-          foreach ($artifact in @($versionDll, $asi)) {
+          foreach ($artifact in @($versionDll, $asi, $steamProbe)) {
             $headers = & $dumpbin /nologo /headers $artifact | Out-String
             if ($headers -notmatch "machine \(x64\)") { throw "$artifact is not an x64 image" }
             $deps = & $dumpbin /nologo /dependents $artifact | Out-String
@@ -70,5 +71,6 @@ jobs:
           path: |
             native/build/Release/version.dll
             native/build/Release/KCD2CleanPause.asi
+            native/build/Release/KCD2CleanPauseSteamProbe.asi
           if-no-files-found: error
           retention-days: 7
