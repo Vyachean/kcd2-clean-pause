@@ -100,3 +100,17 @@ set_target_properties(kcd2_clean_pause_asi PROPERTIES
   OUTPUT_NAME "KCD2CleanPause"
   SUFFIX ".asi"
 )
+
+# Diagnostic-only ASI for unknown storefront layouts. It performs no hooks and
+# exists only to collect enough runtime identity data to build a verified ABI
+# profile without risking the stable Clean Pause runtime on an unknown WHGame.
+add_library(kcd2_clean_pause_steam_probe SHARED
+  src/steam_probe_entry.cpp
+  src/steam_runtime_probe.cpp
+  src/steam_runtime_probe.h
+)
+configure_clean_pause_target(kcd2_clean_pause_steam_probe)
+set_target_properties(kcd2_clean_pause_steam_probe PROPERTIES
+  OUTPUT_NAME "KCD2CleanPauseSteamProbe"
+  SUFFIX ".asi"
+)
