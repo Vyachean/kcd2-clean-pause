@@ -25,9 +25,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure x64 Release
-        run: cmake -S native -B native/build -A x64
+        run: cmake -S native -B native/build -A x64 -DCLEAN_PAUSE_BUILD_RUNTIME_TESTS=ON
       - name: Build x64 Release
         run: cmake --build native/build --config Release --parallel
+      - name: Run runtime profile resolver tests
+        run: ctest --test-dir native/build -C Release --output-on-failure
       - name: Validate both native artifacts
         shell: pwsh
         run: |
