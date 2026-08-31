@@ -94,9 +94,10 @@ bool StronglyValidateEnvironment(RuntimeEnvironment& candidate, RuntimeEnvironme
     return true;
 }
 
-bool FindRuntimeEnvironment(
+bool PollRuntimeEnvironment(
     HMODULE whGame,
     const kcd2::runtime::BuildProfile& profile,
+    const std::uint8_t* fixedEnvironmentBase,
     RuntimeEnvironment& result)
 {
     result = {};
@@ -108,15 +109,12 @@ bool FindRuntimeEnvironment(
             return false;
         break;
 
-    case kcd2::runtime::EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor: {
-        std::uint8_t* canonicalEnvironment{};
-        if (!kcd2::runtime::ResolveCanonicalEnvironmentBase(
-                whGame, profile, canonicalEnvironment))
-            return false;
-        if (!ValidateEnvironmentCandidate(canonicalEnvironment, candidate))
+    case kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva:
+    case kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation:
+        if (!fixedEnvironmentBase
+            || !ValidateEnvironmentCandidate(fixedEnvironmentBase, candidate))
             return false;
         break;
-    }
 
     default:
         return false;
@@ -179,9 +177,29 @@ DWORD WINAPI BootstrapThread(void*)
         kcd2::runtime::EnvironmentLocatorName(profile->environmentLocator),
         kcd2::runtime::BuildValidationName(profile->validation));
 
+    // Resolve immutable build-level identity exactly once. For profiled retail
+    // builds this avoids rescanning WHGame.dll on every readiness poll. The poll
+    // loop below only waits for the already identified gEnv object's interfaces to
+    // become live. Xbox keeps its previously runtime-proven scanner behind the
+    // exact Xbox fingerprint until it is deliberately migrated.
+    std::uint8_t* fixedEnvironmentBase{};
+    if (profile->environmentLocator
+            == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva
+        || profile->environmentLocator
+            == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation) {
+        if (!kcd2::runtime::ResolveProfileEnvironmentBase(
+                whGame, *profile, fixedEnvironmentBase)) {
+            Log("matched %s build-level environment identity failed validation; no hooks installed",
+                profile->name);
+            return 0;
+        }
+        Log("build-level environment identity validated for %s; env=%p",
+            profile->name, fixedEnvironmentBase);
+    }
+
     RuntimeEnvironment environment{};
     for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs && !g_stopping.load(); elapsed += kPollMs) {
-        if (FindRuntimeEnvironment(whGame, *profile, environment))
+        if (PollRuntimeEnvironment(whGame, *profile, fixedEnvironmentBase, environment))
             break;
         Sleep(kPollMs);
     }
