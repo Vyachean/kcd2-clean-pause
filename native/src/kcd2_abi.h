@@ -56,16 +56,22 @@ static_assert(static_cast<std::uint32_t>(KeyId::XiStart) == 516);
 static_assert(static_cast<std::uint32_t>(KeyId::XiA) == 526);
 static_assert(static_cast<std::uint32_t>(KeyId::XiB) == 527);
 
-// SSystemGlobalEnvironment offsets verified for KCD2 1.5.6.
+// Canonical SSystemGlobalEnvironment offsets verified for KCD2 1.5.6. Public
+// release_1_5 RE confirms this layout across the Steam target as well as the
+// retail Xbox Store evidence already used by Clean Pause. Some engine readers
+// keep gEnv+8 and therefore describe these fields eight bytes earlier; runtime
+// discovery always normalizes back to this canonical struct base.
 inline constexpr std::size_t kEnvScriptSystemOffset = 0x30;
 inline constexpr std::size_t kEnvInputOffset = 0x48;
 inline constexpr std::size_t kEnvGameOffset = 0x98;      // IGame*, not IGameFramework*
+inline constexpr std::size_t kEnvConsoleOffset = 0xB0;
 inline constexpr std::size_t kEnvSystemOffset = 0xC8;
 inline constexpr std::size_t kEnvFlashUIOffset = 0x140;
 inline constexpr std::size_t kEnvMainThreadIdOffset = 0x1B0;
 inline constexpr std::size_t kEnvSize = 0x1C0;
 
-// Verified vtable slots used by the stable build.
+// Verified KCD2 1.5.6 vtable slots used by the stable build. The public
+// release_1_5 binary maps independently confirm these slots for Steam.
 inline constexpr std::size_t kInputPostInputEventSlot = 13;
 inline constexpr std::size_t kGameGetLongNameSlot = 12;
 inline constexpr std::size_t kGameGetNameSlot = 13;
