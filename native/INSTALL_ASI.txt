@@ -1,6 +1,6 @@
 KCD2 Clean Pause — ASI installation
 
-This package includes the x64 Ultimate ASI Loader dinput8.dll from the official ThirteenAG release. See ASI_LOADER_SOURCE.txt for the pinned upstream version, source commit and SHA-256 provenance, and ULTIMATE_ASI_LOADER_LICENSE.txt for its MIT license.
+This package includes the retail-tested x64 Ultimate ASI Loader dinput8.dll from the official ThirteenAG release. See ASI_LOADER_SOURCE.txt for the pinned upstream version, source commit and SHA-256 provenance, and ULTIMATE_ASI_LOADER_LICENSE.txt for its MIT license.
 
 Runtime status:
 - The current public v0.2.2 release was runtime-tested with Kingdom Come: Deliverance II 1.5.6 on the PC Xbox Store / Xbox app version.
