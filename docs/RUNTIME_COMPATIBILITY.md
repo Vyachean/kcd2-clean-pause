@@ -23,18 +23,18 @@ Compatibility has five independent concepts.
 
 `Storefront` identifies where a binary was distributed. Storefront alone never selects offsets, vtable slots or hooks.
 
-Steam/GOG/Epic can be detected from independent binary markers used by KCD2/KCSE tooling (`steam_api64.dll`, `Galaxy64.dll`, `EOSSDK-Win64-Shipping.dll`). Xbox / Microsoft Store remains covered by its exact captured PE identity.
+Steam/GOG/Epic are detected from distribution markers in the loaded `WHGame.dll` `.rdata` section (`steam_api64.dll`, `Galaxy64.dll`, `EOSSDK-Win64-Shipping.dll`). Xbox / Microsoft Store remains covered by its exact captured PE identity.
 
 ### Build identity strategy
 
-A build may be identified using the strongest independently available evidence for that distribution.
+A build is identified using the strongest independently available evidence for that distribution.
 
 Current strategies:
 
 - `ExactPeFingerprint` — exact `TimeDateStamp`, `SizeOfImage` and `CheckSum`; used for the captured Steam and Xbox / Microsoft Store builds;
-- `StorefrontBuildCode` — storefront marker plus Warhorse build code derived from `whdlversions.json` (`Branch.Name` + `Assembly.Id`). This is the same shipped-build identity model used by KCSE to select distribution-specific Address Libraries. It is used for GOG/Epic where the public RE corpus identifies the build and exact engine RVA but does not publish the complete PE optional-header tuple.
+- `StorefrontBuildCode` — storefront marker plus Warhorse build code derived from `whdlversions.json` (`Branch.Name` + `Assembly.Id`). This is the same shipped-build identity model used by KCSE to select distribution-specific Address Libraries. It is used for GOG/Epic where the public RE corpus identifies the shipped build and exact engine RVA but does not publish the complete PE optional-header tuple.
 
-`StorefrontBuildCode` is not sufficient by itself to install hooks. The selected profile must still resolve and verify its exact expected `gEnv` RVA and pass every runtime ABI/identity gate below. Epic also requires its independently observed PE timestamp.
+`StorefrontBuildCode` is not sufficient by itself to install hooks. The selected profile must still validate its exact distribution-specific `gEnv` RVA and pass every runtime ABI/identity gate below. Epic additionally requires its independently observed PE timestamp.
 
 ### BuildProfile
 
@@ -44,7 +44,7 @@ A `BuildProfile` represents a supported shipped build and contains:
 - build identity strategy and corresponding evidence;
 - optional required timestamp;
 - exact expected canonical `gEnv` RVA when public cross-distribution RE provides one;
-- environment locator strategy;
+- environment locator/validation strategy;
 - selected ABI profile;
 - evidence / validation level.
 
@@ -64,23 +64,26 @@ Steam, Epic, GOG and Xbox / Microsoft Store 1.5.6 map to the same documented `re
 
 ### EnvironmentLocatorStrategy
 
-Finding the concrete engine objects is separate from their ABI.
+Finding the concrete engine object is separate from its ABI and from storefront identity.
 
 Current strategies:
 
-- `CanonicalPConsoleCodeAnchor` — resolves canonical `gEnv` from the `exec autoexec.cfg` code path and RIP-relative `pConsole` storage, applies the selected ABI's `pConsole` offset, and then requires the result to match the profile's independently known `gEnv` RVA;
-- `LegacyXbox156ValidatedScan` — preserves the already runtime-proven Xbox / Microsoft Store 1.5.6 discovery path, but only behind its exact build identity and the stronger identity checks added by the profiled bootstrap.
+- `ExactEnvironmentRva` — uses an independently cross-validated canonical `gEnv` RVA as the primary immutable locator. Used for GOG and Epic, where the public cross-distribution analysis verifies the exact canonical RVA but Clean Pause does not assume that a Steam-specific instruction pattern must also be byte-identical;
+- `ExactEnvironmentRvaWithAnchorValidation` — uses the exact `gEnv` RVA and additionally cross-checks the Steam `exec autoexec.cfg` -> RIP-relative `pConsole` code path. The expensive code scan is performed once during bootstrap, never on each readiness poll;
+- `LegacyXbox156ValidatedScan` — preserves the already runtime-proven Xbox / Microsoft Store 1.5.6 discovery path, but only behind its exact PE fingerprint and the stronger live identity checks added by the profiled bootstrap.
 
-A future build can reuse an existing ABI while selecting a different locator, or reuse a locator while selecting a different ABI.
+For profiled Steam/GOG/Epic builds, immutable build-level environment identity is resolved once. The later 100 ms readiness loop only checks whether interfaces inside that already identified `gEnv` have become live; it does not repeatedly rescan `WHGame.dll`.
+
+A future build can therefore reuse an existing ABI while selecting a different locator, or reuse a locator while selecting a different ABI.
 
 ## Current release_1_5 profiles
 
-| Storefront | Build identity | Additional exact evidence | ABI | Clean Pause validation |
+| Storefront | Build identity | Environment evidence | ABI | Clean Pause validation |
 | --- | --- | --- | --- | --- |
-| Steam | exact PE `0x6a350e20 / 0x05b2d000 / 0` | canonical `gEnv` RVA `0x492D7F8` | release_1_5 | static RE + automated resolver/build validation; final in-game smoke QA desirable |
-| GOG | `Galaxy64.dll` marker + `release_1_5-15693` | canonical `gEnv` RVA `0x49177F8` | release_1_5 | public cross-distribution RE + external real-install runtime evidence; Clean Pause smoke QA still desirable |
-| Epic Games Store | `EOSSDK-Win64-Shipping.dll` marker + `release_1_5-15693` | timestamp `0x6A34F917` + canonical `gEnv` RVA `0x491D8B8` | release_1_5 | public cross-distribution RE + external real-install runtime evidence; Clean Pause smoke QA still desirable |
-| Xbox / Microsoft Store | exact PE `0x6a391f7b / 0x05bf2000 / 0` | mature captured runtime path | release_1_5 | runtime tested on 1.5.6 |
+| Steam | exact PE `0x6a350e20 / 0x05b2d000 / 0` | exact canonical `gEnv` RVA `0x492D7F8` + one-time code-anchor cross-check | release_1_5 | static RE + automated resolver/build validation; final in-game Clean Pause smoke QA still desirable |
+| GOG | `Galaxy64.dll` marker + `release_1_5-15693` | exact canonical `gEnv` RVA `0x49177F8` | release_1_5 | public cross-distribution RE + external real-install runtime evidence; Clean Pause smoke QA still desirable |
+| Epic Games Store | `EOSSDK-Win64-Shipping.dll` marker + `release_1_5-15693` + timestamp `0x6A34F917` | exact canonical `gEnv` RVA `0x491D8B8` | release_1_5 | public cross-distribution RE + external real-install runtime evidence; Clean Pause smoke QA still desirable |
+| Xbox / Microsoft Store | exact PE `0x6a391f7b / 0x05bf2000 / 0` | mature captured runtime path | release_1_5 | runtime tested on Clean Pause 1.5.6 |
 
 The GOG/Epic profiles deliberately do not invent missing `SizeOfImage` or `CheckSum` values. Instead they combine independently available shipped-build evidence with exact distribution-specific engine RVAs and strong live object validation.
 
@@ -98,9 +101,15 @@ Public cross-distribution analysis independently maps canonical `gEnv` for the s
 - GOG: `0x49177F8`
 - Epic: `0x491D8B8`
 
-The GOG and Epic mappings were cross-validated through the distribution-specific binaries rather than inferred from Steam. The public Address Libraries also have independent distribution identifiers and hashes. KCD2Online audits native REL::ID coverage against all three tables.
+The GOG and Epic mappings were cross-validated through the distribution-specific binaries rather than inferred from Steam. The public analysis reports unanimous 667/667 code-reference consensus for both non-Steam `gEnv` mappings and independently validates their RTTI/vtable maps. The public Address Libraries also have independent distribution identifiers and hashes, and KCD2Online audits native REL::ID coverage against all three tables.
 
 This gives Clean Pause several independent gates. Requiring a made-up or unverified PE field would add the appearance of precision without adding real evidence.
+
+## Build metadata discovery
+
+For build-code profiles, Clean Pause reads the Warhorse-generated `whdlversions.json` and forms `<Branch.Name>-<Assembly.Id>`, for example `release_1_5-15693`.
+
+The metadata lookup starts beside the loaded `WHGame.dll` and walks parent directories with a strict depth bound. The parser/path logic has executable Windows tests using temporary game-directory fixtures, including both nested Bin layouts and a same-directory layout. A missing, malformed or mismatched metadata file leaves GOG/Epic fail closed.
 
 ## Fail-closed rules
 
@@ -109,11 +118,12 @@ Before any version-specific hook is installed:
 1. `WHGame.dll` must select a registered `BuildProfile` using that profile's identity strategy.
 2. Storefront/build-code profiles must match both the binary distribution marker and the Warhorse shipped build code; any required timestamp must also match.
 3. The build must select an `AbiProfile` understood completely by the mature runtime adapter.
-4. Environment discovery must succeed using the build's locator strategy.
-5. If the profile has an expected canonical `gEnv` RVA, the resolved object must be at exactly that RVA.
+4. The build-level environment locator must validate the exact profile-specific `gEnv` address once.
+5. Steam's profile must also pass its independent one-time code-anchor cross-check.
 6. The resolved main-thread ID must belong to the current process.
 7. `IGame::GetName()` must identify `kcd2`.
 8. `IGame -> IGameFramework -> ISystem` must resolve back to the same `ISystem` as `gEnv`.
+9. Only after all of the above may the version-specific input hook be installed.
 
 Any failure leaves vanilla behavior in control and installs no version-specific input hook.
 
@@ -122,11 +132,11 @@ Any failure leaves vanilla behavior in control and installs no version-specific 
 For another binary from Steam, Epic, GOG, Xbox / Microsoft Store, or a future storefront:
 
 1. collect independently trustworthy shipped-build identity evidence;
-2. use an exact PE fingerprint when the complete tuple is known, otherwise use a distribution/build identity only when it can be combined with an independent exact engine anchor/RVA;
+2. use an exact PE fingerprint when the complete tuple is known, otherwise use a distribution/build identity only when it can be combined with an independent exact engine RVA;
 3. determine which existing `AbiProfile` it matches, or add a new ABI profile;
-4. select or implement an environment locator strategy;
+4. select the least-assumptive locator supported by the evidence for that binary;
 5. add one `BuildProfile` row and fail-closed tests for every identity component;
-6. complete in-game smoke QA before advertising Clean Pause itself as runtime-tested on that build.
+6. complete in-game Clean Pause smoke QA before describing that storefront/build as runtime-tested by this project.
 
 If the ABI differs, describe it in a new `AbiProfile`. Do not add storefront-specific conditions to the mature pause/HUD logic. If the current adapter cannot represent the new ABI, `MatureRuntimeSupports()` must reject it until the adapter is deliberately extended.
 
