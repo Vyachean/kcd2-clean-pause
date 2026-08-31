@@ -5,9 +5,10 @@
 
 namespace kcd2 {
 
-// Minimal KCD2 1.5.6 ABI used by the stable native implementation. Clean Pause
-// lets KCD2 own the real pause and changes presentation only through verified
-// Input/FlashUI interfaces.
+// Concrete ABI adapter used by the mature Clean Pause runtime. Build/storefront
+// matching must go through runtime::BuildProfile + runtime::AbiProfile first.
+// These constants describe the currently implemented release_1_5 adapter and must
+// not be treated as universal KCD2 values for unknown/future binaries.
 
 enum class DeviceId : std::int32_t {
     Keyboard = 0,
@@ -27,8 +28,8 @@ enum InputState : std::int32_t {
 enum class KeyId : std::uint32_t {
     Escape = 0,
 
-    // Retail Xbox Store KCD2 1.5.6 evidence. The XInput range is not treated as
-    // contiguous; only directly observed IDs are named here.
+    // release_1_5 evidence. The XInput range is not treated as contiguous; only
+    // IDs covered by the current runtime contract are named here.
     XiStart = 516,
     XiA = 526,
     XiB = 527,
@@ -49,6 +50,8 @@ struct InputEvent {
     std::uint8_t pad29[7];
 };
 
+static_assert(sizeof(InputEvent) == 0x30);
+static_assert(offsetof(InputEvent, state) == 0x04);
 static_assert(offsetof(InputEvent, keyName) == 0x08);
 static_assert(offsetof(InputEvent, keyId) == 0x10);
 static_assert(offsetof(InputEvent, value) == 0x18);
@@ -56,11 +59,11 @@ static_assert(static_cast<std::uint32_t>(KeyId::XiStart) == 516);
 static_assert(static_cast<std::uint32_t>(KeyId::XiA) == 526);
 static_assert(static_cast<std::uint32_t>(KeyId::XiB) == 527);
 
-// Canonical SSystemGlobalEnvironment offsets verified for KCD2 1.5.6. Public
-// release_1_5 RE confirms this layout across the Steam target as well as the
-// retail Xbox Store evidence already used by Clean Pause. Some engine readers
-// keep gEnv+8 and therefore describe these fields eight bytes earlier; runtime
-// discovery always normalizes back to this canonical struct base.
+// Canonical SSystemGlobalEnvironment offsets for the implemented release_1_5 ABI.
+// Public cross-distribution RE confirms this layout for Steam/GOG/Epic; Clean Pause
+// retail evidence confirms the same fields for the supported Xbox / Microsoft Store
+// 1.5.6 build. Some engine readers keep gEnv+8 and therefore describe the same fields
+// eight bytes earlier in code coordinates; profile discovery normalizes to this base.
 inline constexpr std::size_t kEnvScriptSystemOffset = 0x30;
 inline constexpr std::size_t kEnvInputOffset = 0x48;
 inline constexpr std::size_t kEnvGameOffset = 0x98;      // IGame*, not IGameFramework*
@@ -70,8 +73,7 @@ inline constexpr std::size_t kEnvFlashUIOffset = 0x140;
 inline constexpr std::size_t kEnvMainThreadIdOffset = 0x1B0;
 inline constexpr std::size_t kEnvSize = 0x1C0;
 
-// Verified KCD2 1.5.6 vtable slots used by the stable build. The public
-// release_1_5 binary maps independently confirm these slots for Steam.
+// Verified release_1_5 vtable slots consumed by the mature adapter.
 inline constexpr std::size_t kInputPostInputEventSlot = 13;
 inline constexpr std::size_t kGameGetLongNameSlot = 12;
 inline constexpr std::size_t kGameGetNameSlot = 13;
