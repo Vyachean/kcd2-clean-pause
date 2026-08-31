@@ -48,8 +48,9 @@ public:
 
     void AddAmbiguousConsoleReference()
     {
+        const auto& abi = kcd2::runtime::Release15AbiProfile();
         auto* secondEnvironment = base_ + kDataRva + 0x500;
-        auto* secondConsoleStorage = secondEnvironment + kcd2::kEnvConsoleOffset;
+        auto* secondConsoleStorage = secondEnvironment + abi.environment.consoleOffset;
         auto* xref = base_ + kTextRva + 0x300;
         BuildXref(xref, secondConsoleStorage);
     }
@@ -101,12 +102,13 @@ private:
 
     void BuildAnchorPath()
     {
+        const auto& abi = kcd2::runtime::Release15AbiProfile();
         anchor_ = base_ + kRdataRva + 0x100;
         constexpr char kAnchor[] = "exec autoexec.cfg";
         std::memcpy(anchor_, kAnchor, sizeof(kAnchor));
 
         environment_ = base_ + kDataRva + 0x100;
-        auto* consoleStorage = environment_ + kcd2::kEnvConsoleOffset;
+        auto* consoleStorage = environment_ + abi.environment.consoleOffset;
         auto* xref = base_ + kTextRva + 0x200;
         BuildXref(xref, consoleStorage);
     }
@@ -146,6 +148,32 @@ private:
     std::uint8_t* environment_{};
 };
 
+bool TestKnownStorefrontRegistryAndAbiSeparation()
+{
+    std::size_t count{};
+    const auto* stores = kcd2::runtime::KnownStorefronts(count);
+    CHECK(stores != nullptr);
+    CHECK(count == 4);
+
+    const auto* steam = kcd2::runtime::FindStorefront(kcd2::runtime::Storefront::Steam);
+    const auto* epic = kcd2::runtime::FindStorefront(kcd2::runtime::Storefront::EpicGamesStore);
+    const auto* gog = kcd2::runtime::FindStorefront(kcd2::runtime::Storefront::GOG);
+    const auto* xbox = kcd2::runtime::FindStorefront(kcd2::runtime::Storefront::XboxMicrosoftStore);
+    CHECK(steam && epic && gog && xbox);
+
+    const auto& release15 = kcd2::runtime::Release15AbiProfile();
+    CHECK(steam->release15Abi == &release15);
+    CHECK(epic->release15Abi == &release15);
+    CHECK(gog->release15Abi == &release15);
+    CHECK(xbox->release15Abi == &release15);
+    CHECK(steam->publicRelease15AddressLibrary);
+    CHECK(epic->publicRelease15AddressLibrary);
+    CHECK(gog->publicRelease15AddressLibrary);
+    CHECK(!xbox->publicRelease15AddressLibrary);
+    CHECK(kcd2::runtime::MatureRuntimeSupports(release15));
+    return true;
+}
+
 bool TestFingerprintAndCanonicalEnvironment()
 {
     SyntheticWhGame image;
@@ -159,7 +187,11 @@ bool TestFingerprintAndCanonicalEnvironment()
 
     const auto* steam = kcd2::runtime::MatchSupportedBuild(fingerprint);
     CHECK(steam != nullptr);
-    CHECK(steam->id == kcd2::runtime::StorefrontProfile::Steam15693);
+    CHECK(steam->storefront == kcd2::runtime::Storefront::Steam);
+    CHECK(steam->environmentLocator
+        == kcd2::runtime::EnvironmentLocatorStrategy::CanonicalPConsoleCodeAnchor);
+    CHECK(steam->abi == &kcd2::runtime::Release15AbiProfile());
+    CHECK(steam->validation == kcd2::runtime::BuildValidationLevel::StaticReverseEngineering);
 
     std::uint8_t* environment{};
     CHECK(kcd2::runtime::ResolveCanonicalEnvironmentBase(
@@ -179,6 +211,11 @@ bool TestUnknownAndMismatchedBuildsFailClosed()
     const kcd2::runtime::Fingerprint xboxFingerprint{0x6a391f7b, 0x05bf2000, 0};
     const auto* xbox = kcd2::runtime::MatchSupportedBuild(xboxFingerprint);
     CHECK(xbox != nullptr);
+    CHECK(xbox->storefront == kcd2::runtime::Storefront::XboxMicrosoftStore);
+    CHECK(xbox->environmentLocator
+        == kcd2::runtime::EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan);
+    CHECK(xbox->abi == &kcd2::runtime::Release15AbiProfile());
+    CHECK(xbox->validation == kcd2::runtime::BuildValidationLevel::RuntimeTested);
 
     std::uint8_t* environment = reinterpret_cast<std::uint8_t*>(1);
     CHECK(!kcd2::runtime::ResolveCanonicalEnvironmentBase(
@@ -209,12 +246,14 @@ bool TestAmbiguousAnchorFailsClosed()
 
 int main()
 {
-    if (!TestFingerprintAndCanonicalEnvironment())
+    if (!TestKnownStorefrontRegistryAndAbiSeparation())
         return 1;
-    if (!TestUnknownAndMismatchedBuildsFailClosed())
+    if (!TestFingerprintAndCanonicalEnvironment())
         return 2;
-    if (!TestAmbiguousAnchorFailsClosed())
+    if (!TestUnknownAndMismatchedBuildsFailClosed())
         return 3;
+    if (!TestAmbiguousAnchorFailsClosed())
+        return 4;
 
     std::puts("runtime profile tests passed");
     return 0;
