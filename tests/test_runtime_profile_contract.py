@@ -63,7 +63,7 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn('"steam_api64.dll"', PROFILE)
         self.assertIn('"Galaxy64.dll"', PROFILE)
         self.assertIn('"EOSSDK-Win64-Shipping.dll"', PROFILE)
-        self.assertIn('"whdlversions.json"', PROFILE)
+        self.assertIn("whdlversions.json", PROFILE)
         self.assertIn('branch + "-" + assemblyId', PROFILE)
         self.assertGreaterEqual(PROFILE.count('"release_1_5-15693"'), 3)
         self.assertIn("BuildIdentityStrategy::StorefrontBuildCode", PROFILE)
