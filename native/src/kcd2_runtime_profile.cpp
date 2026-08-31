@@ -5,7 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace kcd2::runtime {
