@@ -13,7 +13,9 @@
 #define ResolveGameFramework LegacyResolveGameFramework_Xbox156Only
 #define InstallPauseBarrierHook LegacyInstallPauseBarrierHook_Xbox156Only
 #define InstallInputHook LegacyInstallInputHook_Xbox156Only
+#define HookPostInputEvent LegacyHookPostInputEventProfiledCore
 #include "clean_pause_native.cpp"
+#undef HookPostInputEvent
 #undef InstallInputHook
 #undef InstallPauseBarrierHook
 #undef ResolveGameFramework
@@ -32,6 +34,7 @@ constexpr std::size_t kSteam156FrameworkVtableRva = 0x040472D0;
 
 HMODULE g_profileWhGame{};
 const kcd2::runtime::BuildProfile* g_activeBuildProfile{};
+std::atomic_bool g_pauseBarrierDeferredLogged{false};
 
 bool ThreadBelongsToCurrentProcess(DWORD threadId)
 {
@@ -296,11 +299,14 @@ void __fastcall HookPauseGameProfiled(
         static_cast<unsigned long long>(pressAt ? enteredAt - pressAt : 0));
 }
 
-bool InstallPauseBarrierHook(const RuntimeEnvironment& environment)
+bool InstallPauseBarrierHook(
+    const RuntimeEnvironment& environment,
+    bool logUnavailable)
 {
     void* framework{};
     if (!ResolveGameFramework(environment, framework)) {
-        Log("IGameFramework pause barrier unavailable; continuing with Menu/input fallback");
+        if (logUnavailable)
+            Log("IGameFramework pause barrier unavailable; continuing with Menu/input fallback");
         return false;
     }
 
@@ -338,6 +344,47 @@ bool InstallPauseBarrierHook(const RuntimeEnvironment& environment)
     return true;
 }
 
+bool TryInstallDeferredSteamPauseBarrier()
+{
+    if (g_pauseGameTarget || !g_activeBuildProfile || !g_environment
+        || g_activeBuildProfile->storefront != kcd2::runtime::Storefront::Steam)
+        return g_pauseGameTarget != nullptr;
+
+    RuntimeEnvironment environment{};
+    environment.base = g_environment;
+    __try {
+        environment.system = *reinterpret_cast<void* const*>(
+            reinterpret_cast<const std::uint8_t*>(g_environment) + kEnvSystemOffset);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        environment.system = nullptr;
+    }
+    if (!environment.system)
+        return false;
+
+    const bool installed = InstallPauseBarrierHook(environment, false);
+    if (installed)
+        Log("deferred Steam IGameFramework pause barrier became ready on pause input");
+    return installed;
+}
+
+void __fastcall HookPostInputEventProfiled(void* input, const InputEvent* event, bool force)
+{
+    // Working KCSE mods register input only after DataLoaded. Keep the core input
+    // hook independent of framework readiness, but on the first real user pause
+    // input retry the optional CCryAction barrier on the game-owned input thread.
+    // This closes the startup race without blocking or weakening the Menu fallback.
+    if (event && g_forwardDepth == 0 && !g_pauseGameTarget
+        && g_activeBuildProfile
+        && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam
+        && IsPauseKey(event->keyId)
+        && (event->state & InputState::Pressed) != 0
+        && (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId)) {
+        TryInstallDeferredSteamPauseBarrier();
+    }
+
+    LegacyHookPostInputEventProfiledCore(input, event, force);
+}
+
 bool InstallInputHook(const RuntimeEnvironment& environment)
 {
     g_environment = environment.base;
@@ -360,13 +407,12 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
         return false;
     }
 
-    // Optional event-driven pause barrier. Failure here must not suppress the
-    // proven Menu visibility fallback or the input hook itself.
-    InstallPauseBarrierHook(environment);
-
+    // Install the required input/Menu path first. The PauseGame observer is a
+    // strictly optional capability and must never leave a partial runtime behind
+    // when the required PostInputEvent hook itself cannot be installed.
     const MH_STATUS create = MH_CreateHook(
         g_postInputEventTarget,
-        reinterpret_cast<void*>(&HookPostInputEvent),
+        reinterpret_cast<void*>(&HookPostInputEventProfiled),
         reinterpret_cast<void**>(&g_originalPostInputEvent));
     if (create != MH_OK) {
         Log("MH_CreateHook(PostInputEvent) failed: %d", static_cast<int>(create));
@@ -375,6 +421,8 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
 
     const MH_STATUS enable = MH_EnableHook(g_postInputEventTarget);
     if (enable != MH_OK) {
+        MH_RemoveHook(g_postInputEventTarget);
+        g_originalPostInputEvent = nullptr;
         Log("MH_EnableHook(PostInputEvent) failed: %d", static_cast<int>(enable));
         return false;
     }
@@ -389,6 +437,16 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
         g_flashUI,
         static_cast<unsigned long>(g_mainThreadId),
         g_postInputEventTarget);
+
+    // Try the event-driven barrier immediately after the required runtime is live.
+    // If CCryAction has not published its singleton yet, the first real Pause input
+    // retries this on the game-owned input thread before vanilla handles that press.
+    if (!InstallPauseBarrierHook(environment, true)
+        && g_activeBuildProfile
+        && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam
+        && !g_pauseBarrierDeferredLogged.exchange(true, std::memory_order_acq_rel)) {
+        Log("Steam pause barrier deferred until the first Pause input; Menu/input fallback is already active");
+    }
     return true;
 }
 
