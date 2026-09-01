@@ -3,10 +3,11 @@ KCD2 Clean Pause — ASI installation
 This package includes the retail-tested x64 Ultimate ASI Loader dinput8.dll from the official ThirteenAG release. See ASI_LOADER_SOURCE.txt for the pinned upstream version, source commit and SHA-256 provenance, and ULTIMATE_ASI_LOADER_LICENSE.txt for its MIT license.
 
 Runtime status:
-- This package is v0.3.0-rc.2, a GitHub release candidate for KCD2 1.5.6 multi-store compatibility.
+- This package is v0.3.0-rc.3, a GitHub release candidate for KCD2 1.5.6 multi-store compatibility.
 - Xbox / Microsoft Store 1.5.6 is the Clean Pause runtime-tested baseline.
 - Steam 1.5.6 release_1_5-15693 has an exact fail-closed build profile and is the primary in-game smoke-test target for this RC.
-- RC1 already confirmed the Steam fingerprint/profile and canonical gEnv and removed the previous crash; RC2 keeps exact-profile readiness alive beyond the former startup deadline while retaining every strong gate before hooks.
+- The first Steam test confirmed the correct profile/canonical gEnv and no crash. RC3 fixes the remaining framework-identity bug found by comparison with working libKCD2/KCSE mods: Steam uses the canonical CCryAction IGameFramework singleton instead of treating IGame[16] as framework.
+- The PauseGame observer is optional; failure to resolve it does not block the main PostInputEvent/Menu fallback.
 - GOG and Epic Games Store 1.5.6 profiles are implemented from distribution-specific reverse-engineering/runtime evidence, but Clean Pause-specific smoke QA has not yet been completed by this project.
 - Unknown or mismatched game builds install no version-specific Clean Pause hooks.
 
@@ -47,7 +48,7 @@ If the game crashes while loading native mods:
 
 If the game works with the loader alone but crashes after adding Clean Pause, report the KCD2 version, storefront/build (Steam, GOG, Epic Games Store, Xbox / Microsoft Store, or another build), locations of dinput8.dll and KCD2CleanPause.asi, and kcd2_clean_pause_native.log if one was created before the crash.
 
-The profiled runtime logs the detected PE fingerprint/storefront/build identity and refuses to install version-specific hooks when its build or ABI gates do not validate. RC2 also logs the exact live-readiness gate and observed interface pointers while an exact supported profile is waiting.
+The profiled runtime logs the detected PE fingerprint/storefront/build identity and refuses to install version-specific hooks when its required build or ABI gates do not validate.
 
 Do not install this ASI package together with the standalone Clean Pause version.dll package. They contain the same mod and would load it twice.
 
