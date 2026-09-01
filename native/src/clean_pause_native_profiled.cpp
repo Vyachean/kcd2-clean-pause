@@ -258,7 +258,7 @@ bool ResolveGameFramework(const RuntimeEnvironment& environment, void*& framewor
     return LegacyResolveGameFramework_Xbox156Only(environment, framework);
 }
 
-void __fastcall HookPauseGame(
+void __fastcall HookPauseGameProfiled(
     void* framework,
     bool pause,
     bool force,
@@ -318,7 +318,7 @@ bool InstallPauseBarrierHook(const RuntimeEnvironment& environment)
 
     const MH_STATUS create = MH_CreateHook(
         target,
-        reinterpret_cast<void*>(&HookPauseGame),
+        reinterpret_cast<void*>(&HookPauseGameProfiled),
         reinterpret_cast<void**>(&g_originalPauseGame));
     if (create != MH_OK) {
         Log("MH_CreateHook(IGameFramework::PauseGame) failed: %d", static_cast<int>(create));
