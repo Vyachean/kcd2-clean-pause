@@ -4,19 +4,21 @@ Clean Pause for **Kingdom Come: Deliverance II** on Windows.
 
 The current stable release, **v0.2.2**, was runtime-tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbox controller.
 
-The current GitHub prerelease, **v0.3.0-rc.1**, adds fail-closed KCD2 1.5.6 compatibility profiles for **Steam, GOG, Epic Games Store, and Xbox / Microsoft Store**. Steam is the primary in-game smoke-test target for this RC; GOG/Epic profiles are backed by distribution-specific reverse-engineering/runtime evidence but are not yet claimed as Clean Pause runtime-tested by this project.
+The current GitHub prerelease, **v0.3.0-rc.2**, adds fail-closed KCD2 1.5.6 compatibility profiles for **Steam, GOG, Epic Games Store, and Xbox / Microsoft Store**. Steam is the primary in-game smoke-test target; GOG/Epic profiles are backed by distribution-specific reverse-engineering/runtime evidence but are not yet claimed as Clean Pause runtime-tested by this project.
+
+RC1 already confirmed on the reported Steam build that the exact Steam fingerprint/profile and canonical `gEnv` are identified correctly and that the previous crash is gone. RC2 removes RC1's permanent startup-readiness timeout for exact profiled builds while retaining every strong identity gate before hooks.
 
 ## Release status
 
 - **Current stable release:** v0.2.2.
-- **Current GitHub prerelease:** v0.3.0-rc.1 — multi-store compatibility candidate.
+- **Current GitHub prerelease:** v0.3.0-rc.2 — Steam/runtime-readiness acceptance candidate.
 - **Published edition:** KCD2CleanPause.asi, using the upstream Ultimate ASI Loader.
 - The ASI package includes the pinned official x64 Ultimate ASI Loader for a complete fresh installation.
 - **Stable runtime acceptance:** Xbox / Microsoft Store KCD2 1.5.6.
 - **RC compatibility candidates:** Steam, GOG and Epic Games Store KCD2 1.5.6.
 - **Standalone version.dll:** new standalone publication remains withheld while Defender investigation #38 is unresolved. The last published standalone package is v0.2.0.
 
-If the Steam v0.3.0-rc.1 smoke test confirms the accepted Clean Pause behavior, the same runtime implementation will be promoted through a separate immutable stable v0.3.0 release and then used for the Nexus Mods update.
+If the Steam v0.3.0-rc.2 smoke test confirms the accepted Clean Pause behavior, the accepted runtime will be promoted through a separate immutable stable v0.3.0 release and then used for the Nexus Mods update.
 
 Use the GitHub Releases page as the source of truth for versions and assets that are actually published.
 
@@ -73,7 +75,7 @@ Multiple ASI plugins may share one compatible loader, but loader location and pl
 
 The package also contains ASI_LOADER_SOURCE.txt and ULTIMATE_ASI_LOADER_LICENSE.txt documenting the exact upstream loader release, provenance, hashes, and MIT license.
 
-## v0.3.0-rc.1 Steam smoke test
+## v0.3.0-rc.2 Steam smoke test
 
 For the Steam KCD2 1.5.6 build targeted by this RC:
 
@@ -84,6 +86,8 @@ For the Steam KCD2 1.5.6 build targeted by this RC:
 5. if using an Xbox controller, repeat with Start and verify B reveals the vanilla pause menu from Clean Pause;
 6. resume normally and confirm gameplay continues;
 7. if anything fails, attach kcd2_clean_pause_native.log.
+
+RC2 keeps waiting safely for exact-profile runtime readiness instead of permanently disabling itself after the former startup deadline. If a strong gate remains unresolved, the log records the specific readiness reason and observed interfaces.
 
 ## Troubleshooting
 
@@ -105,7 +109,7 @@ If the game works with the loader alone but crashes after adding Clean Pause, re
 - locations of dinput8.dll and KCD2CleanPause.asi;
 - kcd2_clean_pause_native.log, if one was created before the crash.
 
-The profiled runtime log records the PE fingerprint, detected storefront/build metadata, selected ABI/profile, environment-validation strategy and whether the profile reached hook installation.
+The profiled runtime log records the PE fingerprint, detected storefront/build metadata, selected ABI/profile, environment-validation strategy and whether the profile reached hook installation. RC2 additionally records the exact live-readiness gate while a supported profile is waiting.
 
 ## Standalone version.dll edition
 
@@ -132,6 +136,7 @@ The production architecture deliberately keeps KCD2 as the sole pause owner:
 - exact root HUD visibility, dialogue subtitles, NPC overhead subtitles and DoF state are preserved;
 - supported native builds are selected by explicit build profiles, with storefront, build identity, ABI and environment discovery modeled separately;
 - known distribution-specific canonical gEnv RVAs may be used only behind the matching build profile and strong live object identity checks;
+- exact-profile runtime readiness may wait beyond startup, but hooks remain forbidden until every strong identity gate passes;
 - unknown or mismatched builds install no version-specific Clean Pause hooks.
 
 No action-map replacement, replacement overlay, long-lived movieclip pointer, destructive borrowed-handle release, synthetic B-resume replay, or unguarded cross-store binary assumption is used.

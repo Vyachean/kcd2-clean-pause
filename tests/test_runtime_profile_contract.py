@@ -117,10 +117,48 @@ class RuntimeProfileContractTests(unittest.TestCase):
         bootstrap = BOOTSTRAP[BOOTSTRAP.index(marker):]
         self.assertEqual(bootstrap.count("ResolveProfileEnvironmentBase("), 1)
         resolve = bootstrap.index("ResolveProfileEnvironmentBase")
-        poll_loop = bootstrap.index("for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs")
-        self.assertLess(resolve, poll_loop)
-        self.assertIn("PollRuntimeEnvironment", bootstrap[poll_loop:])
-        self.assertNotIn("ResolveProfileEnvironmentBase", bootstrap[poll_loop:])
+        exact_poll = bootstrap.index("while (!g_stopping.load())")
+        self.assertLess(resolve, exact_poll)
+        self.assertIn("PollRuntimeEnvironment", bootstrap[exact_poll:])
+        self.assertNotIn("ResolveProfileEnvironmentBase", bootstrap[exact_poll:])
+
+    def test_profiled_runtime_wait_does_not_permanently_disable_slow_supported_builds(self):
+        marker = "DWORD WINAPI BootstrapThread(void*)"
+        bootstrap = BOOTSTRAP[BOOTSTRAP.index(marker):]
+        exact_start = bootstrap.index("if (hasExactEnvironment)", bootstrap.index("RuntimeEnvironment environment"))
+        legacy_loop = bootstrap.index(
+            "for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs",
+            exact_start,
+        )
+        exact_wait = bootstrap[exact_start:legacy_loop]
+        self.assertIn("while (!g_stopping.load())", exact_wait)
+        self.assertIn("kProfileSlowPollMs", exact_wait)
+        self.assertIn("kProfileWaitHeartbeatMs", BOOTSTRAP)
+        self.assertNotIn("could not be strongly validated", exact_wait)
+        self.assertIn(
+            "for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs",
+            bootstrap[legacy_loop:],
+        )
+
+    def test_profiled_runtime_wait_logs_stage_and_observed_interfaces(self):
+        for reason in (
+            "required-interface-not-ready",
+            "script-system-vtable",
+            "input-vtable",
+            "game-vtable",
+            "system-vtable",
+            "flash-ui-vtable",
+            "main-thread-unavailable",
+            "main-thread-owner-mismatch",
+            "game-name-mismatch",
+            "game-framework-not-ready",
+            "game-framework-vtable",
+            "framework-system-mismatch",
+        ):
+            self.assertIn(reason, BOOTSTRAP)
+        self.assertIn("RuntimeEnvironment& observedCandidate", BOOTSTRAP)
+        self.assertIn("observedCandidate = candidate", BOOTSTRAP)
+        self.assertIn("reason=%s env=%p script=%p input=%p game=%p system=%p flashUI=%p mainThread=%lu", BOOTSTRAP)
 
     def test_xbox_legacy_discovery_is_locator_scoped(self):
         self.assertIn("LegacyFindRuntimeEnvironment_Xbox156Only", BOOTSTRAP)
@@ -150,6 +188,7 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("GetProcessIdOfThread", BOOTSTRAP)
         self.assertIn("GetCurrentProcessId", BOOTSTRAP)
         self.assertIn('std::strcmp(gameName, "kcd2") == 0', BOOTSTRAP)
+        self.assertIn("frameworkSystem != candidate.system", BOOTSTRAP)
         self.assertIn("frameworkSystem == environment.system", BOOTSTRAP)
 
     def test_profile_sources_are_compiled_into_both_runtime_artifacts(self):
