@@ -77,6 +77,10 @@ inline constexpr std::size_t kEnvSize = 0x1C0;
 inline constexpr std::size_t kInputPostInputEventSlot = 13;
 inline constexpr std::size_t kGameGetLongNameSlot = 12;
 inline constexpr std::size_t kGameGetNameSlot = 13;
+// Legacy compatibility name retained because the runtime-tested Xbox path uses
+// IGame[16] this way. Public Steam 1.5.6 RE identifies slot 16 as a different
+// engine-root accessor, so profiled non-Xbox builds must not use it to obtain
+// IGameFramework. Their framework capability is resolved independently.
 inline constexpr std::size_t kGameGetFrameworkSlot = 16;
 inline constexpr std::size_t kGameFrameworkPauseGameSlot = 13;
 inline constexpr std::size_t kGameFrameworkGetSystemSlot = 19;
