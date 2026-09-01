@@ -3,86 +3,80 @@
 ## Release status
 
 - **Stable:** v0.2.2 ASI, runtime-tested on KCD2 1.5.6 Xbox / Microsoft Store.
-- **GitHub prerelease candidate:** v0.3.0-rc.2 ASI, current Steam acceptance candidate for multi-store KCD2 1.5.6 compatibility.
+- **GitHub prerelease candidate:** v0.3.0-rc.3 ASI, targeted Steam framework-identity acceptance candidate.
 - **Standalone version.dll:** still built and validated, but new public distribution remains blocked by Defender investigation #38. The last published standalone package is v0.2.0.
 
-Nexus remains on stable v0.2.2 until a Steam acceptance candidate completes the intended Clean Pause smoke test and stable v0.3.0 is published.
+Nexus remains on stable v0.2.2 until the Steam acceptance candidate completes the intended Clean Pause smoke test and stable v0.3.0 is published.
 
-## Steam report history
+## Steam report history and root cause
 
 v0.2.2 exposed two independent Steam problems:
 
 1. old shared-loader instructions could leave dinput8.dll and KCD2CleanPause.asi in different directories, preventing the loader from discovering the plugin;
 2. after correct loading, the writable-memory gEnv scanner could accept a false-positive object and observe invalid framework/input/UI state.
 
-v0.3.0-rc.1 fixed that discovery problem. The tester's real Steam 1.5.6 run:
+v0.3.0-rc.1 fixed the discovery problem. The reporter's real Steam 1.5.6 run matched the exact fingerprint/profile, validated canonical gEnv RVA 0x492D7F8, and no longer crashed, but the profiled bootstrap still installed no hooks.
 
-- matched fingerprint 0x6a350e20 / 0x05b2d000 / 0;
-- detected Steam release_1_5-15693;
-- selected the intended Steam profile;
-- independently validated canonical gEnv RVA 0x492D7F8;
-- did not crash;
-- nevertheless installed no hooks because strong live runtime validation did not finish before RC1's bounded startup-readiness window expired.
+RC2 removed the permanent startup-readiness deadline and added precise readiness diagnostics. Further comparison with working libKCD2/KCSE native mods then exposed the actual remaining framework error:
 
-Public Steam 1.5.6 reverse-engineering was rechecked after that result. The gEnv layout and all bootstrap slots used by Clean Pause match the release_1_5 ABI currently implemented: IScriptSystem, IInput::PostInputEvent, IGame, IGameFramework::PauseGame/GetISystem, IFlashUI, and mMainThreadId. No static ABI mismatch was found.
+- Steam `IGame` vtable slot 16 is not a verified `IGameFramework` accessor; detailed RE identifies it as another engine-root object.
+- Working libKCD2 mods obtain framework functionality from `CCryAction::GetInstance()`.
+- On Steam 1.5.6 the canonical `IGameFramework` pointer is cached at qword_18549D328 (RVA 0x0549D328).
+- Clean Pause's mature runtime already designed the PauseGame observer as optional, but the profiled bootstrap accidentally promoted framework resolution to a mandatory precondition for installing the input hook.
 
-## v0.3.0-rc.2 change
+## v0.3.0-rc.3 change
 
-RC2 treats build identity and runtime readiness separately:
+RC3 corrects that root cause:
 
-1. exact Steam/GOG/Epic build/profile/environment evidence must still pass first;
-2. once an exact supported profile and canonical gEnv are established, Clean Pause waits for the required live interfaces for the lifetime of the process rather than permanently disabling itself after 120 seconds;
-3. polling is 100 ms during the initial startup window and 1 second afterward;
-4. hooks remain forbidden until all existing strong gates pass;
-5. readiness logs identify the exact current stage and observed interface pointers whenever the reason changes, with a 30-second heartbeat;
-6. the already runtime-tested Xbox / Microsoft Store legacy path keeps its existing bounded behavior in this RC.
-
-This is a lifecycle fix, not a relaxation of fail-closed compatibility checks.
+1. Steam/GOG/Epic exact-profile readiness validates only capabilities required to install the core input/Menu runtime; it no longer requires `IGame[16]` to be framework.
+2. Steam 1.5.6 resolves the real framework from the documented CCryAction singleton storage at RVA 0x0549D328.
+3. The Steam framework is accepted only when its exact documented vtable matches and `IGameFramework::GetISystem()` returns canonical gEnv `ISystem`.
+4. Failure of the optional PauseGame observer does not block `PostInputEvent` or the Menu-visible Clean Pause fallback.
+5. GOG/Epic never fall back to the invalid slot-16 framework assumption.
+6. Xbox / Microsoft Store retains the existing runtime-tested legacy discovery/framework path.
+7. RC2's persistent readiness/backoff remains as secondary robustness, not as the Steam root-cause fix.
 
 ## Compatibility profiles
 
 | Storefront | KCD2 build evidence | Clean Pause status |
 | --- | --- | --- |
 | Xbox / Microsoft Store | exact PE fingerprint 0x6a391f7b / 0x05bf2000 / 0 | runtime-tested baseline |
-| Steam | exact PE fingerprint 0x6a350e20 / 0x05b2d000 / 0; canonical gEnv RVA 0x492D7F8 | RC2 smoke-test target; RC1 confirmed profile/environment identity and no crash |
-| GOG | Galaxy64.dll marker + release_1_5-15693; canonical gEnv RVA 0x49177F8 | profile implemented; Clean Pause smoke QA pending |
-| Epic Games Store | EOSSDK-Win64-Shipping.dll marker + release_1_5-15693 + timestamp 0x6A34F917; canonical gEnv RVA 0x491D8B8 | profile implemented; Clean Pause smoke QA pending |
-
-Steam/GOG/Epic share the documented release_1_5 ABI family but use separate shipped binaries and distribution-specific environment evidence.
+| Steam | exact PE fingerprint 0x6a350e20 / 0x05b2d000 / 0; gEnv RVA 0x492D7F8; CCryAction framework storage RVA 0x0549D328 | RC3 smoke-test target; RC1 already confirmed profile/gEnv and no crash |
+| GOG | Galaxy64.dll marker + release_1_5-15693; gEnv RVA 0x49177F8 | core profile implemented; Clean Pause smoke QA pending |
+| Epic Games Store | EOSSDK-Win64-Shipping.dll marker + release_1_5-15693 + timestamp 0x6A34F917; gEnv RVA 0x491D8B8 | core profile implemented; Clean Pause smoke QA pending |
 
 ## Safety contract
 
 1. KCD2 remains the sole pause owner.
-2. Storefront, shipped-build identity, ABI, environment discovery, and live readiness are separate concerns.
-3. An incompatible future ABI is rejected before hooks.
-4. Steam/GOG/Epic use explicit distribution-specific canonical gEnv evidence; Steam additionally cross-checks the captured code anchor once.
-5. The main-thread ID must belong to the current process.
-6. IGame must identify kcd2.
-7. IGame -> IGameFramework -> ISystem must resolve back to the same ISystem as gEnv.
-8. Unknown/mismatched builds install no version-specific Clean Pause hooks.
-9. Waiting longer for a known exact profile never bypasses any gate.
-
-See docs/RUNTIME_COMPATIBILITY.md for the full evidence and extension model.
+2. Storefront, shipped-build identity, ABI, environment discovery, and optional capabilities are separate concerns.
+3. Unknown/mismatched builds and unsupported future ABIs install no version-specific hooks.
+4. Steam/GOG/Epic require their distribution-specific canonical gEnv evidence; Steam also cross-checks its captured code anchor.
+5. Required input/script/game/system/FlashUI objects and main-thread ownership must validate before the core runtime is installed.
+6. IGame must identify `kcd2`.
+7. Framework/PauseGame observation is optional and cannot suppress the proven input/Menu fallback.
+8. When Steam framework is available, it must be the canonical CCryAction singleton and `GetISystem()` must agree with gEnv before PauseGame is hooked.
+9. Xbox keeps its already runtime-tested legacy path isolated from non-Xbox builds.
 
 ## Automated validation
 
-The RC2 candidate is covered by:
+RC3 is covered by:
 
 - repository/source contract tests;
 - x64 MSVC production builds;
 - executable Windows runtime-profile tests;
 - PE/storefront/build matching and fail-closed tests;
 - exact environment-RVA validation;
-- Steam one-time anchor/RVA agreement and ambiguity rejection;
-- real whdlversions.json parser/path fixtures for build-code detection;
-- explicit contract coverage that exact-profile readiness is persistent but backs off after startup;
-- explicit contract coverage for stage-specific readiness diagnostics;
+- Steam anchor/RVA agreement and ambiguity rejection;
+- real whdlversions.json parser/path fixtures;
+- contract coverage that non-Xbox exact-profile readiness does not depend on `IGame[16]` framework discovery;
+- contract coverage for Steam CCryAction framework storage/vtable/system identity;
+- contract coverage that PauseGame capability failure does not block input-hook installation;
 - validation of both ASI and standalone native artifacts;
 - full release-shaped packaging checks.
 
 ## Steam acceptance test
 
-For v0.3.0-rc.2:
+For v0.3.0-rc.3:
 
 1. game reaches the main menu and loads gameplay;
 2. Escape enters Clean Pause without covering the gameplay view;
@@ -91,15 +85,11 @@ For v0.3.0-rc.2:
 5. second Escape reveals the ordinary vanilla pause menu;
 6. Xbox Start/B path behaves according to the accepted contract when a controller is available;
 7. normal resume works;
-8. native log shows the Steam profile reaches runtime validation and hook installation.
-
-If something still prevents hook installation, RC2 should identify the specific readiness gate directly in the log rather than requiring another broad diagnostic probe.
+8. native log shows the Steam profile reaches hook installation; normally it should also show the canonical PauseGame observer active.
 
 ## Nexus Mods plan
 
-Nexus currently remains on stable v0.2.2 and should continue to describe Xbox / Microsoft Store as the runtime-tested storefront for that immutable release.
-
-After Steam acceptance:
+Nexus remains on stable v0.2.2. After Steam acceptance:
 
 1. prepare stable v0.3.0 from the accepted runtime;
 2. publish the stable GitHub release through the normal immutable release workflow;
@@ -112,9 +102,9 @@ GOG/Epic may be described as implemented compatibility profiles unless/until Cle
 
 Before stable v0.3.0:
 
-- complete the focused Steam v0.3.0-rc.2 smoke test;
-- review the resulting native log if anything is unexpected;
-- promote to stable only if no runtime change is needed.
+- complete the focused Steam v0.3.0-rc.3 smoke test;
+- review the native log only if behavior is unexpected;
+- promote to stable if accepted.
 
 Blocking new standalone distribution:
 
@@ -122,6 +112,7 @@ Blocking new standalone distribution:
 
 Non-blocking follow-up:
 
+- add canonical GOG/Epic framework locators if their PauseGame barrier is desired rather than relying on the Menu fallback;
 - GOG/Epic Clean Pause-specific smoke QA;
 - coexistence with additional real KCD2 ASI plugins;
 - broader cutscene/dialogue and repeated-cycle/load-transition robustness;
@@ -130,4 +121,4 @@ Non-blocking follow-up:
 
 ## Decision rule
 
-> Reuse vanilla KCD2 pause ownership, select binary compatibility from explicit evidence, and prefer a visible vanilla-menu fallback or no hooks at all over unverified state manipulation.
+> Reuse vanilla KCD2 pause ownership, select binary compatibility from explicit evidence, keep optional capabilities optional, and prefer a visible vanilla-menu fallback or no hooks over unverified state manipulation.
