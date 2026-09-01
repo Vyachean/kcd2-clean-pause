@@ -72,7 +72,9 @@ Current strategies:
 - `ExactEnvironmentRvaWithAnchorValidation` — uses the exact `gEnv` RVA and additionally cross-checks the Steam `exec autoexec.cfg` -> RIP-relative `pConsole` code path. The expensive code scan is performed once during bootstrap, never on each readiness poll;
 - `LegacyXbox156ValidatedScan` — preserves the already runtime-proven Xbox / Microsoft Store 1.5.6 discovery path, but only behind its exact PE fingerprint and the stronger live identity checks added by the profiled bootstrap.
 
-For profiled Steam/GOG/Epic builds, immutable build-level environment identity is resolved once. The later 100 ms readiness loop only checks whether interfaces inside that already identified `gEnv` have become live; it does not repeatedly rescan `WHGame.dll`.
+For profiled Steam/GOG/Epic builds, immutable build-level environment identity is resolved once. Live readiness is then checked only inside that already identified `gEnv`; `WHGame.dll` is not repeatedly rescanned. The exact-profile readiness loop polls at 100 ms during the initial startup window and backs off to 1 second afterward, remaining available for the process lifetime instead of permanently rejecting an exact supported build merely because engine interfaces become live late. Every strong identity gate remains mandatory before hooks.
+
+The already runtime-tested Xbox / Microsoft Store legacy path retains its bounded discovery behavior until that path is deliberately migrated.
 
 A future build can therefore reuse an existing ABI while selecting a different locator, or reuse a locator while selecting a different ABI.
 
@@ -80,7 +82,7 @@ A future build can therefore reuse an existing ABI while selecting a different l
 
 | Storefront | Build identity | Environment evidence | ABI | Clean Pause validation |
 | --- | --- | --- | --- | --- |
-| Steam | exact PE `0x6a350e20 / 0x05b2d000 / 0` | exact canonical `gEnv` RVA `0x492D7F8` + one-time code-anchor cross-check | release_1_5 | static RE + automated resolver/build validation; final in-game Clean Pause smoke QA still desirable |
+| Steam | exact PE `0x6a350e20 / 0x05b2d000 / 0` | exact canonical `gEnv` RVA `0x492D7F8` + one-time code-anchor cross-check | release_1_5 | RC1 confirmed exact profile/environment identity and no crash; RC2 smoke QA pending |
 | GOG | `Galaxy64.dll` marker + `release_1_5-15693` | exact canonical `gEnv` RVA `0x49177F8` | release_1_5 | public cross-distribution RE + external real-install runtime evidence; Clean Pause smoke QA still desirable |
 | Epic Games Store | `EOSSDK-Win64-Shipping.dll` marker + `release_1_5-15693` + timestamp `0x6A34F917` | exact canonical `gEnv` RVA `0x491D8B8` | release_1_5 | public cross-distribution RE + external real-install runtime evidence; Clean Pause smoke QA still desirable |
 | Xbox / Microsoft Store | exact PE `0x6a391f7b / 0x05bf2000 / 0` | mature captured runtime path | release_1_5 | runtime tested on Clean Pause 1.5.6 |
@@ -125,7 +127,9 @@ Before any version-specific hook is installed:
 8. `IGame -> IGameFramework -> ISystem` must resolve back to the same `ISystem` as `gEnv`.
 9. Only after all of the above may the version-specific input hook be installed.
 
-Any failure leaves vanilla behavior in control and installs no version-specific input hook.
+For an exact supported profile, a temporarily unavailable live interface means "not ready yet", not "unsupported build". Waiting longer never skips or weakens any gate. Readiness diagnostics identify the unresolved stage while vanilla behavior remains in control.
+
+Any unknown/mismatched build or permanent gate mismatch leaves vanilla behavior in control and installs no version-specific input hook.
 
 ## Adding another build
 
