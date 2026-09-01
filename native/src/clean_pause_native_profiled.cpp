@@ -18,6 +18,9 @@
 namespace clean_pause {
 namespace {
 
+constexpr DWORD kProfileSlowPollMs = 1'000;
+constexpr ULONGLONG kProfileWaitHeartbeatMs = 30'000;
+
 bool ThreadBelongsToCurrentProcess(DWORD threadId)
 {
     if (!threadId)
@@ -94,33 +97,165 @@ bool StronglyValidateEnvironment(RuntimeEnvironment& candidate, RuntimeEnvironme
     return true;
 }
 
+const char* ValidateProfileEnvironment(
+    const std::uint8_t* environmentBase,
+    RuntimeEnvironment& candidate)
+{
+    candidate = {};
+    if (!environmentBase || !IsReadable(environmentBase, kEnvSize))
+        return "environment-memory-unreadable";
+
+    __try {
+        candidate.base = const_cast<std::uint8_t*>(environmentBase);
+        candidate.scriptSystem = *reinterpret_cast<void* const*>(
+            environmentBase + kEnvScriptSystemOffset);
+        candidate.input = *reinterpret_cast<void* const*>(
+            environmentBase + kEnvInputOffset);
+        candidate.game = *reinterpret_cast<void* const*>(
+            environmentBase + kEnvGameOffset);
+        candidate.system = *reinterpret_cast<void* const*>(
+            environmentBase + kEnvSystemOffset);
+        candidate.flashUI = *reinterpret_cast<void* const*>(
+            environmentBase + kEnvFlashUIOffset);
+        candidate.mainThreadId = *reinterpret_cast<const DWORD*>(
+            environmentBase + kEnvMainThreadIdOffset);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        candidate = {};
+        return "environment-field-read-failed";
+    }
+
+    if (!candidate.scriptSystem || !candidate.input || !candidate.game
+        || !candidate.system || !candidate.flashUI || candidate.mainThreadId == 0)
+        return "required-interface-not-ready";
+    if (candidate.scriptSystem == candidate.input || candidate.input == candidate.game
+        || candidate.game == candidate.system || candidate.system == candidate.flashUI)
+        return "environment-interface-alias";
+
+    if (!ValidateObjectVtable(candidate.scriptSystem, {
+            kScriptExecuteBufferSlot,
+            kScriptGetGlobalAnySlot }))
+        return "script-system-vtable";
+    if (!ValidateObjectVtable(candidate.input, {kInputPostInputEventSlot}))
+        return "input-vtable";
+    if (!ValidateObjectVtable(candidate.game, {
+            kGameGetLongNameSlot,
+            kGameGetNameSlot,
+            kGameGetFrameworkSlot }))
+        return "game-vtable";
+    if (!ValidateObjectVtable(candidate.system, {0}))
+        return "system-vtable";
+    if (!ValidateObjectVtable(candidate.flashUI, {kFlashUIGetElementByInstanceStrSlot}))
+        return "flash-ui-vtable";
+
+    HANDLE thread = OpenThread(
+        THREAD_QUERY_LIMITED_INFORMATION, FALSE, candidate.mainThreadId);
+    if (!thread)
+        return "main-thread-unavailable";
+    const DWORD ownerProcess = GetProcessIdOfThread(thread);
+    CloseHandle(thread);
+    if (ownerProcess == 0 || ownerProcess != GetCurrentProcessId())
+        return "main-thread-owner-mismatch";
+
+    using GetGameNameFn = const char*(__fastcall*)(void*);
+    const auto getName = VFunc<GetGameNameFn>(candidate.game, kGameGetNameSlot);
+    const char* gameName{};
+    bool nameMatches{};
+    __try {
+        gameName = getName ? getName(candidate.game) : nullptr;
+        nameMatches = gameName && std::strcmp(gameName, "kcd2") == 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        nameMatches = false;
+    }
+    if (!nameMatches)
+        return "game-name-mismatch";
+
+    const auto getFramework = VFunc<GetGameFrameworkFn>(
+        candidate.game, kGameGetFrameworkSlot);
+    if (!getFramework || !IsExecutable(reinterpret_cast<void*>(getFramework)))
+        return "game-framework-accessor";
+
+    void* framework{};
+    __try {
+        framework = getFramework(candidate.game);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        framework = nullptr;
+    }
+    if (!framework)
+        return "game-framework-not-ready";
+    if (!ValidateObjectVtable(framework, {
+            kGameFrameworkPauseGameSlot,
+            kGameFrameworkGetSystemSlot }))
+        return "game-framework-vtable";
+
+    const auto getSystem = VFunc<GameFrameworkGetSystemFn>(
+        framework, kGameFrameworkGetSystemSlot);
+    void* frameworkSystem{};
+    __try {
+        frameworkSystem = getSystem ? getSystem(framework) : nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        frameworkSystem = nullptr;
+    }
+    if (frameworkSystem != candidate.system)
+        return "framework-system-mismatch";
+
+    return nullptr;
+}
+
 bool PollRuntimeEnvironment(
     HMODULE whGame,
     const kcd2::runtime::BuildProfile& profile,
     const std::uint8_t* fixedEnvironmentBase,
-    RuntimeEnvironment& result)
+    RuntimeEnvironment& result,
+    const char*& failureReason)
 {
     result = {};
+    failureReason = nullptr;
     RuntimeEnvironment candidate{};
 
     switch (profile.environmentLocator) {
     case kcd2::runtime::EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan:
-        if (!LegacyFindRuntimeEnvironment_Xbox156Only(whGame, candidate))
+        if (!LegacyFindRuntimeEnvironment_Xbox156Only(whGame, candidate)) {
+            failureReason = "xbox-runtime-not-ready";
             return false;
-        break;
+        }
+        if (!StronglyValidateEnvironment(candidate, result)) {
+            failureReason = "xbox-runtime-identity";
+            return false;
+        }
+        return true;
 
     case kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva:
     case kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation:
-        if (!fixedEnvironmentBase
-            || !ValidateEnvironmentCandidate(fixedEnvironmentBase, candidate))
+        failureReason = ValidateProfileEnvironment(fixedEnvironmentBase, candidate);
+        if (failureReason)
             return false;
-        break;
+        result = candidate;
+        return true;
 
     default:
+        failureReason = "unsupported-locator";
         return false;
     }
+}
 
-    return StronglyValidateEnvironment(candidate, result);
+void LogProfileWaitState(
+    const kcd2::runtime::BuildProfile& profile,
+    const char* reason,
+    const RuntimeEnvironment& candidate,
+    const char* prefix)
+{
+    Log(
+        "%s %s runtime readiness: reason=%s env=%p script=%p input=%p game=%p system=%p flashUI=%p mainThread=%lu",
+        prefix,
+        profile.name,
+        reason ? reason : "unknown",
+        candidate.base,
+        candidate.scriptSystem,
+        candidate.input,
+        candidate.game,
+        candidate.system,
+        candidate.flashUI,
+        static_cast<unsigned long>(candidate.mainThreadId));
 }
 
 DWORD WINAPI BootstrapThread(void*)
@@ -179,14 +314,15 @@ DWORD WINAPI BootstrapThread(void*)
 
     // Resolve immutable build-level identity exactly once. For profiled retail
     // builds this avoids rescanning WHGame.dll on every readiness poll. The poll
-    // loop below only waits for the already identified gEnv object's interfaces to
-    // become live. Xbox keeps its previously runtime-proven scanner behind the
-    // exact Xbox fingerprint until it is deliberately migrated.
+    // below only waits for interfaces inside that already identified gEnv to become
+    // live. Xbox retains the bounded legacy path that was already runtime-tested.
     std::uint8_t* fixedEnvironmentBase{};
-    if (profile->environmentLocator
+    const bool hasExactEnvironment =
+        profile->environmentLocator
             == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva
         || profile->environmentLocator
-            == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation) {
+            == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation;
+    if (hasExactEnvironment) {
         if (!kcd2::runtime::ResolveProfileEnvironmentBase(
                 whGame, *profile, fixedEnvironmentBase)) {
             Log("matched %s build-level environment identity failed validation; no hooks installed",
@@ -198,12 +334,46 @@ DWORD WINAPI BootstrapThread(void*)
     }
 
     RuntimeEnvironment environment{};
-    for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs && !g_stopping.load(); elapsed += kPollMs) {
-        if (PollRuntimeEnvironment(whGame, *profile, fixedEnvironmentBase, environment))
-            break;
-        Sleep(kPollMs);
+    if (hasExactEnvironment) {
+        const ULONGLONG waitStartedAt = GetTickCount64();
+        ULONGLONG lastWaitLogAt{};
+        std::string lastReason;
+
+        while (!g_stopping.load()) {
+            RuntimeEnvironment candidate{};
+            const char* failureReason{};
+            if (PollRuntimeEnvironment(
+                    whGame, *profile, fixedEnvironmentBase, environment, failureReason))
+                break;
+
+            const ULONGLONG now = GetTickCount64();
+            const std::string reason = failureReason ? failureReason : "unknown";
+            if (reason != lastReason) {
+                LogProfileWaitState(*profile, failureReason, candidate, "waiting for");
+                lastReason = reason;
+                lastWaitLogAt = now;
+            } else if (now - lastWaitLogAt >= kProfileWaitHeartbeatMs) {
+                LogProfileWaitState(*profile, failureReason, candidate, "still waiting for");
+                lastWaitLogAt = now;
+            }
+
+            const DWORD delay = now - waitStartedAt < kWaitForRuntimeMs
+                ? kPollMs
+                : kProfileSlowPollMs;
+            Sleep(delay);
+        }
+    } else {
+        for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs && !g_stopping.load(); elapsed += kPollMs) {
+            const char* failureReason{};
+            if (PollRuntimeEnvironment(
+                    whGame, *profile, fixedEnvironmentBase, environment, failureReason))
+                break;
+            Sleep(kPollMs);
+        }
     }
 
+    if (g_stopping.load())
+        return 0;
     if (!environment.base) {
         Log("matched %s runtime environment could not be strongly validated; no hooks installed",
             profile->name);
