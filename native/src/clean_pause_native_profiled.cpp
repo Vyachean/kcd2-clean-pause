@@ -206,9 +206,11 @@ bool PollRuntimeEnvironment(
     const kcd2::runtime::BuildProfile& profile,
     const std::uint8_t* fixedEnvironmentBase,
     RuntimeEnvironment& result,
+    RuntimeEnvironment& observedCandidate,
     const char*& failureReason)
 {
     result = {};
+    observedCandidate = {};
     failureReason = nullptr;
     RuntimeEnvironment candidate{};
 
@@ -218,6 +220,7 @@ bool PollRuntimeEnvironment(
             failureReason = "xbox-runtime-not-ready";
             return false;
         }
+        observedCandidate = candidate;
         if (!StronglyValidateEnvironment(candidate, result)) {
             failureReason = "xbox-runtime-identity";
             return false;
@@ -227,6 +230,7 @@ bool PollRuntimeEnvironment(
     case kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva:
     case kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation:
         failureReason = ValidateProfileEnvironment(fixedEnvironmentBase, candidate);
+        observedCandidate = candidate;
         if (failureReason)
             return false;
         result = candidate;
@@ -343,7 +347,12 @@ DWORD WINAPI BootstrapThread(void*)
             RuntimeEnvironment candidate{};
             const char* failureReason{};
             if (PollRuntimeEnvironment(
-                    whGame, *profile, fixedEnvironmentBase, environment, failureReason))
+                    whGame,
+                    *profile,
+                    fixedEnvironmentBase,
+                    environment,
+                    candidate,
+                    failureReason))
                 break;
 
             const ULONGLONG now = GetTickCount64();
@@ -364,9 +373,15 @@ DWORD WINAPI BootstrapThread(void*)
         }
     } else {
         for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs && !g_stopping.load(); elapsed += kPollMs) {
+            RuntimeEnvironment candidate{};
             const char* failureReason{};
             if (PollRuntimeEnvironment(
-                    whGame, *profile, fixedEnvironmentBase, environment, failureReason))
+                    whGame,
+                    *profile,
+                    fixedEnvironmentBase,
+                    environment,
+                    candidate,
+                    failureReason))
                 break;
             Sleep(kPollMs);
         }
