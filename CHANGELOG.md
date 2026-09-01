@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v0.3.0-rc.2 — 2026-09-01
+
+Second release candidate for multi-store KCD2 1.5.6 compatibility.
+
+- Keeps exact-profile Steam/GOG/Epic runtime readiness alive for the process lifetime instead of permanently disabling Clean Pause after the previous 120-second startup window.
+- Retains all existing build, ABI, thread-owner, game-name, framework-vtable, and `IGameFramework -> ISystem` safety gates before hooks.
+- Polls exact-profile readiness at 100 ms during the initial startup window and backs off to 1 second afterward, avoiding a permanent false-negative without busy-waiting.
+- Adds stage-specific readiness diagnostics with observed environment/interface pointers and a 30-second heartbeat while a supported build is still waiting.
+- Preserves the already runtime-tested Xbox / Microsoft Store bounded legacy discovery path unchanged.
+- Responds to the v0.3.0-rc.1 Steam smoke test, which correctly matched the Steam fingerprint/profile and canonical `gEnv` and no longer crashed, but timed out before hooks were installed.
+
 ## v0.3.0-rc.1 — 2026-08-31
 
 Release candidate for multi-store KCD2 1.5.6 compatibility.
