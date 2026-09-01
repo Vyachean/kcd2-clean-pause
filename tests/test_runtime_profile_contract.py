@@ -126,15 +126,18 @@ class RuntimeProfileContractTests(unittest.TestCase):
         marker = "DWORD WINAPI BootstrapThread(void*)"
         bootstrap = BOOTSTRAP[BOOTSTRAP.index(marker):]
         exact_start = bootstrap.index("if (hasExactEnvironment)", bootstrap.index("RuntimeEnvironment environment"))
-        legacy_start = bootstrap.index("} else {", exact_start)
-        exact_wait = bootstrap[exact_start:legacy_start]
+        legacy_loop = bootstrap.index(
+            "for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs",
+            exact_start,
+        )
+        exact_wait = bootstrap[exact_start:legacy_loop]
         self.assertIn("while (!g_stopping.load())", exact_wait)
         self.assertIn("kProfileSlowPollMs", exact_wait)
         self.assertIn("kProfileWaitHeartbeatMs", BOOTSTRAP)
         self.assertNotIn("could not be strongly validated", exact_wait)
         self.assertIn(
             "for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs",
-            bootstrap[legacy_start:],
+            bootstrap[legacy_loop:],
         )
 
     def test_profiled_runtime_wait_logs_stage_and_observed_interfaces(self):
