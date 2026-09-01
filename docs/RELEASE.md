@@ -12,7 +12,7 @@ The project follows Semantic Versioning with immutable tag-backed releases.
 - A release candidate number increments only when another candidate for the same target release is needed. It is not incremented for every merged PR.
 - Published tags/releases are immutable and are never moved or recycled.
 
-The current multi-store compatibility work is a feature-level change, so its target stable version is v0.3.0. v0.3.0-rc.1 remains immutable history; v0.3.0-rc.2 is the current acceptance candidate after the Steam RC1 readiness result required a runtime lifecycle fix.
+The current multi-store compatibility work targets stable v0.3.0. v0.3.0-rc.1 and v0.3.0-rc.2 remain immutable history; v0.3.0-rc.3 is the current Steam acceptance candidate after external native-mod/RE comparison identified and corrected the Steam framework-identity assumption.
 
 ## Production source
 
@@ -51,12 +51,10 @@ For compatibility work that still needs real game acceptance:
 
 1. publish an immutable GitHub prerelease through the normal main release workflow;
 2. test the published ASI artifact rather than an ad-hoc local/CI binary;
-3. if a runtime change is required, increment the RC number and publish a new immutable prerelease; never move or reuse an old RC tag;
-4. if the RC is accepted, prepare stable v0.3.0 from the same accepted runtime implementation with only release/version/documentation promotion changes;
+3. if a runtime change is required, increment the RC number and publish a new immutable prerelease; never move/reuse an old RC tag;
+4. if accepted, prepare stable v0.3.0 from the same runtime implementation with only release/version/documentation promotion changes;
 5. publish the stable GitHub artifact first;
 6. use that stable GitHub artifact for Nexus Mods.
-
-The RCs remain immutable history after stable promotion.
 
 ## Bundled Ultimate ASI Loader
 
@@ -76,18 +74,14 @@ Users with an existing compatible ASI loader should keep it rather than blindly 
 
 ## Edition-gated publication
 
-Build validation and public distribution are separate concerns. Both native targets remain continuously built so shared-runtime and proxy regressions are caught even while one edition has a distribution blocker.
-
 Current policy:
 
 - v0.2.2 ASI is the current stable public release.
-- v0.3.0-rc.2 ASI is the current multi-store/Steam-readiness prerelease candidate.
-- v0.3.0-rc.1 remains immutable prerelease history and must not be retagged or replaced.
+- v0.3.0-rc.3 ASI is the current multi-store/Steam framework-fix prerelease candidate.
+- v0.3.0-rc.1 and v0.3.0-rc.2 remain immutable prerelease history.
 - New standalone version.dll builds remain CI-only while Defender investigation #38 is unresolved.
 - SHA256SUMS.txt covers only public release assets.
 - CI_SHA256SUMS.txt covers both internally validated ZIPs and remains an Actions artifact.
-
-When #38 is resolved, standalone publication can be restored in a later release without changing the shared runtime architecture.
 
 ## Publication flow
 
@@ -107,7 +101,7 @@ For an unpublished version on a qualifying main push or manual dispatch from mai
 
 ## Current validation baseline
 
-- Xbox / Microsoft Store KCD2 1.5.6 is the existing Clean Pause runtime-tested baseline.
-- Steam KCD2 1.5.6 release_1_5-15693 is the v0.3.0-rc.2 acceptance target. RC1 already confirmed exact build/profile/canonical-environment identity and eliminated the prior crash, but exposed the startup-readiness timeout.
-- GOG and Epic Games Store release_1_5-15693 profiles are implemented from distribution-specific reverse-engineering/runtime evidence but are not yet claimed as Clean Pause runtime-tested.
-- Unknown or mismatched builds fail closed before version-specific hooks.
+- Xbox / Microsoft Store KCD2 1.5.6 remains the Clean Pause runtime-tested baseline.
+- Steam KCD2 1.5.6 release_1_5-15693 is the v0.3.0-rc.3 acceptance target. RC1 already confirmed exact build/profile/canonical gEnv and eliminated the prior crash. RC3 corrects the remaining `IGame[16]` framework assumption using the canonical Steam CCryAction singleton and restores PauseGame observation to optional capability status.
+- GOG and Epic release_1_5-15693 profiles are implemented from distribution-specific evidence; their core input/Menu path no longer depends on the invalid slot-16 framework assumption, but Clean Pause-specific runtime acceptance is still pending.
+- Unknown or mismatched builds fail closed before core version-specific hooks.
