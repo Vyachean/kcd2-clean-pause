@@ -1,26 +1,27 @@
-# KCD2 Clean Pause v0.3.0-rc.2
+# KCD2 Clean Pause v0.3.0-rc.3
 
-Second release candidate for **Kingdom Come: Deliverance II 1.5.6** multi-store compatibility on Windows.
+Third release candidate for **Kingdom Come: Deliverance II 1.5.6** multi-store compatibility on Windows.
 
-v0.3.0-rc.1 fixed the original Steam crash-class discovery problem: the tester's Steam build matched the exact fingerprint, selected the correct Steam profile, validated the canonical `gEnv`, and no longer crashed. However, RC1 permanently disabled Clean Pause when all live runtime interfaces had not passed strong validation within the startup readiness window.
+The first Steam test established that build detection and canonical `gEnv` resolution were correct and eliminated the old crash. A comparison with working libKCD2/KCSE native mods then exposed the remaining root cause: Clean Pause's profiled bootstrap incorrectly treated `IGame` vtable slot 16 as `IGameFramework` on Steam. Detailed Steam 1.5.6 reverse-engineering identifies that slot as a different engine-root object. Working mods obtain the real framework from the `CCryAction` singleton instead.
 
-RC2 fixes that lifecycle behavior without weakening any compatibility or identity gate.
+RC3 corrects that framework identity assumption and restores the mature runtime's original capability boundary: the optional PauseGame observer must never prevent the input/Menu fallback from loading.
 
-## What changed since rc.1
+## What changed since rc.2
 
-- Exact-profile Steam/GOG/Epic builds no longer permanently disable Clean Pause after the previous 120-second readiness window.
-- Runtime readiness keeps waiting for the lifetime of the process once an exact supported build/profile and canonical `gEnv` have been validated.
-- Polling remains at 100 ms during the initial startup window, then backs off to 1 second.
-- Strong validation still requires the documented release_1_5 ABI, current-process main thread, `IGame` identity, valid `IGameFramework` surface, and `IGameFramework -> ISystem` agreement before hooks.
-- Readiness diagnostics now report the exact failing stage and observed environment/interface pointers whenever the state changes, with a 30-second heartbeat while still waiting.
-- The already runtime-tested Xbox / Microsoft Store path retains its bounded legacy discovery behavior in this RC.
+- Exact-profile Steam/GOG/Epic readiness no longer requires `IGame[16]` to behave as `IGameFramework`.
+- Steam 1.5.6 resolves the real `IGameFramework` from the documented `CCryAction` singleton storage at `WHGame + 0x0549D328`.
+- The Steam singleton is accepted only when its vtable matches the documented Steam 1.5.6 framework vtable and `IGameFramework::GetISystem()` returns the same `ISystem` as canonical `gEnv`.
+- The PauseGame observer remains optional. If framework capability is unavailable, Clean Pause still installs its `PostInputEvent` hook and uses the existing verified Menu-visible fallback.
+- GOG/Epic no longer fall back to interpreting `IGame[16]` as framework; their input/Menu path remains available while a canonical framework locator is not registered.
+- Xbox / Microsoft Store retains the already runtime-tested legacy framework path unchanged.
+- The rc.2 lifetime-readiness behavior remains as a secondary robustness measure, but it is no longer relied upon as the Steam fix.
 
 ## Compatibility status
 
 - **Xbox / Microsoft Store 1.5.6:** Clean Pause runtime-tested baseline.
-- **Steam 1.5.6 release_1_5-15693:** exact profile and canonical environment identity confirmed by the RC1 tester; RC2 is the current in-game acceptance candidate.
-- **GOG 1.5.6 release_1_5-15693:** compatibility profile implemented from distribution-specific reverse-engineering and external runtime evidence; Clean Pause-specific smoke QA is still pending.
-- **Epic Games Store 1.5.6 release_1_5-15693:** compatibility profile implemented from distribution-specific reverse-engineering and external runtime evidence; Clean Pause-specific smoke QA is still pending.
+- **Steam 1.5.6 release_1_5-15693:** exact profile/canonical environment confirmed by the reporter; RC3 contains the targeted framework-identity fix and is the current acceptance candidate.
+- **GOG 1.5.6 release_1_5-15693:** compatibility profile implemented; input/Menu fallback does not depend on the invalid slot-16 assumption; Clean Pause-specific smoke QA remains pending.
+- **Epic Games Store 1.5.6 release_1_5-15693:** compatibility profile implemented; input/Menu fallback does not depend on the invalid slot-16 assumption; Clean Pause-specific smoke QA remains pending.
 
 Unknown or mismatched builds remain fail closed and receive no version-specific Clean Pause hooks.
 
@@ -36,13 +37,13 @@ For the reported Steam 1.5.6 build:
 6. resume normally and confirm gameplay continues;
 7. if anything fails, attach `kcd2_clean_pause_native.log` from beside `KCD2CleanPause.asi`.
 
-The RC2 log is intentionally more specific than RC1: a remaining compatibility failure should identify the exact readiness gate rather than only reporting a generic validation timeout.
+A successful log should now show the runtime profile becoming active and, on Steam, normally show the canonical `IGameFramework::PauseGame` observer as active. Failure of that optional observer alone must no longer disable the input/Menu Clean Pause path.
 
 ## Published package
 
 The GitHub prerelease publishes only:
 
-- `kcd2-clean-pause-v0.3.0-rc.2-asi.zip`
+- `kcd2-clean-pause-v0.3.0-rc.3-asi.zip`
 - `SHA256SUMS.txt`
 
 The ASI ZIP contains:
@@ -60,6 +61,6 @@ A new standalone `version.dll` is not published while Defender investigation #38
 
 ## Promotion to stable v0.3.0
 
-If the Steam smoke test confirms normal loading and accepted Clean Pause behavior, the accepted runtime can be promoted through a separate immutable v0.3.0 release-preparation commit. The v0.3.0-rc.1 and v0.3.0-rc.2 tags/releases remain immutable history.
+If the Steam smoke test confirms normal loading and accepted Clean Pause behavior, the accepted runtime can be promoted through a separate immutable v0.3.0 release-preparation commit. The earlier RC tags/releases remain immutable history.
 
 The stable Nexus Mods update should be made only after that acceptance step and should use the stable v0.3.0 GitHub release artifact rather than an RC package.

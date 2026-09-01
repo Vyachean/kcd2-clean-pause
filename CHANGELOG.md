@@ -2,16 +2,31 @@
 
 ## Unreleased
 
+## v0.3.0-rc.3 — 2026-09-01
+
+Third release candidate for Steam 1.5.6 compatibility.
+
+- Fixes the profiled Steam bootstrap's incorrect assumption that `IGame` vtable slot 16 returns `IGameFramework`.
+- Uses the documented Steam 1.5.6 `CCryAction` / `IGameFramework` singleton storage at RVA `0x0549D328`, with exact framework-vtable and `GetISystem() == gEnv->pSystem` validation before installing the optional `PauseGame` observer.
+- Restores the mature runtime capability boundary: failure to resolve the optional `PauseGame` barrier no longer blocks the `PostInputEvent` hook or Menu-visible Clean Pause fallback.
+- Keeps `IGame[16]` framework discovery isolated to the already runtime-tested Xbox / Microsoft Store 1.5.6 path instead of treating it as a storefront-independent ABI fact.
+- Prevents GOG/Epic profiles from falling back to the invalid Steam-style `IGame[16] -> IGameFramework` assumption; their input/Menu fallback remains available while a canonical framework locator is not registered.
+- Adds contract tests that make exact-profile readiness independent from framework discovery and pin the Steam `CCryAction` singleton evidence.
+
+The root cause was identified by comparing Clean Pause with working libKCD2/KCSE native mods: those mods use `CCryAction::GetInstance()` for framework functionality, while detailed Steam 1.5.6 RE identifies `IGame[16]` as a different engine-root object.
+
 ## v0.3.0-rc.2 — 2026-09-01
 
 Second release candidate for multi-store KCD2 1.5.6 compatibility.
 
 - Keeps exact-profile Steam/GOG/Epic runtime readiness alive for the process lifetime instead of permanently disabling Clean Pause after the previous 120-second startup window.
-- Retains all existing build, ABI, thread-owner, game-name, framework-vtable, and `IGameFramework -> ISystem` safety gates before hooks.
+- Retains the then-current build, ABI, thread-owner, game-name, framework-vtable, and `IGameFramework -> ISystem` safety gates before hooks.
 - Polls exact-profile readiness at 100 ms during the initial startup window and backs off to 1 second afterward, avoiding a permanent false-negative without busy-waiting.
 - Adds stage-specific readiness diagnostics with observed environment/interface pointers and a 30-second heartbeat while a supported build is still waiting.
 - Preserves the already runtime-tested Xbox / Microsoft Store bounded legacy discovery path unchanged.
 - Responds to the v0.3.0-rc.1 Steam smoke test, which correctly matched the Steam fingerprint/profile and canonical `gEnv` and no longer crashed, but timed out before hooks were installed.
+
+RC2 fixed the premature readiness deadline but did not correct the underlying Steam framework-identity assumption; RC3 supersedes it for Steam acceptance testing.
 
 ## v0.3.0-rc.1 — 2026-08-31
 
@@ -22,7 +37,7 @@ Release candidate for multi-store KCD2 1.5.6 compatibility.
 - Fixes the Steam v0.2.2 failure where the legacy writable-memory `gEnv` scan could accept a false-positive runtime object and then observe invalid framework/input/UI state.
 - Uses exact distribution-specific canonical `gEnv` evidence for Steam/GOG/Epic, with an additional one-time code-anchor cross-check on the captured Steam build.
 - Keeps the already runtime-tested Xbox / Microsoft Store 1.5.6 discovery path behind its exact PE fingerprint and stronger live identity checks.
-- Requires the resolved main-thread ID to belong to the current process and verifies `IGame -> IGameFramework -> ISystem` identity before installing version-specific hooks.
+- Requires the resolved main-thread ID to belong to the current process and verifies the then-assumed `IGame -> IGameFramework -> ISystem` identity before installing version-specific hooks.
 - Rejects unknown/mismatched builds and unsupported future ABIs before hook installation.
 - Adds executable Windows tests for storefront/build matching, exact environment resolution, fail-closed behavior, and real `whdlversions.json` path/parsing fixtures.
 - Fixes shared ASI-loader installation guidance so plugin placement follows the loader's actual search path.

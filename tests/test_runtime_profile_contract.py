@@ -134,13 +134,13 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("while (!g_stopping.load())", exact_wait)
         self.assertIn("kProfileSlowPollMs", exact_wait)
         self.assertIn("kProfileWaitHeartbeatMs", BOOTSTRAP)
-        self.assertNotIn("could not be strongly validated", exact_wait)
+        self.assertNotIn("could not be validated", exact_wait)
         self.assertIn(
             "for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs",
             bootstrap[legacy_loop:],
         )
 
-    def test_profiled_runtime_wait_logs_stage_and_observed_interfaces(self):
+    def test_profiled_runtime_wait_logs_required_capability_stage(self):
         for reason in (
             "required-interface-not-ready",
             "script-system-vtable",
@@ -151,19 +151,64 @@ class RuntimeProfileContractTests(unittest.TestCase):
             "main-thread-unavailable",
             "main-thread-owner-mismatch",
             "game-name-mismatch",
-            "game-framework-not-ready",
-            "game-framework-vtable",
-            "framework-system-mismatch",
         ):
             self.assertIn(reason, BOOTSTRAP)
         self.assertIn("RuntimeEnvironment& observedCandidate", BOOTSTRAP)
         self.assertIn("observedCandidate = candidate", BOOTSTRAP)
         self.assertIn("reason=%s env=%p script=%p input=%p game=%p system=%p flashUI=%p mainThread=%lu", BOOTSTRAP)
 
+    def test_exact_profile_readiness_does_not_require_igame_slot16_framework(self):
+        validate = BOOTSTRAP[
+            BOOTSTRAP.index("const char* ValidateProfileEnvironment"):
+            BOOTSTRAP.index("bool ResolveSteamFrameworkSingleton")
+        ]
+        self.assertNotIn("kGameGetFrameworkSlot", validate)
+        self.assertNotIn("kGameFrameworkPauseGameSlot", validate)
+        self.assertNotIn("kGameFrameworkGetSystemSlot", validate)
+        self.assertIn("kGameGetNameSlot", validate)
+        self.assertIn("kInputPostInputEventSlot", validate)
+        self.assertIn("kFlashUIGetElementByInstanceStrSlot", validate)
+
+    def test_steam_framework_uses_canonical_ccryaction_singleton(self):
+        resolver = BOOTSTRAP[
+            BOOTSTRAP.index("bool ResolveSteamFrameworkSingleton"):
+            BOOTSTRAP.index("bool ResolveGameFramework")
+        ]
+        self.assertIn("kSteam156FrameworkStorageRva = 0x0549D328", BOOTSTRAP)
+        self.assertIn("kSteam156FrameworkVtableRva = 0x040472D0", BOOTSTRAP)
+        self.assertIn("kGameFrameworkPauseGameSlot", resolver)
+        self.assertIn("kGameFrameworkGetSystemSlot", resolver)
+        self.assertIn("frameworkSystem != environment.system", resolver)
+        self.assertNotIn("kGameGetFrameworkSlot", resolver)
+
+    def test_pause_barrier_is_optional_for_profiled_input_installation(self):
+        install = BOOTSTRAP[
+            BOOTSTRAP.index("bool InstallInputHook"):
+            BOOTSTRAP.index("bool PollRuntimeEnvironment")
+        ]
+        self.assertIn("InstallPauseBarrierHook(environment);", install)
+        self.assertIn("MH_CreateHook(\n        g_postInputEventTarget", install)
+        self.assertIn("continuing with Menu/input fallback", BOOTSTRAP)
+        self.assertLess(
+            install.index("InstallPauseBarrierHook(environment);"),
+            install.index("MH_CreateHook(\n        g_postInputEventTarget"),
+        )
+
+    def test_non_xbox_profiles_never_fallback_to_igame_slot16(self):
+        resolver = BOOTSTRAP[
+            BOOTSTRAP.index("bool ResolveGameFramework"):
+            BOOTSTRAP.index("void __fastcall HookPauseGameProfiled")
+        ]
+        self.assertIn("Storefront::Steam", resolver)
+        self.assertIn("Storefront::XboxMicrosoftStore", resolver)
+        self.assertIn("LegacyResolveGameFramework_Xbox156Only", resolver)
+        self.assertNotIn("kGameGetFrameworkSlot", resolver)
+
     def test_xbox_legacy_discovery_is_locator_scoped(self):
         self.assertIn("LegacyFindRuntimeEnvironment_Xbox156Only", BOOTSTRAP)
         self.assertIn("EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan", BOOTSTRAP)
         self.assertIn("StronglyValidateEnvironment", BOOTSTRAP)
+        self.assertIn("ValidateLegacyXboxGameAndFrameworkIdentity", BOOTSTRAP)
         self.assertNotIn("src/clean_pause_native.cpp\n", CMAKE)
         self.assertIn("src/clean_pause_native_profiled.cpp", CMAKE)
         self.assertIn("for (std::size_t offset = 0; offset <= limit", LEGACY)
@@ -184,12 +229,11 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertLess(poll, install)
         self.assertIn("unsupported WHGame build; Clean Pause disabled; no hooks installed", bootstrap)
 
-    def test_candidate_identity_is_strongly_validated(self):
+    def test_required_candidate_identity_is_strongly_validated(self):
         self.assertIn("GetProcessIdOfThread", BOOTSTRAP)
         self.assertIn("GetCurrentProcessId", BOOTSTRAP)
         self.assertIn('std::strcmp(gameName, "kcd2") == 0', BOOTSTRAP)
-        self.assertIn("frameworkSystem != candidate.system", BOOTSTRAP)
-        self.assertIn("frameworkSystem == environment.system", BOOTSTRAP)
+        self.assertIn("frameworkSystem != environment.system", BOOTSTRAP)
 
     def test_profile_sources_are_compiled_into_both_runtime_artifacts(self):
         self.assertIn("src/kcd2_abi_profile.cpp", CMAKE)

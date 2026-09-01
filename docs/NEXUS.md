@@ -2,7 +2,7 @@
 
 Prepared for the currently published ASI edition.
 
-> Release-candidate note: v0.2.2 remains the immutable Xbox / Microsoft Store-tested Nexus/stable release. GitHub prerelease v0.3.0-rc.2 is the current Steam acceptance candidate and contains fail-closed KCD2 1.5.6 profiles for Steam, GOG, Epic Games Store and Xbox / Microsoft Store. Do not promote the Nexus compatibility claim until the intended in-game smoke QA is complete and stable v0.3.0 is published.
+> Release-candidate note: v0.2.2 remains the immutable Xbox / Microsoft Store-tested Nexus/stable release. GitHub prerelease v0.3.0-rc.3 is the current Steam acceptance candidate and contains fail-closed KCD2 1.5.6 profiles for Steam, GOG, Epic Games Store and Xbox / Microsoft Store. Do not promote the Nexus compatibility claim until the intended in-game smoke QA is complete and stable v0.3.0 is published.
 
 ## Page metadata
 
@@ -28,7 +28,7 @@ Kingdom Come: Deliverance II 1.5.6 — PC Xbox Store / Xbox app version, tested 
 
 **Other storefronts**
 
-GitHub prerelease v0.3.0-rc.2 contains explicit 1.5.6 compatibility profiles for Steam, GOG and Epic Games Store backed by public reverse-engineering/runtime evidence and automated Windows validation. RC1 confirmed the reported Steam build/profile/canonical environment and eliminated the previous crash but exposed a startup-readiness timeout; RC2 fixes that lifecycle behavior while retaining the strong pre-hook gates. Steam remains the current Clean Pause smoke-test target; GOG/Epic should not yet be described as Clean Pause runtime-tested by this project.
+GitHub prerelease v0.3.0-rc.3 contains explicit 1.5.6 compatibility profiles for Steam, GOG and Epic Games Store backed by public reverse-engineering/runtime evidence and automated Windows validation. RC1 confirmed the reported Steam build/profile/canonical environment and eliminated the previous crash. Comparison with working libKCD2/KCSE native mods then identified the remaining Steam framework-identity error: `IGame[16]` was being treated as `IGameFramework`, while the real framework is the `CCryAction` singleton. RC3 corrects that assumption and restores the PauseGame observer to optional capability status. Steam remains the current Clean Pause smoke-test target; GOG/Epic should not yet be described as Clean Pause runtime-tested by this project.
 
 ## Description
 
@@ -115,7 +115,7 @@ If the game works with the loader alone but crashes after adding Clean Pause, re
 - whether the game starts with the loader present and Clean Pause removed;
 - `kcd2_clean_pause_native.log`, if one was created before the crash.
 
-For v0.3.0-rc.2, the native log records the detected fingerprint/storefront/build profile, whether the fail-closed gates reached hook installation, and the exact current runtime-readiness reason when a supported exact profile is still waiting.
+For v0.3.0-rc.3, the native log records the detected fingerprint/storefront/build profile and hook installation. On Steam it also reports whether the canonical CCryAction PauseGame observer was installed; failure of that optional observer alone must not disable the input/Menu fallback.
 
 Do not install the ASI edition together with an old standalone Clean Pause `version.dll` edition.
 
@@ -192,7 +192,7 @@ Do **not** upload a CI/development build as v0.2.2 and do **not** upload the CI-
 
 Before changing the Nexus compatibility claim for Steam/GOG/Epic:
 
-- test the published GitHub prerelease v0.3.0-rc.2 rather than RC1 or an earlier diagnostic/CI build;
+- test the published GitHub prerelease v0.3.0-rc.3 rather than an earlier RC/diagnostic build;
 - complete the intended Clean Pause in-game smoke QA for every storefront being claimed as runtime-tested;
 - if the Steam RC is accepted, publish stable v0.3.0 through the normal immutable GitHub release workflow;
 - update the Nexus page version/changelog and tested-storefront wording together;
