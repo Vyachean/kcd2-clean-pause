@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## v0.3.0-rc.4 — 2026-09-02
+
+Fourth release candidate for Steam 1.5.6 compatibility, focused on lifecycle hardening before the next in-game acceptance test.
+
+- Removes the remaining Steam framework-startup race: the canonical `CCryAction` / `PauseGame` observer is acquired lazily on a real Escape/Start press instead of being attempted only once during worker-thread bootstrap.
+- Installs and validates the required `PostInputEvent` hook independently from the optional PauseGame observer, including clean rollback if enabling the required input hook fails.
+- Uses a single Steam observer-installation path on the validated KCD2 input thread, avoiding a duplicate-create race between bootstrap and the first Pause event.
+- Retries the optional Steam observer on later Pause presses if the canonical framework singleton is not ready yet; the existing Menu/input fallback remains active throughout.
+- Adds SEH around the profiled compatibility wrapper's direct `InputEvent` field reads so an unexpected payload cannot crash in the new lifecycle shim.
+- Keeps the already runtime-tested Xbox / Microsoft Store framework path unchanged and keeps GOG/Epic on their fail-open input/Menu capability path until canonical framework locators are registered for those storefronts.
+- Rechecks the release_1_5 input, framework, FlashUI, HUD-mask, bubbles and script-system contracts against current public KCD2 reverse-engineering and working native-mod code. No ABI changes were required.
+- Retains retail-proven controller IDs `xi_start=516`, `xi_a=526`, `xi_b=527`; SDK-derived contiguous XInput assumptions are intentionally not substituted for captured KCD2 runtime evidence.
+- Adds contract coverage for the single-path lazy Steam barrier acquisition and validates the resulting runtime with the full Windows/release-shaped CI pipeline.
+
+RC4 supersedes RC3 as the Steam acceptance candidate. RC3 fixed framework identity; RC4 makes that optional framework capability robust against initialization timing without weakening the core Clean Pause path.
+
 ## v0.3.0-rc.3 — 2026-09-01
 
 Third release candidate for Steam 1.5.6 compatibility.
