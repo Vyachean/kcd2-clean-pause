@@ -181,18 +181,52 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("frameworkSystem != environment.system", resolver)
         self.assertNotIn("kGameGetFrameworkSlot", resolver)
 
-    def test_pause_barrier_is_optional_for_profiled_input_installation(self):
+    def test_required_input_hook_is_installed_before_optional_pause_barrier(self):
         install = BOOTSTRAP[
             BOOTSTRAP.index("bool InstallInputHook"):
             BOOTSTRAP.index("bool PollRuntimeEnvironment")
         ]
-        self.assertIn("InstallPauseBarrierHook(environment);", install)
-        self.assertIn("MH_CreateHook(\n        g_postInputEventTarget", install)
-        self.assertIn("continuing with Menu/input fallback", BOOTSTRAP)
+        create_input = install.index("MH_CreateHook(\n        g_postInputEventTarget")
+        enable_input = install.index("MH_EnableHook(g_postInputEventTarget)")
+        xbox_barrier = install.index("InstallPauseBarrierHook(environment, true)")
+        self.assertLess(create_input, enable_input)
+        self.assertLess(enable_input, xbox_barrier)
+        self.assertIn("MH_RemoveHook(g_postInputEventTarget)", install)
+        self.assertIn("Storefront::XboxMicrosoftStore", install)
+        self.assertIn("Storefront::Steam", install)
+        self.assertIn("will be acquired lazily on the first Pause input", install)
+
+    def test_steam_pause_barrier_has_one_lazy_installation_path(self):
+        self.assertIn("#define HookPostInputEvent LegacyHookPostInputEventProfiledCore", BOOTSTRAP)
+        retry = BOOTSTRAP[
+            BOOTSTRAP.index("bool TryInstallDeferredSteamPauseBarrier"):
+            BOOTSTRAP.index("bool InstallInputHook")
+        ]
+        self.assertIn("ShouldTryDeferredSteamPauseBarrier", retry)
+        self.assertIn("HookPostInputEventProfiled", retry)
+        self.assertIn("Storefront::Steam", retry)
+        self.assertIn("IsPauseKey(event->keyId)", retry)
+        self.assertIn("InputState::Pressed", retry)
+        self.assertIn("__try", retry)
+        self.assertIn("EXCEPTION_EXECUTE_HANDLER", retry)
+        self.assertIn("g_mainThreadId && GetCurrentThreadId() != g_mainThreadId", retry)
+        self.assertIn("TryInstallDeferredSteamPauseBarrier();", retry)
+        self.assertIn("LegacyHookPostInputEventProfiledCore(input, event, force);", retry)
         self.assertLess(
-            install.index("InstallPauseBarrierHook(environment);"),
-            install.index("MH_CreateHook(\n        g_postInputEventTarget"),
+            retry.index("TryInstallDeferredSteamPauseBarrier();"),
+            retry.index("LegacyHookPostInputEventProfiledCore(input, event, force);"),
         )
+
+        install = BOOTSTRAP[
+            BOOTSTRAP.index("bool InstallInputHook"):
+            BOOTSTRAP.index("bool PollRuntimeEnvironment")
+        ]
+        steam_branch = install[
+            install.index("Storefront::Steam"):
+            install.index("Storefront::XboxMicrosoftStore")
+        ]
+        self.assertNotIn("InstallPauseBarrierHook", steam_branch)
+        self.assertIn("will be acquired lazily on the first Pause input", steam_branch)
 
     def test_non_xbox_profiles_never_fallback_to_igame_slot16(self):
         resolver = BOOTSTRAP[
