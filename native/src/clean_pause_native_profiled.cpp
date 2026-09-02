@@ -34,7 +34,6 @@ constexpr std::size_t kSteam156FrameworkVtableRva = 0x040472D0;
 
 HMODULE g_profileWhGame{};
 const kcd2::runtime::BuildProfile* g_activeBuildProfile{};
-std::atomic_bool g_pauseBarrierDeferredLogged{false};
 
 bool ThreadBelongsToCurrentProcess(DWORD threadId)
 {
@@ -367,20 +366,34 @@ bool TryInstallDeferredSteamPauseBarrier()
     return installed;
 }
 
+bool ShouldTryDeferredSteamPauseBarrier(const InputEvent* event)
+{
+    if (!event || g_forwardDepth != 0 || g_pauseGameTarget
+        || !g_activeBuildProfile
+        || g_activeBuildProfile->storefront != kcd2::runtime::Storefront::Steam
+        || (g_mainThreadId && GetCurrentThreadId() != g_mainThreadId))
+        return false;
+
+    bool shouldTry{};
+    __try {
+        shouldTry = IsPauseKey(event->keyId)
+            && (event->state & InputState::Pressed) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        shouldTry = false;
+    }
+    return shouldTry;
+}
+
 void __fastcall HookPostInputEventProfiled(void* input, const InputEvent* event, bool force)
 {
-    // Working KCSE mods register input only after DataLoaded. Keep the core input
-    // hook independent of framework readiness, but on the first real user pause
-    // input retry the optional CCryAction barrier on the game-owned input thread.
-    // This closes the startup race without blocking or weakening the Menu fallback.
-    if (event && g_forwardDepth == 0 && !g_pauseGameTarget
-        && g_activeBuildProfile
-        && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam
-        && IsPauseKey(event->keyId)
-        && (event->state & InputState::Pressed) != 0
-        && (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId)) {
+    // The mature runtime already installs its Menu/HUD/Mask/Bubbles hooks from this
+    // same first-Pause call stack, and pinned MinHook serializes its public API.
+    // Acquire the optional Steam CCryAction barrier here as well: by real user input
+    // the game lifecycle is mature, and avoiding a parallel bootstrap attempt removes
+    // a create/enable race against the input thread. Failure stays fail-open and is
+    // retried on the next physical Pause press.
+    if (ShouldTryDeferredSteamPauseBarrier(event))
         TryInstallDeferredSteamPauseBarrier();
-    }
 
     LegacyHookPostInputEventProfiledCore(input, event, force);
 }
@@ -438,14 +451,14 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
         static_cast<unsigned long>(g_mainThreadId),
         g_postInputEventTarget);
 
-    // Try the event-driven barrier immediately after the required runtime is live.
-    // If CCryAction has not published its singleton yet, the first real Pause input
-    // retries this on the game-owned input thread before vanilla handles that press.
-    if (!InstallPauseBarrierHook(environment, true)
-        && g_activeBuildProfile
-        && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam
-        && !g_pauseBarrierDeferredLogged.exchange(true, std::memory_order_acq_rel)) {
-        Log("Steam pause barrier deferred until the first Pause input; Menu/input fallback is already active");
+    if (g_activeBuildProfile
+        && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam) {
+        Log("Steam PauseGame observer will be acquired lazily on the first Pause input; Menu/input runtime is already active");
+    } else if (g_activeBuildProfile
+        && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::XboxMicrosoftStore) {
+        // Preserve the already runtime-tested Xbox behavior. Unlike Steam, there is
+        // no second installation path racing this bootstrap attempt.
+        InstallPauseBarrierHook(environment, true);
     }
     return true;
 }
