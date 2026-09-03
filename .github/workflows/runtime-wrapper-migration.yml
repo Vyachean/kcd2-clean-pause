@@ -1,0 +1,34 @@
+name: Runtime Wrapper Migration
+
+on:
+  push:
+    branches:
+      - refactor/runtime-wrapper-removal
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: ${{ !contains(github.event.head_commit.message, '[runtime-migrated]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Materialize profiled runtime as normal source
+        run: python tools/migrate_runtime_wrapper.py
+
+      - name: Commit migration when needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No migration changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add native/src/clean_pause_native.cpp native/src/clean_pause_native_profiled.cpp native/CMakeLists.txt
+          git commit -m "refactor: materialize profiled runtime [runtime-migrated]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
