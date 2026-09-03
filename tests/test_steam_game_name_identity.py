@@ -3,14 +3,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ABI = (ROOT / "native/src/kcd2_abi.h").read_text(encoding="utf-8")
-BOOTSTRAP = (ROOT / "native/src/clean_pause_native_profiled.cpp").read_text(encoding="utf-8")
+RUNTIME = (ROOT / "native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
 
 
 class SteamGameNameIdentityTests(unittest.TestCase):
     def test_profiled_runtime_accepts_both_observed_retail_casings(self):
-        validate = BOOTSTRAP[
-            BOOTSTRAP.index("const char* ValidateProfileEnvironment"):
-            BOOTSTRAP.index("bool ResolveSteamFrameworkSingleton")
+        validate = RUNTIME[
+            RUNTIME.index("const char* ValidateProfileEnvironment"):
+            RUNTIME.index("bool ResolveSteamFrameworkSingleton")
         ]
         self.assertIn('std::strcmp(gameName, "kcd2") == 0', validate)
         self.assertIn('std::strcmp(gameName, "KCD2") == 0', validate)
