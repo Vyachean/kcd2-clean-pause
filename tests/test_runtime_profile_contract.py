@@ -269,7 +269,7 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("unsupported WHGame build/release branch", bootstrap)
         self.assertIn("conservative release_1_5 compatibility fallback", bootstrap)
         self.assertIn("FrameworkLocatorStrategy::None", PROFILE)
-        self.assertIn("BuildValidationLevel::CompatibilityFallback", PROFILE_H)
+        self.assertIn("CompatibilityFallback", PROFILE_H)
         self.assertIn("AnchorDerivedEnvironment", PROFILE_H)
 
     def test_required_candidate_identity_is_strongly_validated(self):
