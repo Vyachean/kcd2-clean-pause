@@ -45,6 +45,15 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
         )
         self.assertIn("visible vanilla pause menu", helper)
 
+        latched = helper[
+            helper.index("if (g_visiblePauseGesturePassthrough.load"):
+            helper.index("if (!pressed)")
+        ]
+        self.assertLess(
+            latched.index("Forward(input, event, force);"),
+            latched.index("g_visiblePauseGesturePassthrough.store(false"),
+        )
+
     def test_latch_is_reset_at_runtime_boundaries(self):
         start = PROFILED[PROFILED.index("bool Start(HMODULE selfModule)"):]
         self.assertIn(
