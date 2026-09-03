@@ -10,7 +10,7 @@ class SteamGameNameIdentityTests(unittest.TestCase):
     def test_profiled_runtime_accepts_both_observed_retail_casings(self):
         validate = RUNTIME[
             RUNTIME.index("const char* ValidateProfileEnvironment"):
-            RUNTIME.index("bool ResolveProfileFrameworkSingleton")
+            RUNTIME.index("bool ResolveProfileFramework")
         ]
         self.assertIn('std::strcmp(gameName, "kcd2") == 0', validate)
         self.assertIn('std::strcmp(gameName, "KCD2") == 0', validate)
