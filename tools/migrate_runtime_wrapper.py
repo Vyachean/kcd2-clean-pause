@@ -1,167 +1,103 @@
 #!/usr/bin/env python3
-"""Mechanically materialize the current profiled translation unit as normal source.
+"""One-shot cleanup after materializing the profiled runtime for issue #45.
 
-This is a one-shot migration helper for issue #45. It preserves the symbol
-substitution performed by clean_pause_native_profiled.cpp, then appends the
-profiled bootstrap/capability implementation without textual .cpp inclusion.
-It intentionally does not redesign runtime behavior.
+The wrapper has already been expanded into clean_pause_native.cpp. This helper
+removes only dead symbols that existed because of the old textual-include/macro
+composition and gives the retained shared input core a normal name. Xbox 1.5.6
+legacy discovery/framework adapters remain because the profiled runtime still
+uses them intentionally.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
-import re
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "native/src/clean_pause_native.cpp"
-PROFILED = ROOT / "native/src/clean_pause_native_profiled.cpp"
-CMAKE = ROOT / "native/CMakeLists.txt"
-
-RENAMES = {
-    "Start": "LegacyStart_Unreachable",
-    "Stop": "LegacyStop_Unreachable",
-    "BootstrapThread": "LegacyBootstrapThread_Unreachable",
-    "FindRuntimeEnvironment": "LegacyFindRuntimeEnvironment_Xbox156Only",
-    "ResolveGameFramework": "LegacyResolveGameFramework_Xbox156Only",
-    "InstallPauseBarrierHook": "LegacyInstallPauseBarrierHook_Xbox156Only",
-    "InstallInputHook": "LegacyInstallInputHook_Xbox156Only",
-    "HookPostInputEvent": "LegacyHookPostInputEventProfiledCore",
-}
-
-PROFILE_TAIL_MARKER = "namespace clean_pause {\nnamespace {\n"
-INCLUDE_MARKER = '#include "clean_pause_native.cpp"'
 
 
-def replace_identifiers(text: str) -> str:
-    """Apply the wrapper's identifier macros outside comments and literals."""
-    out: list[str] = []
-    i = 0
-    n = len(text)
-    state = "code"
-
-    while i < n:
-        if state == "code":
-            if text.startswith("//", i):
-                out.append("//")
-                i += 2
-                state = "line_comment"
-                continue
-            if text.startswith("/*", i):
-                out.append("/*")
-                i += 2
-                state = "block_comment"
-                continue
-            ch = text[i]
-            if ch == '"':
-                out.append(ch)
-                i += 1
-                state = "string"
-                continue
-            if ch == "'":
-                out.append(ch)
-                i += 1
-                state = "char"
-                continue
-            if ch == "_" or ch.isalpha():
-                j = i + 1
-                while j < n and (text[j] == "_" or text[j].isalnum()):
-                    j += 1
-                token = text[i:j]
-                out.append(RENAMES.get(token, token))
-                i = j
-                continue
-            out.append(ch)
-            i += 1
-            continue
-
-        if state == "line_comment":
-            ch = text[i]
-            out.append(ch)
-            i += 1
-            if ch == "\n":
-                state = "code"
-            continue
-
-        if state == "block_comment":
-            if text.startswith("*/", i):
-                out.append("*/")
-                i += 2
-                state = "code"
-            else:
-                out.append(text[i])
-                i += 1
-            continue
-
-        if state in {"string", "char"}:
-            ch = text[i]
-            out.append(ch)
-            i += 1
-            if ch == "\\" and i < n:
-                out.append(text[i])
-                i += 1
-                continue
-            if (state == "string" and ch == '"') or (state == "char" and ch == "'"):
-                state = "code"
-            continue
-
-    if state in {"block_comment", "string", "char"}:
-        raise RuntimeError(f"unterminated C++ lexical state: {state}")
-    return "".join(out)
+def cut(text: str, start_marker: str, end_marker: str) -> str:
+    start = text.find(start_marker)
+    if start < 0:
+        raise RuntimeError(f"cleanup start marker not found: {start_marker}")
+    end = text.find(end_marker, start)
+    if end < 0:
+        raise RuntimeError(f"cleanup end marker not found: {end_marker}")
+    return text[:start] + text[end:]
 
 
-def migrate() -> bool:
-    if not PROFILED.exists():
-        print("profiled wrapper already absent; nothing to migrate")
-        return False
+def cleanup() -> bool:
+    text = CORE.read_text(encoding="utf-8")
+    original = text
 
-    core = CORE.read_text(encoding="utf-8")
-    profiled = PROFILED.read_text(encoding="utf-8")
-    if INCLUDE_MARKER not in profiled:
-        raise RuntimeError("profiled wrapper include marker not found")
-    marker_index = profiled.find(PROFILE_TAIL_MARKER, profiled.index(INCLUDE_MARKER))
-    if marker_index < 0:
-        raise RuntimeError("profiled implementation tail marker not found")
+    # The profiled BootstrapThread logs the selected profile fingerprint directly;
+    # this helper was used only by the now-dead legacy bootstrap.
+    text = cut(
+        text,
+        "void LogWhGameFingerprint(HMODULE whGame)\n{",
+        "bool LegacyFindRuntimeEnvironment_Xbox156Only",
+    )
 
-    transformed_core = replace_identifiers(core)
-    if '#include "kcd2_runtime_profile.h"' not in transformed_core:
-        transformed_core = '#include "kcd2_runtime_profile.h"\n' + transformed_core
+    # The active profiled path owns PauseGame/input installation. Keep only the
+    # runtime-tested Xbox discovery/framework adapters used by that path.
+    text = cut(
+        text,
+        "void __fastcall HookPauseGame(\n",
+        "DWORD WINAPI LegacyBootstrapThread_Unreachable",
+    )
+    text = cut(
+        text,
+        "DWORD WINAPI LegacyBootstrapThread_Unreachable(void*)\n{",
+        "} // namespace\n\nbool LegacyStart_Unreachable",
+    )
+    text = cut(
+        text,
+        "bool LegacyStart_Unreachable(HMODULE selfModule)\n{",
+        "} // namespace clean_pause\n\nnamespace clean_pause {",
+    )
 
-    tail = profiled[marker_index:]
-    unified = transformed_core.rstrip() + "\n\n" + tail.lstrip()
+    text = text.replace(
+        "LegacyHookPostInputEventProfiledCore",
+        "HookPostInputEventCore",
+    )
+    text = text.replace("the legacy core", "the shared core")
+    text = text.replace("legacy core performs", "shared core performs")
 
-    # Guard against accidentally preserving the mechanism being removed.
-    for forbidden in (
+    forbidden = (
+        "LegacyStart_Unreachable",
+        "LegacyStop_Unreachable",
+        "LegacyBootstrapThread_Unreachable",
+        "LegacyInstallPauseBarrierHook_Xbox156Only",
+        "LegacyInstallInputHook_Xbox156Only",
+        "LegacyHookPostInputEventProfiledCore",
+        "void __fastcall HookPauseGame(\n",
+        "void LogWhGameFingerprint(HMODULE whGame)",
         '#include "clean_pause_native.cpp"',
-        "#define Start LegacyStart_Unreachable",
-        "#define HookPostInputEvent LegacyHookPostInputEventProfiledCore",
-    ):
-        if forbidden in unified:
-            raise RuntimeError(f"forbidden wrapper mechanism survived: {forbidden}")
+    )
+    for token in forbidden:
+        if token in text:
+            raise RuntimeError(f"dead wrapper artifact survived cleanup: {token}")
 
-    for required in (
+    required = (
         "LegacyFindRuntimeEnvironment_Xbox156Only",
         "LegacyResolveGameFramework_Xbox156Only",
-        "LegacyHookPostInputEventProfiledCore",
-        "ResolveSteamFrameworkSingleton",
-        "HookPostInputEventProfiled",
+        "void __fastcall HookPostInputEventCore",
+        "void __fastcall HookPostInputEventProfiled",
+        "void __fastcall HookPauseGameProfiled",
+        "DWORD WINAPI BootstrapThread(void*)",
         "bool Start(HMODULE selfModule)",
-    ):
-        if required not in unified:
-            raise RuntimeError(f"required migrated symbol missing: {required}")
+        "void Stop()",
+    )
+    for token in required:
+        if token not in text:
+            raise RuntimeError(f"required runtime symbol missing after cleanup: {token}")
 
-    CORE.write_text(unified, encoding="utf-8")
-    PROFILED.unlink()
+    if text == original:
+        print("no cleanup needed")
+        return False
 
-    cmake = CMAKE.read_text(encoding="utf-8")
-    old = """  # Production entry compiles the mature runtime through a small profiled wrapper\n  # that replaces only build gating/environment discovery. Do not compile\n  # clean_pause_native.cpp separately: it is included by this translation unit.\n  src/clean_pause_native_profiled.cpp\n"""
-    new = """  # The accepted profiled runtime is represented directly as normal source.\n  # Storefront/build discovery and the shared Clean Pause core remain behaviorally\n  # unchanged while issue #45 proceeds toward a smaller private API boundary.\n  src/clean_pause_native.cpp\n"""
-    if old not in cmake:
-        raise RuntimeError("expected profiled CMake source block not found")
-    cmake = cmake.replace(old, new, 1)
-    CMAKE.write_text(cmake, encoding="utf-8")
+    CORE.write_text(text, encoding="utf-8")
+    print("materialized runtime cleanup complete")
     return True
 
 
 if __name__ == "__main__":
-    changed = migrate()
-    print("runtime wrapper migration complete" if changed else "no migration needed")
+    cleanup()
