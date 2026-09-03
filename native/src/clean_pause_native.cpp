@@ -1406,85 +1406,6 @@ std::atomic_bool g_visiblePauseGesturePassthrough{false};
 std::atomic_bool g_hudRootVisibilitySuppressionLogged{false};
 std::atomic_bool g_steamEntryRenderPrehide{false};
 
-bool ThreadBelongsToCurrentProcess(DWORD threadId)
-{
-    if (!threadId)
-        return false;
-
-    HANDLE thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, threadId);
-    if (!thread)
-        return false;
-    const DWORD ownerProcess = GetProcessIdOfThread(thread);
-    CloseHandle(thread);
-    return ownerProcess != 0 && ownerProcess == GetCurrentProcessId();
-}
-
-// The Xbox retail path already proved the legacy IGame[16] lookup in-game. Keep
-// that accepted behavior isolated to Xbox rather than treating slot 16 as a
-// storefront-independent IGameFramework accessor.
-bool ValidateLegacyXboxGameAndFrameworkIdentity(const RuntimeEnvironment& environment)
-{
-    if (!environment.game || !environment.system)
-        return false;
-
-    using GetGameNameFn = const char*(__fastcall*)(void*);
-    if (!ValidateObjectVtable(environment.game, {
-            kGameGetNameSlot,
-            kGameGetFrameworkSlot }))
-        return false;
-
-    const auto getName = VFunc<GetGameNameFn>(environment.game, kGameGetNameSlot);
-    const char* gameName{};
-    bool nameMatches{};
-    __try {
-        gameName = getName ? getName(environment.game) : nullptr;
-        nameMatches = gameName && std::strcmp(gameName, "kcd2") == 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        nameMatches = false;
-    }
-    if (!nameMatches)
-        return false;
-
-    const auto getFramework = VFunc<GetGameFrameworkFn>(
-        environment.game, kGameGetFrameworkSlot);
-    if (!getFramework || !IsExecutable(reinterpret_cast<void*>(getFramework)))
-        return false;
-
-    void* framework{};
-    __try {
-        framework = getFramework(environment.game);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        framework = nullptr;
-    }
-    if (!framework || !ValidateObjectVtable(framework, {
-            kGameFrameworkPauseGameSlot,
-            kGameFrameworkGetSystemSlot }))
-        return false;
-
-    const auto getSystem = VFunc<GameFrameworkGetSystemFn>(
-        framework, kGameFrameworkGetSystemSlot);
-    void* frameworkSystem{};
-    __try {
-        frameworkSystem = getSystem ? getSystem(framework) : nullptr;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        frameworkSystem = nullptr;
-    }
-    return frameworkSystem == environment.system;
-}
-
-bool StronglyValidateEnvironment(RuntimeEnvironment& candidate, RuntimeEnvironment& result)
-{
-    if (!candidate.base)
-        return false;
-    if (!ThreadBelongsToCurrentProcess(candidate.mainThreadId))
-        return false;
-    if (!ValidateLegacyXboxGameAndFrameworkIdentity(candidate))
-        return false;
-
-    result = candidate;
-    return true;
-}
-
 // Exact-profile readiness deliberately validates only capabilities required for
 // installing the mature input/menu runtime. PauseGame observation is optional in
 // the mature runtime and must not disable Clean Pause when framework discovery is
@@ -2023,15 +1944,20 @@ bool PollRuntimeEnvironment(
 
     switch (profile.environmentLocator) {
     case kcd2::runtime::EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan:
-        if (!LegacyFindRuntimeEnvironment_Xbox156Only(whGame, candidate)) {
+        // Preserve the runtime-tested Xbox bootstrap boundary: the exact Xbox PE
+        // fingerprint has already selected this adapter, and the legacy scanner
+        // validates the complete SSystemGlobalEnvironment interface shape. Do not
+        // call engine virtuals such as IGame::GetName()/IGame[16] from this worker
+        // thread. The optional framework identity is verified later, immediately
+        // before its PauseGame observer is installed.
+        if (!LegacyFindRuntimeEnvironment_Xbox156Only(whGame, result)) {
             failureReason = "xbox-runtime-not-ready";
             return false;
         }
-        observedCandidate = candidate;
-        if (!StronglyValidateEnvironment(candidate, result)) {
-            failureReason = "xbox-runtime-identity";
-            return false;
-        }
+        observedCandidate = result;
+        Log("Xbox legacy runtime environment discovered; env=%p mainThread=%lu",
+            result.base,
+            static_cast<unsigned long>(result.mainThreadId));
         return true;
 
     case kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva:

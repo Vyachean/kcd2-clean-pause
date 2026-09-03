@@ -240,11 +240,20 @@ class RuntimeProfileContractTests(unittest.TestCase):
     def test_xbox_legacy_discovery_is_locator_scoped(self):
         self.assertIn("LegacyFindRuntimeEnvironment_Xbox156Only", RUNTIME)
         self.assertIn("EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan", RUNTIME)
-        self.assertIn("StronglyValidateEnvironment", RUNTIME)
-        self.assertIn("ValidateLegacyXboxGameAndFrameworkIdentity", RUNTIME)
         self.assertIn("src/clean_pause_native.cpp", CMAKE)
         self.assertNotIn("src/clean_pause_native_profiled.cpp", CMAKE)
         self.assertIn("for (std::size_t offset = 0; offset <= limit", RUNTIME)
+
+        legacy = RUNTIME[
+            RUNTIME.index("case kcd2::runtime::EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan"):
+            RUNTIME.index("case kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva")
+        ]
+        self.assertIn("LegacyFindRuntimeEnvironment_Xbox156Only(whGame, result)", legacy)
+        self.assertIn("observedCandidate = result;", legacy)
+        self.assertNotIn("StronglyValidateEnvironment", legacy)
+        self.assertNotIn("ValidateLegacyXboxGameAndFrameworkIdentity", RUNTIME)
+        self.assertNotIn("ThreadBelongsToCurrentProcess", RUNTIME)
+        self.assertIn("Xbox legacy runtime environment discovered", legacy)
 
     def test_unknown_build_is_rejected_before_abi_or_runtime_discovery(self):
         marker = "DWORD WINAPI BootstrapThread(void*)"
