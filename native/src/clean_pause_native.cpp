@@ -2057,7 +2057,7 @@ bool PollRuntimeEnvironment(
     RuntimeEnvironment candidate{};
 
     switch (profile.environmentLocator) {
-    case kcd2::runtime::EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan:
+    case kcd2::runtime::EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan: {
         // Preserve the runtime-tested Xbox bootstrap boundary: the exact Xbox PE
         // fingerprint has already selected this adapter, and the legacy scanner
         // validates the complete SSystemGlobalEnvironment interface shape. Do not
@@ -2070,13 +2070,15 @@ bool PollRuntimeEnvironment(
         }
         observedCandidate = result;
         const auto* moduleBase = reinterpret_cast<const std::uint8_t*>(whGame);
-        const auto envRva = static_cast<unsigned long long>(result.base - moduleBase);
+        const auto* environmentBase = reinterpret_cast<const std::uint8_t*>(result.base);
+        const auto envRva = static_cast<unsigned long long>(environmentBase - moduleBase);
         Log("Xbox legacy runtime environment discovered; WHGame=%p env=%p envRva=0x%llx mainThread=%lu",
             whGame,
             result.base,
             envRva,
             static_cast<unsigned long>(result.mainThreadId));
         return true;
+    }
 
     case kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva:
     case kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation:
