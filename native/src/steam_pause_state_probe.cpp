@@ -16,6 +16,9 @@ using namespace kcd2;
 constexpr DWORD kWaitForWhGameMs = 60'000;
 constexpr DWORD kWaitForFrameworkMs = 120'000;
 constexpr DWORD kPollMs = 100;
+constexpr DWORD kEscapePollMs = 2;
+constexpr DWORD kActiveSampleSleepMs = 1;
+constexpr ULONGLONG kActiveSampleWindowMs = 1'000;
 constexpr std::uint32_t kSteam156Timestamp = 0x6a350e20;
 constexpr std::uint32_t kSteam156ImageSize = 0x05b2d000;
 constexpr std::uint32_t kSteam156Checksum = 0x00000000;
@@ -204,7 +207,7 @@ bool __fastcall HookIsGamePaused(void* framework)
         if (previous != next) {
             const unsigned change = g_stateChangeCount.fetch_add(1, std::memory_order_acq_rel) + 1;
             Log(
-                "IGameFramework::IsGamePaused state=%s change=%u thread=%lu tick=%llu",
+                "passive IGameFramework::IsGamePaused state=%s change=%u thread=%lu tick=%llu",
                 paused ? "true" : "false",
                 change,
                 static_cast<unsigned long>(GetCurrentThreadId()),
@@ -266,6 +269,82 @@ bool InstallObserver(void* framework)
     return true;
 }
 
+bool ReadPausedStateDirect(bool& paused)
+{
+    paused = false;
+    if (!g_framework || !g_originalIsGamePaused)
+        return false;
+
+    __try {
+        paused = g_originalIsGamePaused(g_framework);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    return true;
+}
+
+void RunActiveEscapeSampleWindow()
+{
+    const ULONGLONG startedAt = GetTickCount64();
+    const ULONGLONG deadline = startedAt + kActiveSampleWindowMs;
+    int previous = -1;
+    unsigned samples{};
+    unsigned transitions{};
+    bool readFailed{};
+
+    Log(
+        "active Escape sampling window started; durationMs=%llu samplerThread=%lu",
+        static_cast<unsigned long long>(kActiveSampleWindowMs),
+        static_cast<unsigned long>(GetCurrentThreadId()));
+
+    while (!g_stopping.load(std::memory_order_acquire) && GetTickCount64() <= deadline) {
+        bool paused{};
+        if (!ReadPausedStateDirect(paused)) {
+            readFailed = true;
+            break;
+        }
+
+        ++samples;
+        const int next = paused ? 1 : 0;
+        if (previous != next) {
+            ++transitions;
+            Log(
+                "active sample state=%s transition=%u sample=%u elapsedMs=%llu",
+                paused ? "true" : "false",
+                transitions,
+                samples,
+                static_cast<unsigned long long>(GetTickCount64() - startedAt));
+            previous = next;
+        }
+
+        Sleep(kActiveSampleSleepMs);
+    }
+
+    const ULONGLONG elapsed = GetTickCount64() - startedAt;
+    Log(
+        "active Escape sampling window complete; samples=%u transitions=%u elapsedMs=%llu avgIntervalMs=%.3f readFailed=%s lastState=%s",
+        samples,
+        transitions,
+        static_cast<unsigned long long>(elapsed),
+        samples > 1 ? static_cast<double>(elapsed) / static_cast<double>(samples - 1) : 0.0,
+        readFailed ? "true" : "false",
+        previous < 0 ? "unavailable" : (previous ? "true" : "false"));
+}
+
+void MonitorEscapeAndSample()
+{
+    bool wasDown = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+    Log("active Escape pause-state sampler ready; polling physical Escape without changing game input");
+
+    while (!g_stopping.load(std::memory_order_acquire)) {
+        const bool down = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+        if (down && !wasDown)
+            RunActiveEscapeSampleWindow();
+        wasDown = down;
+        Sleep(kEscapePollMs);
+    }
+}
+
 DWORD WINAPI ProbeThread(void*)
 {
     HMODULE whGame{};
@@ -294,7 +373,16 @@ DWORD WINAPI ProbeThread(void*)
         return 0;
     }
 
-    InstallObserver(framework);
+    if (!InstallObserver(framework))
+        return 0;
+
+    bool baseline{};
+    if (ReadPausedStateDirect(baseline))
+        Log("active sampler baseline IsGamePaused=%s", baseline ? "true" : "false");
+    else
+        Log("active sampler baseline IsGamePaused read failed");
+
+    MonitorEscapeAndSample();
     return 0;
 }
 
