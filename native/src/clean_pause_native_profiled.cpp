@@ -35,6 +35,7 @@ constexpr std::size_t kSteam156FrameworkVtableRva = 0x040472D0;
 HMODULE g_profileWhGame{};
 const kcd2::runtime::BuildProfile* g_activeBuildProfile{};
 std::atomic_bool g_visiblePauseGesturePassthrough{false};
+std::atomic_bool g_hudRootVisibilitySuppressionLogged{false};
 
 bool ThreadBelongsToCurrentProcess(DWORD threadId)
 {
@@ -265,6 +266,25 @@ bool ResolveGameFramework(const RuntimeEnvironment& environment, void*& framewor
     return LegacyResolveGameFramework_Xbox156Only(environment, framework);
 }
 
+bool ShouldSuppressSteamHudRootVisibility(bool visible)
+{
+    if (!g_activeBuildProfile
+        || g_activeBuildProfile->storefront != kcd2::runtime::Storefront::Steam
+        || g_hudMaskPinSuspended.load(std::memory_order_acquire)
+        || !g_gameplayHudSnapshot.captured)
+        return false;
+
+    const bool pin = g_pauseTransitionActive.load(std::memory_order_acquire)
+        || g_cleanHidden.load(std::memory_order_acquire);
+    if (!pin || visible == g_gameplayHudSnapshot.rootVisible)
+        return false;
+
+    if (!g_hudRootVisibilitySuppressionLogged.exchange(true, std::memory_order_acq_rel))
+        Log("Steam pause transition suppressed hud@0 root visibility change; preserved gameplay root=%s",
+            g_gameplayHudSnapshot.rootVisible ? "visible" : "hidden");
+    return true;
+}
+
 bool RestoreGameplayHudRootAtPauseBarrier()
 {
     if (!g_gameplayHudSnapshot.captured || !g_hudElement
@@ -331,13 +351,9 @@ void __fastcall HookPauseGameProfiled(
         return;
     }
 
-    // C_UIHudMask hooks preserve the 28 child flags during the real pause call, and
-    // the subtitle CallFunction hook blocks vanilla subtitle clears. The root hud@0
-    // visibility is independent of that mask, however, so restore just that cheap root
-    // state immediately after PauseGame(true) returns. The later transactional handoff
-    // still performs the complete snapshot validation/restore before publishing Clean
-    // Pause ownership; this closes the visible one-frame root-HUD gap without weakening
-    // fail-open behavior or adding another full 28-clip replay here.
+    // The shared CFlashUIElement::SetVisible hook pins hud@0 root visibility while
+    // PauseGame(true) itself is running. Keep this post-call correction as a cheap
+    // defensive check for any root mutation that bypasses SetVisible entirely.
     RestoreGameplayHudRootAtPauseBarrier();
 
     g_pauseBarrierObserved.store(true, std::memory_order_release);
@@ -509,6 +525,15 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
     g_flashUI = environment.flashUI;
     g_mainThreadId = environment.mainThreadId;
     blur::Initialize(environment.scriptSystem, environment.mainThreadId);
+
+    // bubbles::EnsureHooks lazily installs the one shared CFlashUIElement::SetVisible
+    // detour on the first Pause input. Register the Steam-only hud@0 root filter now,
+    // before that lazy installation can occur. Xbox/GOG/Epic behavior stays unchanged.
+    bubbles::SetHudRootVisibilityFilter(
+        g_activeBuildProfile
+            && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam
+        ? &ShouldSuppressSteamHudRootVisibility
+        : nullptr);
 
     g_postInputEventTarget = reinterpret_cast<void*>(
         VFunc<PostInputEventFn>(g_input, kInputPostInputEventSlot));
@@ -776,6 +801,7 @@ bool Start(HMODULE selfModule)
     g_selfModule = selfModule;
     g_stopping.store(false, std::memory_order_relaxed);
     g_visiblePauseGesturePassthrough.store(false, std::memory_order_relaxed);
+    g_hudRootVisibilitySuppressionLogged.store(false, std::memory_order_relaxed);
 
     HANDLE thread = CreateThread(nullptr, 0, BootstrapThread, nullptr, 0, nullptr);
     if (!thread)
@@ -788,6 +814,7 @@ void Stop()
 {
     g_stopping.store(true, std::memory_order_release);
     g_visiblePauseGesturePassthrough.store(false, std::memory_order_release);
+    bubbles::SetHudRootVisibilityFilter(nullptr);
 }
 
 } // namespace clean_pause
