@@ -35,6 +35,8 @@ constexpr std::size_t kSteam156FrameworkVtableRva = 0x040472D0;
 HMODULE g_profileWhGame{};
 const kcd2::runtime::BuildProfile* g_activeBuildProfile{};
 std::atomic_bool g_visiblePauseGesturePassthrough{false};
+HudVisibilitySnapshot g_resumeGameplayHudSnapshot{};
+std::atomic_bool g_resumeGameplayHudSnapshotArmed{false};
 
 bool ThreadBelongsToCurrentProcess(DWORD threadId)
 {
@@ -275,6 +277,10 @@ void __fastcall HookPauseGameProfiled(
         && pause
         && g_pendingPauseAttempt.load(std::memory_order_acquire)
         && (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId);
+    const bool restoreGameplayOnResume = framework == g_gameFramework
+        && !pause
+        && g_resumeGameplayHudSnapshotArmed.load(std::memory_order_acquire)
+        && (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId);
     const ULONGLONG enteredAt = observe ? GetTickCount64() : 0;
 
     if (observe)
@@ -283,9 +289,28 @@ void __fastcall HookPauseGameProfiled(
     if (!g_originalPauseGame) {
         if (observe)
             g_pauseTransitionActive.store(false, std::memory_order_release);
+        if (restoreGameplayOnResume)
+            g_resumeGameplayHudSnapshotArmed.store(false, std::memory_order_release);
         return;
     }
     g_originalPauseGame(framework, pause, force, fadeOutInMs);
+
+    // A Clean Pause -> visible vanilla menu transition deliberately restores the
+    // vanilla pause HUD, but keeps one private copy of the preceding gameplay HUD.
+    // Apply that copy only after the real vanilla PauseGame(false) returns. This is
+    // late enough that KCD2 has completed its resume mutations, but still inside the
+    // same main-thread call stack and therefore before the first resumed render.
+    if (restoreGameplayOnResume) {
+        const bool restored = g_resumeGameplayHudSnapshot.captured
+            && RestoreHudVisibilitySnapshot(
+                g_resumeGameplayHudSnapshot, "gameplay-resume-barrier");
+        g_resumeGameplayHudSnapshotArmed.store(false, std::memory_order_release);
+        g_resumeGameplayHudSnapshot = {};
+        if (restored)
+            Log("vanilla PauseGame(false) resume barrier restored gameplay HUD before resumed render");
+        else
+            Log("vanilla PauseGame(false) resume barrier could not restore gameplay HUD; vanilla restore retained");
+    }
 
     if (!observe || !g_pendingPauseAttempt.load(std::memory_order_acquire)) {
         if (observe)
@@ -389,6 +414,32 @@ bool ShouldTryDeferredSteamPauseBarrier(const InputEvent* event)
     return shouldTry;
 }
 
+void UpdateResumeHudSnapshotForPauseInput(const InputEvent* event)
+{
+    if (!event || g_forwardDepth != 0 || !IsPauseKey(event->keyId)
+        || (event->state & InputState::Pressed) == 0)
+        return;
+
+    if (g_cleanHidden.load(std::memory_order_acquire)) {
+        if (!g_pauseGameTarget || (g_mainThreadId && GetCurrentThreadId() != g_mainThreadId)
+            || !g_gameplayHudSnapshot.captured) {
+            g_resumeGameplayHudSnapshotArmed.store(false, std::memory_order_release);
+            return;
+        }
+
+        g_resumeGameplayHudSnapshot = g_gameplayHudSnapshot;
+        g_resumeGameplayHudSnapshotArmed.store(true, std::memory_order_release);
+        Log("Clean Pause gameplay HUD snapshot retained for vanilla resume barrier");
+        return;
+    }
+
+    // Reaching a new gameplay pause gesture means any retained snapshot belonged to
+    // an older visible-menu session that was exited through a UI control such as
+    // Continue rather than Escape/Start. Do not carry it into the next pause cycle.
+    if (g_resumeGameplayHudSnapshotArmed.exchange(false, std::memory_order_acq_rel))
+        g_resumeGameplayHudSnapshot = {};
+}
+
 bool ForwardVisiblePauseGestureIfNeeded(void* input, const InputEvent* event, bool force)
 {
     if (!event || g_forwardDepth != 0 || g_cleanHidden.load(std::memory_order_acquire)
@@ -441,6 +492,12 @@ void __fastcall HookPostInputEventProfiled(void* input, const InputEvent* event,
     // HUD clips. Keep forwarding repeats until the matching physical release.
     if (ForwardVisiblePauseGestureIfNeeded(input, event, force))
         return;
+
+    // Before the legacy Clean Pause handler clears its working snapshots while
+    // revealing the vanilla pause menu, retain the exact gameplay HUD for the real
+    // PauseGame(false) resume barrier. A fresh gameplay pause gesture also clears any
+    // stale retained copy left by exiting the visible menu through Continue.
+    UpdateResumeHudSnapshotForPauseInput(event);
 
     // The mature runtime already installs its Menu/HUD/Mask/Bubbles hooks from this
     // same first-Pause call stack, and pinned MinHook serializes its public API.
@@ -729,6 +786,8 @@ bool Start(HMODULE selfModule)
     g_selfModule = selfModule;
     g_stopping.store(false, std::memory_order_relaxed);
     g_visiblePauseGesturePassthrough.store(false, std::memory_order_relaxed);
+    g_resumeGameplayHudSnapshot = {};
+    g_resumeGameplayHudSnapshotArmed.store(false, std::memory_order_relaxed);
 
     HANDLE thread = CreateThread(nullptr, 0, BootstrapThread, nullptr, 0, nullptr);
     if (!thread)
@@ -741,6 +800,7 @@ void Stop()
 {
     g_stopping.store(true, std::memory_order_release);
     g_visiblePauseGesturePassthrough.store(false, std::memory_order_release);
+    g_resumeGameplayHudSnapshotArmed.store(false, std::memory_order_release);
 }
 
 } // namespace clean_pause
