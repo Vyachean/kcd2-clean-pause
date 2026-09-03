@@ -352,11 +352,11 @@ void __fastcall HookPauseGameProfiled(
         g_pauseTransitionActive.store(true, std::memory_order_release);
 
         // Menu@0 can render on a different engine/render path while the main thread
-        // spends hundreds of milliseconds restoring the complete gameplay HUD snapshot.
-        // Arm the existing render suppression before the verified vanilla PauseGame(true)
-        // call itself. This state is provisional: the PostInputEvent wrapper commits it
-        // only if TryEnterCleanPause publishes a real ownership timestamp, otherwise it
-        // is rolled back immediately and the ordinary vanilla pause menu remains usable.
+        // restores the complete gameplay HUD snapshot. Arm the existing render
+        // suppression before the verified vanilla PauseGame(true) call itself. This
+        // state is provisional: the PostInputEvent wrapper commits it only if
+        // TryEnterCleanPause publishes a real ownership timestamp, otherwise it is
+        // rolled back immediately and the ordinary vanilla pause menu remains usable.
         if (ShouldPrehideSteamEntryRender()) {
             g_cleanHiddenSinceMs.store(0, std::memory_order_release);
             g_renderSuppressionObserved.store(false, std::memory_order_release);
@@ -374,14 +374,6 @@ void __fastcall HookPauseGameProfiled(
         return;
     }
     g_originalPauseGame(framework, pause, force, fadeOutInMs);
-
-    if (!pause) {
-        const ULONGLONG pressAt = g_pausePressAtMs.load(std::memory_order_acquire);
-        const ULONGLONG now = GetTickCount64();
-        if (pressAt && now >= pressAt && now - pressAt <= 2'000)
-            Log("vanilla IGameFramework::PauseGame(false) observed %llu ms after physical Pause press",
-                static_cast<unsigned long long>(now - pressAt));
-    }
 
     if (!observe || !g_pendingPauseAttempt.load(std::memory_order_acquire)) {
         if (observe) {
@@ -513,9 +505,9 @@ bool ForwardVisiblePauseGestureIfNeeded(void* input, const InputEvent* event, bo
     if (!pressed)
         return false;
 
-    // Check visible Menu@0 before the legacy core performs the expensive 28-clip HUD
-    // snapshot. If the render hook has not been established yet, establish only that
-    // cheap identity first so an already-open vanilla menu still gets the fast path.
+    // Check visible Menu@0 before the legacy core performs the expensive HUD snapshot.
+    // If the render hook has not been established yet, establish only that cheap
+    // identity first so an already-open vanilla menu still gets the fast path.
     bool visible{};
     if (!ReadVerifiedMenuVisible(visible)) {
         if (!EnsureMenuRenderHook() || !ReadVerifiedMenuVisible(visible))
@@ -540,8 +532,8 @@ bool ForwardVisiblePauseGestureIfNeeded(void* input, const InputEvent* event, bo
 void __fastcall HookPostInputEventProfiled(void* input, const InputEvent* event, bool force)
 {
     // A visible vanilla pause menu owns Escape/Start completely. Detect that state
-    // before Steam barrier acquisition and before the legacy core can capture all 28
-    // HUD clips. Keep forwarding repeats until the matching physical release.
+    // before Steam barrier acquisition and before the legacy core can capture HUD
+    // presentation. Keep forwarding repeats until the matching physical release.
     if (ForwardVisiblePauseGestureIfNeeded(input, event, force))
         return;
 
@@ -745,7 +737,7 @@ DWORD WINAPI BootstrapThread(void*)
 
     const auto* profile = kcd2::runtime::MatchSupportedBuild(identity);
     if (!profile) {
-        Log("unsupported WHGame build; Clean Pause disabled; no hooks installed");
+        Log("unsupported WHGame build; Clean Pause disabled; no version-specific hooks installed");
         return 0;
     }
     if (!profile->abi || !kcd2::runtime::MatureRuntimeSupports(*profile->abi)) {
