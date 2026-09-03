@@ -3,13 +3,13 @@ KCD2 Clean Pause — ASI installation
 This package includes the retail-tested x64 Ultimate ASI Loader dinput8.dll from the official ThirteenAG release. See ASI_LOADER_SOURCE.txt for the pinned upstream version, source commit and SHA-256 provenance, and ULTIMATE_ASI_LOADER_LICENSE.txt for its MIT license.
 
 Runtime status:
-- This package is v0.3.0-rc.4, a GitHub release candidate for KCD2 1.5.6 multi-store compatibility.
-- Xbox / Microsoft Store 1.5.6 is the Clean Pause runtime-tested baseline.
-- Steam 1.5.6 release_1_5-15693 has an exact fail-closed build profile and is the primary in-game smoke-test target for this RC.
-- The first Steam test confirmed the correct profile/canonical gEnv and no crash. RC3 fixed the framework-identity bug found by comparison with working libKCD2/KCSE mods: Steam uses the canonical CCryAction IGameFramework singleton instead of treating IGame[16] as framework.
-- RC4 removes the remaining framework-startup timing dependency: the core PostInputEvent/Menu runtime loads independently, and the optional canonical PauseGame observer is acquired on a real Pause input and retried later if necessary.
+- The current published prerelease is v0.3.0-rc.4; source after that prerelease contains the accepted Steam 1.5.6 runtime fixes from PR #51.
+- Xbox / Microsoft Store 1.5.6 is the original Clean Pause runtime-tested baseline.
+- Steam 1.5.6 release_1_5-15693 is runtime-accepted on current source through its exact fail-closed build profile, canonical gEnv and CCryAction framework capability.
+- The recurring Steam pre-pause hitch was removed by taking the normal gameplay HUD snapshot from authoritative C_UIHudMask state instead of synchronously querying all 28 Flash clips on every pause press.
 - GOG and Epic Games Store 1.5.6 profiles are implemented from distribution-specific reverse-engineering/runtime evidence, but Clean Pause-specific smoke QA has not yet been completed by this project.
 - Unknown or mismatched game builds install no version-specific Clean Pause hooks.
+- Stable v0.3.0 / a new public native candidate is currently blocked by Defender / Smart App Control investigation #38.
 
 Fresh installation:
 1. Close Kingdom Come: Deliverance II.
@@ -27,15 +27,15 @@ Do not leave dinput8.dll in one directory and place KCD2CleanPause.asi beside WH
 
 Multiple ASI mods may share one compatible ASI loader, but loader location and plugin search paths are part of that loader's configuration. The bundled loader is provided for a complete fresh installation and does not imply universal coexistence with every native plugin.
 
-Steam smoke test for this RC:
+Runtime smoke test:
 1. Launch the game and load into gameplay.
 2. Press Escape and confirm Clean Pause keeps the gameplay frame/HUD/subtitles visible.
-3. Press Escape again and confirm the ordinary vanilla pause menu appears.
+3. Press Escape again and confirm the ordinary vanilla pause menu appears promptly.
 4. If using an Xbox controller, repeat with Start and verify B reveals the vanilla pause menu from Clean Pause.
 5. Resume normally and confirm gameplay continues.
-6. If anything fails, include kcd2_clean_pause_native.log with the report.
+6. Repeat several cycles. If anything fails, include kcd2_clean_pause_native.log with the report.
 
-On Steam, the log should show the core runtime becoming active before framework capability is needed. On the first real Pause input it should normally show the canonical CCryAction PauseGame observer becoming active. Failure of that optional observer alone does not disable the input/Menu fallback.
+On Steam, the log should show the exact profile/runtime becoming active and normally show the canonical CCryAction PauseGame observer becoming active on the first real Pause input. Failure of that optional observer alone does not disable the input/Menu fallback.
 
 Troubleshooting:
 When Clean Pause is successfully loaded, it writes kcd2_clean_pause_native.log beside KCD2CleanPause.asi.
@@ -44,15 +44,19 @@ If no log is created at all, first verify that your ASI loader is actually loadi
 
 If the game crashes while loading native mods:
 1. Keep the ASI loader in the location being tested.
-2. Temporarily remove KCD2CleanPause.asi and any other .asi plugins from that loader's search path.
-3. Start the game.
-4. If the game starts normally, add only KCD2CleanPause.asi and test again.
+2. Close KCD2 completely.
+3. Remove KCD2CleanPause.asi and any other .asi plugins from that loader's search path.
+4. Start the game.
+5. If the game starts normally, close KCD2 again, add only KCD2CleanPause.asi, and test again.
 
 If the game works with the loader alone but crashes after adding Clean Pause, report the KCD2 version, storefront/build (Steam, GOG, Epic Games Store, Xbox / Microsoft Store, or another build), locations of dinput8.dll and KCD2CleanPause.asi, and kcd2_clean_pause_native.log if one was created before the crash.
 
 The profiled runtime logs the detected PE fingerprint/storefront/build identity and refuses to install version-specific hooks when its required build or ABI gates do not validate.
 
 Do not install this ASI package together with the standalone Clean Pause version.dll package. They contain the same mod and would load it twice.
+
+Process lifetime:
+Clean Pause native hooks are process-lifetime state. Hot-unloading or hot-reloading KCD2CleanPause.asi while the game is running is not supported. Stop KCD2 before replacing, removing or moving the ASI file.
 
 Uninstall:
 Close KCD2 and remove KCD2CleanPause.asi and the optional kcd2_clean_pause_native.log. Remove dinput8.dll only if no other installed mod needs that ASI loader.
