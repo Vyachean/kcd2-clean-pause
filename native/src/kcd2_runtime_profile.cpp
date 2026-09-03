@@ -40,6 +40,10 @@ const std::array<BuildProfile, 4> kSupportedBuilds{{
         0,
         0,
         EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan,
+        FrameworkLocatorStrategy::LegacyGameFrameworkSlot,
+        0,
+        0,
+        {false, false, false},
         &Release15AbiProfile(),
         BuildValidationLevel::RuntimeTested,
     },
@@ -52,6 +56,10 @@ const std::array<BuildProfile, 4> kSupportedBuilds{{
         0,
         0x0492d7f8,
         EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation,
+        FrameworkLocatorStrategy::ExactSingletonRva,
+        0x0549d328,
+        0x040472d0,
+        {true, true, true},
         &Release15AbiProfile(),
         BuildValidationLevel::StaticReverseEngineering,
     },
@@ -64,6 +72,10 @@ const std::array<BuildProfile, 4> kSupportedBuilds{{
         0,
         0x049177f8,
         EnvironmentLocatorStrategy::ExactEnvironmentRva,
+        FrameworkLocatorStrategy::None,
+        0,
+        0,
+        {false, false, false},
         &Release15AbiProfile(),
         BuildValidationLevel::ExternalRuntimeEvidence,
     },
@@ -76,6 +88,10 @@ const std::array<BuildProfile, 4> kSupportedBuilds{{
         0x6a34f917,
         0x0491d8b8,
         EnvironmentLocatorStrategy::ExactEnvironmentRva,
+        FrameworkLocatorStrategy::None,
+        0,
+        0,
+        {false, false, false},
         &Release15AbiProfile(),
         BuildValidationLevel::ExternalRuntimeEvidence,
     },
@@ -551,6 +567,20 @@ const char* EnvironmentLocatorName(EnvironmentLocatorStrategy strategy)
         return "legacy-xbox-1.5.6-validated-scan";
     default:
         return "unknown-locator";
+    }
+}
+
+const char* FrameworkLocatorName(FrameworkLocatorStrategy strategy)
+{
+    switch (strategy) {
+    case FrameworkLocatorStrategy::None:
+        return "none";
+    case FrameworkLocatorStrategy::ExactSingletonRva:
+        return "exact-singleton-rva";
+    case FrameworkLocatorStrategy::LegacyGameFrameworkSlot:
+        return "legacy-game-framework-slot";
+    default:
+        return "unknown-framework-locator";
     }
 }
 

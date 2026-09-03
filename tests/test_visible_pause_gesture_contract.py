@@ -23,7 +23,7 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
             RUNTIME.index("bool InstallInputHook")
         ]
         preflight = wrapper.index("ForwardVisiblePauseGestureIfNeeded")
-        deferred_barrier = wrapper.index("ShouldTryDeferredSteamPauseBarrier")
+        deferred_barrier = wrapper.index("ShouldTryDeferredPauseBarrier")
         shared_core = wrapper.index("HookPostInputEventCore")
         self.assertLess(preflight, deferred_barrier)
         self.assertLess(preflight, shared_core)
@@ -53,7 +53,7 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
 
     def test_steam_root_visibility_filter_pins_only_owned_pause_presentation(self):
         helper = RUNTIME[
-            RUNTIME.index("bool ShouldSuppressSteamHudRootVisibility"):
+            RUNTIME.index("bool ShouldSuppressProfileHudRootVisibility"):
             RUNTIME.index("bool RestoreGameplayHudRootAtPauseBarrier")
         ]
         self.assertIn("Storefront::Steam", helper)
@@ -69,7 +69,7 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
             RUNTIME.index("bool PollRuntimeEnvironment")
         ]
         self.assertIn("bubbles::SetHudRootVisibilityFilter", install)
-        self.assertIn("&ShouldSuppressSteamHudRootVisibility", install)
+        self.assertIn("&ShouldSuppressProfileHudRootVisibility", install)
 
         stop = RUNTIME[RUNTIME.index("void Stop()"):]
         self.assertIn("bubbles::SetHudRootVisibilityFilter(nullptr)", stop)
@@ -77,7 +77,7 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
     def test_pause_barrier_defensively_restores_only_hud_root(self):
         helper = RUNTIME[
             RUNTIME.index("bool RestoreGameplayHudRootAtPauseBarrier"):
-            RUNTIME.index("bool ShouldPrehideSteamEntryRender")
+            RUNTIME.index("bool ShouldPrehideEntryRender")
         ]
         self.assertIn("g_gameplayHudSnapshot.captured", helper)
         self.assertIn("kUIElementSetVisibleSlot", helper)
@@ -101,20 +101,20 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
             RUNTIME.index("void __fastcall HookPauseGameProfiled"):
             RUNTIME.index("bool InstallPauseBarrierHook")
         ]
-        arm = hook.index("g_steamEntryRenderPrehide.store(true")
+        arm = hook.index("g_entryRenderPrehide.store(true")
         hide = hook.index("g_cleanHidden.store(true")
         original = hook.index("g_originalPauseGame(framework, pause, force, fadeOutInMs);")
         self.assertLess(arm, hide)
         self.assertLess(hide, original)
-        self.assertIn("ShouldPrehideSteamEntryRender", hook)
-        self.assertIn("RollBackSteamEntryRenderPrehide", hook)
+        self.assertIn("ShouldPrehideEntryRender", hook)
+        self.assertIn("RollBackEntryRenderPrehide", hook)
 
         wrapper = RUNTIME[
             RUNTIME.index("void __fastcall HookPostInputEventProfiled"):
             RUNTIME.index("bool InstallInputHook")
         ]
         shared_core = wrapper.index("HookPostInputEventCore")
-        settle = wrapper.index("g_steamEntryRenderPrehide.exchange(false")
+        settle = wrapper.index("g_entryRenderPrehide.exchange(false")
         self.assertLess(shared_core, settle)
         self.assertIn("g_cleanHiddenSinceMs.load", wrapper)
         self.assertIn("g_cleanHidden.store(false", wrapper)
@@ -129,10 +129,10 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
             "g_visiblePauseGesturePassthrough.store(false, std::memory_order_release)", start
         )
         self.assertIn(
-            "g_steamEntryRenderPrehide.store(false, std::memory_order_relaxed)", start
+            "g_entryRenderPrehide.store(false, std::memory_order_relaxed)", start
         )
         self.assertIn(
-            "g_steamEntryRenderPrehide.store(false, std::memory_order_release)", start
+            "g_entryRenderPrehide.store(false, std::memory_order_release)", start
         )
 
 

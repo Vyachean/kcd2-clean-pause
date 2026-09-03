@@ -289,7 +289,7 @@ for needle in (
         raise SystemExit(f"Xbox framework identity adapter contract missing: {needle}")
 
 steam_resolver = native[
-    native.index("bool ResolveSteamFrameworkSingleton"):
+    native.index("bool ResolveProfileFrameworkSingleton"):
     native.index("bool ResolveGameFramework")
 ]
 for needle in (
@@ -305,9 +305,9 @@ if "kGameGetFrameworkSlot" in steam_resolver:
 
 dispatcher = native[
     native.index("bool ResolveGameFramework"):
-    native.index("bool ShouldSuppressSteamHudRootVisibility")
+    native.index("bool ShouldSuppressProfileHudRootVisibility")
 ]
-if "ResolveSteamFrameworkSingleton" not in dispatcher:
+if "ResolveProfileFrameworkSingleton" not in dispatcher:
     raise SystemExit("framework dispatcher must route Steam through CCryAction singleton")
 if "LegacyResolveGameFramework_Xbox156Only" not in dispatcher:
     raise SystemExit("framework dispatcher must retain the isolated Xbox adapter")

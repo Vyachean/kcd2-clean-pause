@@ -28,7 +28,7 @@ class PauseBarrierContractTests(unittest.TestCase):
         self.assertIn("kGameFrameworkGetSystemSlot", xbox)
 
         steam = NATIVE[
-            NATIVE.index("bool ResolveSteamFrameworkSingleton"):
+            NATIVE.index("bool ResolveProfileFrameworkSingleton"):
             NATIVE.index("bool ResolveGameFramework")
         ]
         self.assertIn("frameworkSystem != environment.system", steam)

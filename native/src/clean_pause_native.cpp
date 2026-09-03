@@ -1397,14 +1397,18 @@ namespace {
 
 constexpr DWORD kProfileSlowPollMs = 1'000;
 constexpr ULONGLONG kProfileWaitHeartbeatMs = 30'000;
-constexpr std::size_t kSteam156FrameworkStorageRva = 0x0549D328;
-constexpr std::size_t kSteam156FrameworkVtableRva = 0x040472D0;
 
 HMODULE g_profileWhGame{};
 const kcd2::runtime::BuildProfile* g_activeBuildProfile{};
 std::atomic_bool g_visiblePauseGesturePassthrough{false};
 std::atomic_bool g_hudRootVisibilitySuppressionLogged{false};
-std::atomic_bool g_steamEntryRenderPrehide{false};
+std::atomic_bool g_entryRenderPrehide{false};
+
+const kcd2::runtime::RuntimeCapabilities& ActiveRuntimeCapabilities()
+{
+    static constexpr kcd2::runtime::RuntimeCapabilities kNone{};
+    return g_activeBuildProfile ? g_activeBuildProfile->capabilities : kNone;
+}
 
 // Exact-profile readiness deliberately validates only capabilities required for
 // installing the mature input/menu runtime. PauseGame observation is optional in
@@ -1488,18 +1492,21 @@ const char* ValidateProfileEnvironment(
     return nullptr;
 }
 
-bool ResolveSteamFrameworkSingleton(
+bool ResolveProfileFrameworkSingleton(
     const RuntimeEnvironment& environment,
     void*& framework)
 {
     framework = nullptr;
     if (!g_profileWhGame || !g_activeBuildProfile
-        || g_activeBuildProfile->storefront != kcd2::runtime::Storefront::Steam
+        || g_activeBuildProfile->frameworkLocator
+            != kcd2::runtime::FrameworkLocatorStrategy::ExactSingletonRva
+        || !g_activeBuildProfile->expectedFrameworkStorageRva
+        || !g_activeBuildProfile->expectedFrameworkVtableRva
         || !environment.system)
         return false;
 
     auto* imageBase = reinterpret_cast<std::uint8_t*>(g_profileWhGame);
-    auto* storage = imageBase + kSteam156FrameworkStorageRva;
+    auto* storage = imageBase + g_activeBuildProfile->expectedFrameworkStorageRva;
     if (!IsReadable(storage, sizeof(void*)))
         return false;
 
@@ -1517,7 +1524,8 @@ bool ResolveSteamFrameworkSingleton(
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         vtable = nullptr;
     }
-    if (vtable != reinterpret_cast<void**>(imageBase + kSteam156FrameworkVtableRva))
+    if (vtable != reinterpret_cast<void**>(
+            imageBase + g_activeBuildProfile->expectedFrameworkVtableRva))
         return false;
     if (!ValidateObjectVtable(framework, {
             kGameFrameworkPauseGameSlot,
@@ -1542,24 +1550,23 @@ bool ResolveSteamFrameworkSingleton(
 bool ResolveGameFramework(const RuntimeEnvironment& environment, void*& framework)
 {
     framework = nullptr;
-    if (g_activeBuildProfile) {
-        if (g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam)
-            return ResolveSteamFrameworkSingleton(environment, framework);
+    if (!g_activeBuildProfile)
+        return false;
 
-        // GOG/Epic exact environments are valid for the input/menu fallback, but no
-        // canonical framework singleton storage has yet been registered for them.
-        // Do not reinterpret IGame[16] as IGameFramework on these binaries.
-        if (g_activeBuildProfile->storefront != kcd2::runtime::Storefront::XboxMicrosoftStore)
-            return false;
+    switch (g_activeBuildProfile->frameworkLocator) {
+    case kcd2::runtime::FrameworkLocatorStrategy::ExactSingletonRva:
+        return ResolveProfileFrameworkSingleton(environment, framework);
+    case kcd2::runtime::FrameworkLocatorStrategy::LegacyGameFrameworkSlot:
+        return LegacyResolveGameFramework_Xbox156Only(environment, framework);
+    case kcd2::runtime::FrameworkLocatorStrategy::None:
+    default:
+        return false;
     }
-
-    return LegacyResolveGameFramework_Xbox156Only(environment, framework);
 }
 
-bool ShouldSuppressSteamHudRootVisibility(bool visible)
+bool ShouldSuppressProfileHudRootVisibility(bool visible)
 {
-    if (!g_activeBuildProfile
-        || g_activeBuildProfile->storefront != kcd2::runtime::Storefront::Steam
+    if (!ActiveRuntimeCapabilities().pinHudRootDuringPause
         || g_hudMaskPinSuspended.load(std::memory_order_acquire)
         || !g_gameplayHudSnapshot.captured)
         return false;
@@ -1570,7 +1577,7 @@ bool ShouldSuppressSteamHudRootVisibility(bool visible)
         return false;
 
     if (!g_hudRootVisibilitySuppressionLogged.exchange(true, std::memory_order_acq_rel))
-        Log("Steam pause transition suppressed hud@0 root visibility change; preserved gameplay root=%s",
+        Log("profile pause transition suppressed hud@0 root visibility change; preserved gameplay root=%s",
             g_gameplayHudSnapshot.rootVisible ? "visible" : "hidden");
     return true;
 }
@@ -1605,23 +1612,22 @@ bool RestoreGameplayHudRootAtPauseBarrier()
     return true;
 }
 
-bool ShouldPrehideSteamEntryRender()
+bool ShouldPrehideEntryRender()
 {
-    return g_activeBuildProfile
-        && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam
+    return ActiveRuntimeCapabilities().prehideMenuDuringPauseTransition
         && g_menuElement
         && g_renderTarget
         && g_gameplayHudSnapshot.captured;
 }
 
-void RollBackSteamEntryRenderPrehide(const char* reason)
+void RollBackEntryRenderPrehide(const char* reason)
 {
-    if (!g_steamEntryRenderPrehide.exchange(false, std::memory_order_acq_rel))
+    if (!g_entryRenderPrehide.exchange(false, std::memory_order_acq_rel))
         return;
     g_cleanHidden.store(false, std::memory_order_release);
     g_renderSuppressionObserved.store(false, std::memory_order_release);
     g_cleanHiddenSinceMs.store(0, std::memory_order_release);
-    Log("Steam Clean Pause entry render prehide rolled back (%s)",
+    Log("profile Clean Pause entry render prehide rolled back (%s)",
         reason ? reason : "handoff not accepted");
 }
 
@@ -1646,18 +1652,18 @@ void __fastcall HookPauseGameProfiled(
         // state is provisional: the PostInputEvent wrapper commits it only if
         // TryEnterCleanPause publishes a real ownership timestamp, otherwise it is
         // rolled back immediately and the ordinary vanilla pause menu remains usable.
-        if (ShouldPrehideSteamEntryRender()) {
+        if (ShouldPrehideEntryRender()) {
             g_cleanHiddenSinceMs.store(0, std::memory_order_release);
             g_renderSuppressionObserved.store(false, std::memory_order_release);
-            g_steamEntryRenderPrehide.store(true, std::memory_order_release);
+            g_entryRenderPrehide.store(true, std::memory_order_release);
             g_cleanHidden.store(true, std::memory_order_release);
-            Log("Steam Clean Pause entry render prehide armed before PauseGame(true)");
+            Log("profile Clean Pause entry render prehide armed before PauseGame(true)");
         }
     }
 
     if (!g_originalPauseGame) {
         if (observe) {
-            RollBackSteamEntryRenderPrehide("PauseGame trampoline unavailable");
+            RollBackEntryRenderPrehide("PauseGame trampoline unavailable");
             g_pauseTransitionActive.store(false, std::memory_order_release);
         }
         return;
@@ -1666,7 +1672,7 @@ void __fastcall HookPauseGameProfiled(
 
     if (!observe || !g_pendingPauseAttempt.load(std::memory_order_acquire)) {
         if (observe) {
-            RollBackSteamEntryRenderPrehide("pending pause correlation ended inside PauseGame");
+            RollBackEntryRenderPrehide("pending pause correlation ended inside PauseGame");
             g_pauseTransitionActive.store(false, std::memory_order_release);
         }
         return;
@@ -1732,10 +1738,10 @@ bool InstallPauseBarrierHook(
     return true;
 }
 
-bool TryInstallDeferredSteamPauseBarrier()
+bool TryInstallDeferredPauseBarrier()
 {
     if (g_pauseGameTarget || !g_activeBuildProfile || !g_environment
-        || g_activeBuildProfile->storefront != kcd2::runtime::Storefront::Steam)
+        || !ActiveRuntimeCapabilities().deferPauseBarrierUntilPauseInput)
         return g_pauseGameTarget != nullptr;
 
     RuntimeEnvironment environment{};
@@ -1751,15 +1757,16 @@ bool TryInstallDeferredSteamPauseBarrier()
 
     const bool installed = InstallPauseBarrierHook(environment, false);
     if (installed)
-        Log("deferred Steam IGameFramework pause barrier became ready on pause input");
+        Log("deferred IGameFramework pause barrier became ready on pause input; profile=%s",
+            g_activeBuildProfile ? g_activeBuildProfile->name : "<unknown>");
     return installed;
 }
 
-bool ShouldTryDeferredSteamPauseBarrier(const InputEvent* event)
+bool ShouldTryDeferredPauseBarrier(const InputEvent* event)
 {
     if (!event || g_forwardDepth != 0 || g_pauseGameTarget
         || !g_activeBuildProfile
-        || g_activeBuildProfile->storefront != kcd2::runtime::Storefront::Steam
+        || !ActiveRuntimeCapabilities().deferPauseBarrierUntilPauseInput
         || (g_mainThreadId && GetCurrentThreadId() != g_mainThreadId))
         return false;
 
@@ -1821,36 +1828,36 @@ bool ForwardVisiblePauseGestureIfNeeded(void* input, const InputEvent* event, bo
 void __fastcall HookPostInputEventProfiled(void* input, const InputEvent* event, bool force)
 {
     // A visible vanilla pause menu owns Escape/Start completely. Detect that state
-    // before Steam barrier acquisition and before the shared core can capture HUD
+    // before deferred barrier acquisition and before the shared core can capture HUD
     // presentation. Keep forwarding repeats until the matching physical release.
     if (ForwardVisiblePauseGestureIfNeeded(input, event, force))
         return;
 
     // The mature runtime already installs its Menu/HUD/Mask/Bubbles hooks from this
     // same first-Pause call stack, and pinned MinHook serializes its public API.
-    // Acquire the optional Steam CCryAction barrier here as well: by real user input
+    // Acquire the optional deferred framework barrier here as well: by real user input
     // the game lifecycle is mature, and avoiding a parallel bootstrap attempt removes
     // a create/enable race against the input thread. Failure stays fail-open and is
     // retried on the next physical Pause press.
-    if (ShouldTryDeferredSteamPauseBarrier(event))
-        TryInstallDeferredSteamPauseBarrier();
+    if (ShouldTryDeferredPauseBarrier(event))
+        TryInstallDeferredPauseBarrier();
 
     HookPostInputEventCore(input, event, force);
 
     // g_cleanHidden is deliberately reused as the already-proven Menu@0 render gate
-    // during the short provisional Steam handoff. A successful TryEnterCleanPause sets
+    // during the short provisional profile handoff. A successful TryEnterCleanPause sets
     // the ownership timestamp before returning. If that did not happen, clear the
     // provisional gate immediately so fail-open vanilla rendering is never stranded.
-    if (g_steamEntryRenderPrehide.exchange(false, std::memory_order_acq_rel)) {
+    if (g_entryRenderPrehide.exchange(false, std::memory_order_acq_rel)) {
         const bool accepted = g_cleanHidden.load(std::memory_order_acquire)
             && g_cleanHiddenSinceMs.load(std::memory_order_acquire) != 0;
         if (!accepted) {
             g_cleanHidden.store(false, std::memory_order_release);
             g_renderSuppressionObserved.store(false, std::memory_order_release);
             g_cleanHiddenSinceMs.store(0, std::memory_order_release);
-            Log("Steam Clean Pause entry render prehide rolled back after input handoff");
+            Log("profile Clean Pause entry render prehide rolled back after input handoff");
         } else {
-            Log("Steam Clean Pause entry render prehide committed to Clean Pause ownership");
+            Log("profile Clean Pause entry render prehide committed to Clean Pause ownership");
         }
     }
 }
@@ -1865,12 +1872,11 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
     blur::Initialize(environment.scriptSystem, environment.mainThreadId);
 
     // bubbles::EnsureHooks lazily installs the one shared CFlashUIElement::SetVisible
-    // detour on the first Pause input. Register the Steam-only hud@0 root filter now,
-    // before that lazy installation can occur. Xbox/GOG/Epic behavior stays unchanged.
+    // detour on the first Pause input. Presentation quirks are profile capabilities,
+    // so the shared core never branches on storefront identity.
     bubbles::SetHudRootVisibilityFilter(
-        g_activeBuildProfile
-            && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam
-        ? &ShouldSuppressSteamHudRootVisibility
+        ActiveRuntimeCapabilities().pinHudRootDuringPause
+        ? &ShouldSuppressProfileHudRootVisibility
         : nullptr);
 
     g_postInputEventTarget = reinterpret_cast<void*>(
@@ -1918,12 +1924,12 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
         g_postInputEventTarget);
 
     if (g_activeBuildProfile
-        && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam) {
-        Log("Steam PauseGame observer will be acquired lazily on the first Pause input; Menu/input runtime is already active");
+        && ActiveRuntimeCapabilities().deferPauseBarrierUntilPauseInput) {
+        Log("%s PauseGame observer will be acquired lazily on the first Pause input; Menu/input runtime is already active",
+            g_activeBuildProfile->name);
     } else if (g_activeBuildProfile
-        && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::XboxMicrosoftStore) {
-        // Preserve the already runtime-tested Xbox behavior. Unlike Steam, there is
-        // no second installation path racing this bootstrap attempt.
+        && g_activeBuildProfile->frameworkLocator
+            != kcd2::runtime::FrameworkLocatorStrategy::None) {
         InstallPauseBarrierHook(environment, true);
     }
     return true;
@@ -2044,12 +2050,16 @@ DWORD WINAPI BootstrapThread(void*)
     g_activeBuildProfile = profile;
 
     Log(
-        "WHGame profile candidate: %s; storefront=%s identity=%s abi=%s locator=%s evidence=%s",
+        "WHGame profile candidate: %s; storefront=%s identity=%s abi=%s envLocator=%s frameworkLocator=%s capabilities=defer:%s,rootPin:%s,menuPrehide:%s evidence=%s",
         profile->name,
         kcd2::runtime::StorefrontName(profile->storefront),
         kcd2::runtime::BuildIdentityStrategyName(profile->identityStrategy),
         profile->abi->name,
         kcd2::runtime::EnvironmentLocatorName(profile->environmentLocator),
+        kcd2::runtime::FrameworkLocatorName(profile->frameworkLocator),
+        profile->capabilities.deferPauseBarrierUntilPauseInput ? "yes" : "no",
+        profile->capabilities.pinHudRootDuringPause ? "yes" : "no",
+        profile->capabilities.prehideMenuDuringPauseTransition ? "yes" : "no",
         kcd2::runtime::BuildValidationName(profile->validation));
 
     std::uint8_t* fixedEnvironmentBase{};
@@ -2145,7 +2155,7 @@ bool Start(HMODULE selfModule)
     g_stopping.store(false, std::memory_order_relaxed);
     g_visiblePauseGesturePassthrough.store(false, std::memory_order_relaxed);
     g_hudRootVisibilitySuppressionLogged.store(false, std::memory_order_relaxed);
-    g_steamEntryRenderPrehide.store(false, std::memory_order_relaxed);
+    g_entryRenderPrehide.store(false, std::memory_order_relaxed);
 
     HANDLE thread = CreateThread(nullptr, 0, BootstrapThread, nullptr, 0, nullptr);
     if (!thread)
@@ -2158,7 +2168,7 @@ void Stop()
 {
     g_stopping.store(true, std::memory_order_release);
     g_visiblePauseGesturePassthrough.store(false, std::memory_order_release);
-    g_steamEntryRenderPrehide.store(false, std::memory_order_release);
+    g_entryRenderPrehide.store(false, std::memory_order_release);
     bubbles::SetHudRootVisibilityFilter(nullptr);
 }
 
