@@ -45,6 +45,9 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
         )
         self.assertIn("visible vanilla pause menu", helper)
 
+        # A held Escape/Start may emit repeated Pressed events after the first one has
+        # already closed Menu@0. The latch must forward those repeats instead of
+        # letting them fall through and become fresh Clean Pause entry attempts.
         latched = helper[
             helper.index("if (g_visiblePauseGesturePassthrough.load"):
             helper.index("if (!pressed)")
