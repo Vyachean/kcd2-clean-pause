@@ -288,32 +288,34 @@ for needle in (
     "frameworkSystem != environment.system",
 ):
     if needle not in profile_framework_resolver:
-        raise SystemExit(f"profile singleton framework identity contract missing: {needle}")
+        raise SystemExit(f"profile framework identity contract missing: {needle}")
 if "Storefront::Steam" in profile_framework_resolver:
-    raise SystemExit("profile singleton framework resolver must not branch on storefront")
+    raise SystemExit("profile framework resolver must not branch on storefront")
 if "kGameGetFrameworkSlot" in profile_framework_resolver:
     raise SystemExit("profile framework resolver must not use legacy IGame[16]")
+
+for needle in (
+    "FrameworkLocatorStrategy::ExactPointerStorageRva",
+    "FrameworkLocatorStrategy::ExactObjectRva",
+    "FrameworkLocatorStrategy::None",
+):
+    if needle not in profile_framework_resolver:
+        raise SystemExit(f"framework locator strategy contract missing: {needle}")
 
 dispatcher = native[
     native.index("bool ResolveGameFramework"):
     native.index("bool ShouldSuppressProfileHudRootVisibility")
 ]
-for needle in (
-    "FrameworkLocatorStrategy::ExactPointerStorageRva",
-    "FrameworkLocatorStrategy::ExactObjectRva",
-    "FrameworkLocatorStrategy::None",
-    "ResolveProfileFramework",
-):
-    if needle not in dispatcher:
-        raise SystemExit(f"framework strategy dispatcher contract missing: {needle}")
+if "return ResolveProfileFramework(environment, framework);" not in dispatcher:
+    raise SystemExit("framework dispatcher must delegate to the unified profile resolver")
 for storefront in (
     "Storefront::Steam",
     "Storefront::XboxMicrosoftStore",
     "Storefront::GOG",
     "Storefront::EpicGamesStore",
 ):
-    if storefront in dispatcher:
-        raise SystemExit(f"framework dispatcher must not branch on storefront: {storefront}")
+    if storefront in profile_framework_resolver or storefront in dispatcher:
+        raise SystemExit(f"framework resolution must not branch on storefront: {storefront}")
 
 post = native[native.index("void __fastcall HookPostInputEvent"):native.index("bool ResolveGameFramework")]
 barrier_exchange = post.index("g_pauseBarrierObserved.exchange(false")
