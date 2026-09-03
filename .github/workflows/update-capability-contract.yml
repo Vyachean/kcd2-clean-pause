@@ -1,0 +1,32 @@
+name: Update Capability Contract
+
+on:
+  push:
+    branches:
+      - refactor/unified-runtime-capabilities
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: ${{ !contains(github.event.head_commit.message, '[capability-contract]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Update stable native contract
+        run: python tools/update_capability_contract.py
+      - name: Commit contract update
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No contract changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/validate_native_contract.py
+          git commit -m "test: validate capability-driven framework dispatch [capability-contract]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
