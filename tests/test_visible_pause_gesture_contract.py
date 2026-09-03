@@ -77,7 +77,7 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
     def test_pause_barrier_defensively_restores_only_hud_root(self):
         helper = PROFILED[
             PROFILED.index("bool RestoreGameplayHudRootAtPauseBarrier"):
-            PROFILED.index("void __fastcall HookPauseGameProfiled")
+            PROFILED.index("bool ShouldPrehideSteamEntryRender")
         ]
         self.assertIn("g_gameplayHudSnapshot.captured", helper)
         self.assertIn("kUIElementSetVisibleSlot", helper)
@@ -96,6 +96,30 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
         self.assertLess(original, root_restore)
         self.assertLess(root_restore, barrier)
 
+    def test_steam_entry_render_prehide_covers_pause_and_slow_handoff(self):
+        hook = PROFILED[
+            PROFILED.index("void __fastcall HookPauseGameProfiled"):
+            PROFILED.index("bool InstallPauseBarrierHook")
+        ]
+        arm = hook.index("g_steamEntryRenderPrehide.store(true")
+        hide = hook.index("g_cleanHidden.store(true")
+        original = hook.index("g_originalPauseGame(framework, pause, force, fadeOutInMs);")
+        self.assertLess(arm, hide)
+        self.assertLess(hide, original)
+        self.assertIn("ShouldPrehideSteamEntryRender", hook)
+        self.assertIn("RollBackSteamEntryRenderPrehide", hook)
+
+        wrapper = PROFILED[
+            PROFILED.index("void __fastcall HookPostInputEventProfiled"):
+            PROFILED.index("bool InstallInputHook")
+        ]
+        legacy = wrapper.index("LegacyHookPostInputEventProfiledCore")
+        settle = wrapper.index("g_steamEntryRenderPrehide.exchange(false")
+        self.assertLess(legacy, settle)
+        self.assertIn("g_cleanHiddenSinceMs.load", wrapper)
+        self.assertIn("g_cleanHidden.store(false", wrapper)
+        self.assertIn("entry render prehide committed", wrapper)
+
     def test_nearby_pausegame_false_is_logged_for_transition_diagnosis(self):
         hook = PROFILED[
             PROFILED.index("void __fastcall HookPauseGameProfiled"):
@@ -112,6 +136,12 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
         )
         self.assertIn(
             "g_visiblePauseGesturePassthrough.store(false, std::memory_order_release)", start
+        )
+        self.assertIn(
+            "g_steamEntryRenderPrehide.store(false, std::memory_order_relaxed)", start
+        )
+        self.assertIn(
+            "g_steamEntryRenderPrehide.store(false, std::memory_order_release)", start
         )
 
 
