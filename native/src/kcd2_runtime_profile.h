@@ -27,11 +27,13 @@ enum class Storefront {
 enum class BuildIdentityStrategy {
     ExactPeFingerprint,
     StorefrontBuildCode,
+    CompatibleReleaseBranch,
 };
 
 enum class EnvironmentLocatorStrategy {
     ExactEnvironmentRva,
     ExactEnvironmentRvaWithAnchorValidation,
+    AnchorDerivedEnvironment,
 };
 
 enum class FrameworkLocatorStrategy {
@@ -44,6 +46,7 @@ enum class BuildValidationLevel {
     RuntimeTested,
     StaticReverseEngineering,
     ExternalRuntimeEvidence,
+    CompatibilityFallback,
 };
 
 struct RuntimeCapabilities {
@@ -98,6 +101,15 @@ bool ReadBuildCode(HMODULE whGame, std::string& out);
 bool ReadBuildIdentity(HMODULE whGame, DetectedBuildIdentity& out);
 const BuildProfile* MatchSupportedBuild(const DetectedBuildIdentity& identity);
 
+// Build a best-effort profile only for an otherwise-unmatched release_1_5 build.
+// The fallback deliberately has no version-specific framework root or presentation
+// quirks. It derives gEnv from a unique code anchor and is still subject to the
+// mature runtime's full live interface/main-thread/game-name validation before any
+// hook is installed. Unknown release branches remain unsupported.
+bool BuildCompatibleRelease15Fallback(
+    const DetectedBuildIdentity& identity,
+    BuildProfile& out);
+
 const StorefrontDescriptor* KnownStorefronts(std::size_t& count);
 const StorefrontDescriptor* FindStorefront(Storefront storefront);
 const char* StorefrontName(Storefront storefront);
@@ -106,8 +118,11 @@ const char* EnvironmentLocatorName(EnvironmentLocatorStrategy strategy);
 const char* FrameworkLocatorName(FrameworkLocatorStrategy strategy);
 const char* BuildValidationName(BuildValidationLevel validation);
 
-// Resolves immutable build-level environment identity once. The caller may then
-// poll object readiness at the returned address without rescanning WHGame.dll.
+// Resolves immutable build-level environment identity once. Exact profiles use
+// their registered RVA; the conservative release_1_5 fallback derives gEnv from a
+// unique executable reference to the canonical pConsole storage instead of broad
+// writable-memory scanning. The caller may then poll object readiness at the
+// returned address without rescanning WHGame.dll.
 bool ResolveProfileEnvironmentBase(
     HMODULE whGame,
     const BuildProfile& profile,
