@@ -1,0 +1,32 @@
+name: Remove Legacy IGame Framework ABI
+
+on:
+  push:
+    branches:
+      - refactor/unified-runtime-capabilities
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: ${{ !contains(github.event.head_commit.message, '[remove-igame16-abi]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Remove legacy IGame framework ABI
+        run: python tools/remove_legacy_igame_framework_abi.py
+      - name: Commit ABI cleanup
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No ABI cleanup changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add native/src/kcd2_abi.h native/src/kcd2_abi_profile.h native/src/kcd2_abi_profile.cpp tests/test_pause_barrier_contract.py tools/validate_native_contract.py
+          git commit -m "refactor: remove legacy IGame[16] framework ABI [remove-igame16-abi]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
