@@ -19,25 +19,18 @@ class PauseBarrierContractTests(unittest.TestCase):
             self.assertIn(needle, ABI)
 
     def test_framework_identity_is_not_shape_only(self):
-        xbox = NATIVE[
-            NATIVE.index("bool LegacyResolveGameFramework_Xbox156Only"):
-            NATIVE.index("} // namespace\n\n} // namespace clean_pause")
+        resolver = NATIVE[
+            NATIVE.index("bool ResolveProfileFramework"):
+            NATIVE.index("bool ShouldSuppressProfileHudRootVisibility")
         ]
-        self.assertIn("frameworkSystem == environment.system", xbox)
-        self.assertIn("kGameGetFrameworkSlot", xbox)
-        self.assertIn("kGameFrameworkGetSystemSlot", xbox)
-
-        profile_singleton = NATIVE[
-            NATIVE.index("bool ResolveProfileFrameworkSingleton"):
-            NATIVE.index("bool ResolveGameFramework")
-        ]
-        self.assertIn("FrameworkLocatorStrategy::ExactSingletonRva", profile_singleton)
-        self.assertIn("expectedFrameworkStorageRva", profile_singleton)
-        self.assertIn("expectedFrameworkVtableRva", profile_singleton)
-        self.assertIn("frameworkSystem != environment.system", profile_singleton)
-        self.assertIn("kGameFrameworkGetSystemSlot", profile_singleton)
-        self.assertNotIn("Storefront::Steam", profile_singleton)
-        self.assertNotIn("kGameGetFrameworkSlot", profile_singleton)
+        self.assertIn("FrameworkLocatorStrategy::ExactPointerStorageRva", resolver)
+        self.assertIn("FrameworkLocatorStrategy::ExactObjectRva", resolver)
+        self.assertIn("expectedFrameworkRva", resolver)
+        self.assertIn("expectedFrameworkVtableRva", resolver)
+        self.assertIn("frameworkSystem != environment.system", resolver)
+        self.assertIn("kGameFrameworkGetSystemSlot", resolver)
+        self.assertNotIn("kGameGetFrameworkSlot", resolver)
+        self.assertNotIn("LegacyResolveGameFramework_Xbox156Only", resolver)
 
     def test_pause_hook_keeps_exact_vanilla_ownership_and_scopes_pinning_to_pause_call(self):
         hook = NATIVE[NATIVE.index("void __fastcall HookPauseGame"):NATIVE.index("bool InstallPauseBarrierHook")]

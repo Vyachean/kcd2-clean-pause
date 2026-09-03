@@ -44,7 +44,7 @@ All supported release_1_5 profiles converge on the same mature input/HUD/Menu/su
 
 ### Xbox / Microsoft Store 1.5.6
 
-The runtime-tested Xbox path keeps its captured legacy environment scan and the separately proven `IGame[16] -> IGameFramework` lookup. That slot-16 interpretation is scoped to this Xbox adapter and is not a universal release_1_5 assumption.
+Runtime capture on the exact Xbox PE fingerprint established canonical ASLR-independent roots: `gEnv` at RVA `0x049D6EF8` and the static `IGameFramework` object at RVA `0x056EC680`, with vtable RVA `0x040DAF18`. Xbox therefore uses the same exact-profile model as the other builds and no longer scans writable memory or calls the historical `IGame[16]` adapter at runtime.
 
 ### Steam 1.5.6 `release_1_5-15693`
 

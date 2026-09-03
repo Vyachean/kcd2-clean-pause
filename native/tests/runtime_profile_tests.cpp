@@ -291,8 +291,8 @@ bool TestSteamExactFingerprintAndEnvironmentValidation()
     CHECK(steam->environmentLocator
         == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation);
     CHECK(steam->frameworkLocator
-        == kcd2::runtime::FrameworkLocatorStrategy::ExactSingletonRva);
-    CHECK(steam->expectedFrameworkStorageRva == 0x0549d328);
+        == kcd2::runtime::FrameworkLocatorStrategy::ExactPointerStorageRva);
+    CHECK(steam->expectedFrameworkRva == 0x0549d328);
     CHECK(steam->expectedFrameworkVtableRva == 0x040472d0);
     CHECK(steam->capabilities.deferPauseBarrierUntilPauseInput);
     CHECK(steam->capabilities.pinHudRootDuringPause);
@@ -392,9 +392,12 @@ bool TestUnknownAndMismatchedBuildsFailClosed()
     CHECK(xboxProfile->storefront == kcd2::runtime::Storefront::XboxMicrosoftStore);
     CHECK(xboxProfile->identityStrategy == kcd2::runtime::BuildIdentityStrategy::ExactPeFingerprint);
     CHECK(xboxProfile->environmentLocator
-        == kcd2::runtime::EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan);
+        == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva);
+    CHECK(xboxProfile->expectedEnvironmentRva == 0x049d6ef8);
     CHECK(xboxProfile->frameworkLocator
-        == kcd2::runtime::FrameworkLocatorStrategy::LegacyGameFrameworkSlot);
+        == kcd2::runtime::FrameworkLocatorStrategy::ExactObjectRva);
+    CHECK(xboxProfile->expectedFrameworkRva == 0x056ec680);
+    CHECK(xboxProfile->expectedFrameworkVtableRva == 0x040daf18);
     CHECK(!xboxProfile->capabilities.deferPauseBarrierUntilPauseInput);
     CHECK(!xboxProfile->capabilities.pinHudRootDuringPause);
     CHECK(!xboxProfile->capabilities.prehideMenuDuringPauseTransition);

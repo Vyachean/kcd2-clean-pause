@@ -32,13 +32,12 @@ enum class BuildIdentityStrategy {
 enum class EnvironmentLocatorStrategy {
     ExactEnvironmentRva,
     ExactEnvironmentRvaWithAnchorValidation,
-    LegacyXbox156ValidatedScan,
 };
 
 enum class FrameworkLocatorStrategy {
     None,
-    ExactSingletonRva,
-    LegacyGameFrameworkSlot,
+    ExactPointerStorageRva,
+    ExactObjectRva,
 };
 
 enum class BuildValidationLevel {
@@ -83,7 +82,7 @@ struct BuildProfile {
     EnvironmentLocatorStrategy environmentLocator{};
 
     FrameworkLocatorStrategy frameworkLocator{};
-    std::uint32_t expectedFrameworkStorageRva{};
+    std::uint32_t expectedFrameworkRva{};
     std::uint32_t expectedFrameworkVtableRva{};
 
     RuntimeCapabilities capabilities{};

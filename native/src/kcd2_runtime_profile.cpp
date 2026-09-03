@@ -38,11 +38,11 @@ const std::array<BuildProfile, 4> kSupportedBuilds{{
         {0x6a391f7b, 0x05bf2000, 0x00000000},
         nullptr,
         0,
-        0,
-        EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan,
-        FrameworkLocatorStrategy::LegacyGameFrameworkSlot,
-        0,
-        0,
+        0x049d6ef8,
+        EnvironmentLocatorStrategy::ExactEnvironmentRva,
+        FrameworkLocatorStrategy::ExactObjectRva,
+        0x056ec680,
+        0x040daf18,
         {false, false, false},
         &Release15AbiProfile(),
         BuildValidationLevel::RuntimeTested,
@@ -56,7 +56,7 @@ const std::array<BuildProfile, 4> kSupportedBuilds{{
         0,
         0x0492d7f8,
         EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation,
-        FrameworkLocatorStrategy::ExactSingletonRva,
+        FrameworkLocatorStrategy::ExactPointerStorageRva,
         0x0549d328,
         0x040472d0,
         {true, true, true},
@@ -563,8 +563,6 @@ const char* EnvironmentLocatorName(EnvironmentLocatorStrategy strategy)
         return "exact-environment-rva";
     case EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation:
         return "exact-environment-rva+anchor-validation";
-    case EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan:
-        return "legacy-xbox-1.5.6-validated-scan";
     default:
         return "unknown-locator";
     }
@@ -575,10 +573,10 @@ const char* FrameworkLocatorName(FrameworkLocatorStrategy strategy)
     switch (strategy) {
     case FrameworkLocatorStrategy::None:
         return "none";
-    case FrameworkLocatorStrategy::ExactSingletonRva:
-        return "exact-singleton-rva";
-    case FrameworkLocatorStrategy::LegacyGameFrameworkSlot:
-        return "legacy-game-framework-slot";
+    case FrameworkLocatorStrategy::ExactPointerStorageRva:
+        return "exact-pointer-storage-rva";
+    case FrameworkLocatorStrategy::ExactObjectRva:
+        return "exact-object-rva";
     default:
         return "unknown-framework-locator";
     }

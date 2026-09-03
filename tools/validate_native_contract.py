@@ -276,46 +276,33 @@ if pause_hook.index("g_pauseTransitionActive.store(true") > pause_hook.index("g_
 if "g_pendingPauseAttempt.load" not in pause_hook or "framework == g_gameFramework" not in pause_hook:
     raise SystemExit("PauseGame observer must be scoped to target framework + pending physical pause")
 
-xbox_resolver = native[
-    native.index("bool LegacyResolveGameFramework_Xbox156Only"):
-    native.index("} // namespace\n\n} // namespace clean_pause")
-]
-for needle in (
-    "kGameGetFrameworkSlot",
-    "kGameFrameworkGetSystemSlot",
-    "frameworkSystem == environment.system",
-):
-    if needle not in xbox_resolver:
-        raise SystemExit(f"Xbox framework identity adapter contract missing: {needle}")
-
-profile_singleton_resolver = native[
-    native.index("bool ResolveProfileFrameworkSingleton"):
+profile_framework_resolver = native[
+    native.index("bool ResolveProfileFramework"):
     native.index("bool ResolveGameFramework")
 ]
 for needle in (
-    "FrameworkLocatorStrategy::ExactSingletonRva",
-    "expectedFrameworkStorageRva",
+    "FrameworkLocatorStrategy::ExactPointerStorageRva",
+    "expectedFrameworkRva",
     "expectedFrameworkVtableRva",
     "kGameFrameworkGetSystemSlot",
     "frameworkSystem != environment.system",
 ):
-    if needle not in profile_singleton_resolver:
+    if needle not in profile_framework_resolver:
         raise SystemExit(f"profile singleton framework identity contract missing: {needle}")
-if "Storefront::Steam" in profile_singleton_resolver:
+if "Storefront::Steam" in profile_framework_resolver:
     raise SystemExit("profile singleton framework resolver must not branch on storefront")
-if "kGameGetFrameworkSlot" in profile_singleton_resolver:
-    raise SystemExit("profile singleton framework resolver must not fall back to legacy IGame[16]")
+if "kGameGetFrameworkSlot" in profile_framework_resolver:
+    raise SystemExit("profile framework resolver must not use legacy IGame[16]")
 
 dispatcher = native[
     native.index("bool ResolveGameFramework"):
     native.index("bool ShouldSuppressProfileHudRootVisibility")
 ]
 for needle in (
-    "FrameworkLocatorStrategy::ExactSingletonRva",
-    "FrameworkLocatorStrategy::LegacyGameFrameworkSlot",
+    "FrameworkLocatorStrategy::ExactPointerStorageRva",
+    "FrameworkLocatorStrategy::ExactObjectRva",
     "FrameworkLocatorStrategy::None",
-    "ResolveProfileFrameworkSingleton",
-    "LegacyResolveGameFramework_Xbox156Only",
+    "ResolveProfileFramework",
 ):
     if needle not in dispatcher:
         raise SystemExit(f"framework strategy dispatcher contract missing: {needle}")
