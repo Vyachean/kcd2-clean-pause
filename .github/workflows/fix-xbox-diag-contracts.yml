@@ -1,0 +1,32 @@
+name: Fix Xbox Diagnostic Contracts
+
+on:
+  push:
+    branches:
+      - diag/xbox-canonical-runtime-roots
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, '[xbox-diag-contracts]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Update diagnostic contracts
+        run: python tools/fix_xbox_diag_contracts.py
+      - name: Commit contract fix
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No contract changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_pause_barrier_contract.py tools/validate_native_contract.py
+          git commit -m "test: validate Xbox diagnostics after identity proof [xbox-diag-contracts]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
