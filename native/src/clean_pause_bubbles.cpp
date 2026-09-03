@@ -356,12 +356,17 @@ void SetHudRootVisibilityFilter(HudRootVisibilityFilterFn filter)
 bool EnsureHooks(void* hudElement, void* flashUI)
 {
     void* menu = ResolveMenu(flashUI);
-    if (!menu || !EnsureSharedVisibilityHook(hudElement, menu))
+    if (!menu)
+        return false;
+
+    // Capture cache identity before the shared visibility hook republishes the current
+    // hud/menu objects. Otherwise a recreated HUD would incorrectly appear cached.
+    const bool cached = g_hudElementObject.load(std::memory_order_acquire) == hudElement
+        && g_menuElement == menu;
+    if (!EnsureSharedVisibilityHook(hudElement, menu))
         return false;
 
     void* bubbleInterface{};
-    const bool cached = g_hudElementObject.load(std::memory_order_acquire) == hudElement
-        && g_menuElement == menu;
     if (cached)
         bubbleInterface = g_bubbleInterfaceObject.load(std::memory_order_acquire);
     if (!bubbleInterface)
