@@ -35,10 +35,27 @@ enum class EnvironmentLocatorStrategy {
     LegacyXbox156ValidatedScan,
 };
 
+enum class FrameworkLocatorStrategy {
+    None,
+    ExactSingletonRva,
+    LegacyGameFrameworkSlot,
+};
+
 enum class BuildValidationLevel {
     RuntimeTested,
     StaticReverseEngineering,
     ExternalRuntimeEvidence,
+};
+
+struct RuntimeCapabilities {
+    // Some builds expose the optional PauseGame observer safely only after a real
+    // Pause input, when the engine lifecycle is fully mature.
+    bool deferPauseBarrierUntilPauseInput{};
+
+    // Presentation quirks are evidence-driven build capabilities, not storefront
+    // identity checks inside the shared Clean Pause state machine.
+    bool pinHudRootDuringPause{};
+    bool prehideMenuDuringPauseTransition{};
 };
 
 struct StorefrontDescriptor {
@@ -61,8 +78,15 @@ struct BuildProfile {
     Fingerprint exactFingerprint{};
     const char* buildCode{};
     std::uint32_t requiredTimestamp{};
+
     std::uint32_t expectedEnvironmentRva{};
     EnvironmentLocatorStrategy environmentLocator{};
+
+    FrameworkLocatorStrategy frameworkLocator{};
+    std::uint32_t expectedFrameworkStorageRva{};
+    std::uint32_t expectedFrameworkVtableRva{};
+
+    RuntimeCapabilities capabilities{};
     const AbiProfile* abi{};
     BuildValidationLevel validation{};
 };
@@ -80,6 +104,7 @@ const StorefrontDescriptor* FindStorefront(Storefront storefront);
 const char* StorefrontName(Storefront storefront);
 const char* BuildIdentityStrategyName(BuildIdentityStrategy strategy);
 const char* EnvironmentLocatorName(EnvironmentLocatorStrategy strategy);
+const char* FrameworkLocatorName(FrameworkLocatorStrategy strategy);
 const char* BuildValidationName(BuildValidationLevel validation);
 
 // Resolves immutable build-level environment identity once. The caller may then
