@@ -4,26 +4,25 @@ Clean Pause for **Kingdom Come: Deliverance II** on Windows.
 
 The current stable release, **v0.2.2**, was runtime-tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbox controller.
 
-The current GitHub prerelease, **v0.3.0-rc.4**, adds fail-closed KCD2 1.5.6 compatibility profiles for **Steam, GOG, Epic Games Store, and Xbox / Microsoft Store**. Steam is the primary in-game smoke-test target; GOG/Epic profiles are backed by distribution-specific reverse-engineering/runtime evidence but are not yet claimed as Clean Pause runtime-tested by this project.
+The current published GitHub prerelease, **v0.3.0-rc.4**, introduced fail-closed KCD2 1.5.6 compatibility profiles for **Steam, GOG, Epic Games Store, and Xbox / Microsoft Store**. The source on `main` contains the later Steam acceptance fixes from PR #51; those changes have not been promoted to a new public native release because Defender / Smart App Control investigation #38 is still a release blocker.
 
-The first Steam test confirmed the exact Steam fingerprint/profile and canonical `gEnv` and eliminated the previous crash. Comparison with working libKCD2/KCSE mods then identified the framework bug: Steam `IGame[16]` is not the real `IGameFramework`. RC3 corrected framework identity using the documented Steam `CCryAction` singleton. RC4 hardens the remaining lifecycle edge by acquiring that optional PauseGame observer lazily on a real Pause input instead of depending on one bootstrap-time attempt.
+Steam 1.5.6 `release_1_5-15693` is now runtime-accepted on the current source. The accepted path uses the exact Steam build fingerprint, canonical `gEnv`, the real `CCryAction` `IGameFramework` singleton, visible-menu gesture passthrough, and authoritative `C_UIHudMask` state for the fast gameplay HUD snapshot. GOG/Epic profiles are backed by distribution-specific reverse-engineering/runtime evidence but are not yet claimed as Clean Pause runtime-tested by this project.
 
 ## Release status
 
 - **Current stable release:** v0.2.2.
-- **Current GitHub prerelease:** v0.3.0-rc.4 — lifecycle-hardened Steam acceptance candidate.
+- **Current published GitHub prerelease:** v0.3.0-rc.4.
+- **Current source runtime acceptance:** Xbox / Microsoft Store 1.5.6 baseline plus Steam 1.5.6 `release_1_5-15693` acceptance on `main`.
+- **GOG / Epic Games Store:** compatibility profiles implemented; Clean Pause-specific smoke QA still pending.
 - **Published edition:** KCD2CleanPause.asi, using the upstream Ultimate ASI Loader.
-- The ASI package includes the pinned official x64 Ultimate ASI Loader for a complete fresh installation.
-- **Stable runtime acceptance:** Xbox / Microsoft Store KCD2 1.5.6.
-- **RC compatibility candidates:** Steam, GOG and Epic Games Store KCD2 1.5.6.
-- **Standalone version.dll:** new standalone publication remains withheld while Defender investigation #38 is unresolved. The last published standalone package is v0.2.0.
-
-If the Steam v0.3.0-rc.4 smoke test confirms the accepted Clean Pause behavior, the accepted runtime will be promoted through a separate immutable stable v0.3.0 release and then used for the Nexus Mods update.
+- **Standalone version.dll:** built and validated, but new publication remains withheld.
+- **Stable v0.3.0:** blocked by Defender / Smart App Control issue #38. The final `main` ASI is also detected by current ML/heuristic scanners, so the accepted runtime is not being promoted until that investigation is resolved.
 
 Use the GitHub Releases page as the source of truth for versions and assets that are actually published.
 
 ## Behavior
 
+```text
 Running
   Escape / Xbox Start -> Clean Pause
 
@@ -33,6 +32,7 @@ Clean Pause
 
 Vanilla pause menu
   normal KCD2 controls -> resume / settings / save / quit
+```
 
 Clean Pause uses KCD2's own pause lifecycle. The vanilla pause menu remains logically open, but its render surface is suppressed while the gameplay presentation is retained. The mod does not manufacture a second pause state.
 
@@ -40,16 +40,19 @@ Clean Pause keeps the retained frame sharp by removing the vanilla pause depth-o
 
 ### Known behavior
 
-Xbox **B does not resume directly from Clean Pause**. It reveals the ordinary KCD2 pause menu; use the normal menu controls to resume.
+- Xbox **B does not resume directly from Clean Pause**. It reveals the ordinary KCD2 pause menu; use the normal menu controls to resume.
+- The current Steam acceptance build can still show a single residual visual frame when the retained gameplay HUD becomes visible after the game is already paused. This is non-blocking and tracked in #52.
 
 ## Editions
 
-Both native targets compile the same runtime and remain mutually exclusive installations.
+Both native targets compile the same Clean Pause runtime and remain mutually exclusive installations.
 
 - **ASI edition — public distribution:** KCD2CleanPause.asi, packaged with the pinned official x64 Ultimate ASI Loader dinput8.dll for fresh installation.
-- **Standalone edition — built and validated, but new builds are not distributed:** version.dll; public distribution remains blocked by Defender investigation #38.
+- **Standalone edition — built and validated, but new builds are not distributed:** version.dll; public distribution remains blocked by #38.
 
 Do **not** intentionally install both Clean Pause editions at the same time. A process-wide guard prevents duplicate hooks if both are accidentally loaded, but dual installation is unsupported.
+
+Native hooks are **process-lifetime state**. Hot unload/reload of KCD2CleanPause.asi or version.dll is not supported; close KCD2 before replacing or removing the native module.
 
 See [Dual native packages](docs/DUAL_PACKAGE.md) for the package contract.
 
@@ -75,19 +78,20 @@ Multiple ASI plugins may share one compatible loader, but loader location and pl
 
 The package also contains ASI_LOADER_SOURCE.txt and ULTIMATE_ASI_LOADER_LICENSE.txt documenting the exact upstream loader release, provenance, hashes, and MIT license.
 
-## v0.3.0-rc.4 Steam smoke test
+## Runtime acceptance
 
-For the Steam KCD2 1.5.6 build targeted by this RC:
+For a candidate built from current source, the core smoke contract is:
 
-1. install the RC ASI package using the included INSTALL.txt;
-2. launch the game and load into gameplay;
-3. press Escape and confirm Clean Pause keeps the current gameplay frame, HUD and subtitles visible;
-4. press Escape again and confirm the ordinary vanilla pause menu appears;
-5. if using an Xbox controller, repeat with Start and verify B reveals the vanilla pause menu from Clean Pause;
-6. resume normally and confirm gameplay continues;
-7. if anything fails, attach kcd2_clean_pause_native.log.
+1. launch the game and load into gameplay;
+2. press Escape / Start and confirm Clean Pause retains the gameplay frame, HUD and applicable subtitles;
+3. press Escape / Start again and confirm the ordinary vanilla pause menu appears immediately;
+4. on controller, B from Clean Pause reveals the same vanilla pause menu;
+5. resume normally and confirm gameplay continues;
+6. repeat several cycles and include kcd2_clean_pause_native.log with any unexpected result.
 
-RC4 keeps the real Steam framework on the documented `CCryAction` singleton path but no longer depends on it being ready during bootstrap. The core `PostInputEvent`/Menu runtime becomes active independently; on the first real Pause press the optional PauseGame observer is acquired before vanilla handles that input. If it is still unavailable, Clean Pause continues through the existing fallback and retries later.
+Steam acceptance on `main` confirmed the exact Steam 1.5.6 profile and canonical `gEnv`, corrected the old `IGame[16]` framework assumption, and validated the canonical `CCryAction` PauseGame observer. The recurring pre-pause hitch was removed by taking the gameplay snapshot from authoritative `C_UIHudMask` state rather than synchronously walking 28 Flash clips on every pause press.
+
+The Xbox / Microsoft Store path keeps its independently runtime-tested legacy environment/framework adapter. The shared Clean Pause core is common, but the storefront-specific discovery adapters are intentionally not assumed to be identical. A current-source Xbox regression smoke remains appropriate before the next public native release because shared HUD/presentation code has changed since the original stable acceptance.
 
 ## Troubleshooting
 
@@ -115,13 +119,15 @@ The profiled runtime log records the PE fingerprint, detected storefront/build m
 
 The project still builds and validates the standalone proxy, but new standalone builds are not published while #38 is unresolved. Do not obtain or whitelist an unofficial standalone build to work around that release gate.
 
-The immutable v0.2.0 release still contains the older retail-proven standalone package, but it does not contain the later pause-transition fix.
+The immutable v0.2.0 release still contains the older retail-proven standalone package, but it does not contain the later pause-transition fixes.
 
 Both native editions write kcd2_clean_pause_native.log beside their own module.
 
 ## Uninstall
 
 Close KCD2 and remove KCD2CleanPause.asi plus the optional kcd2_clean_pause_native.log. Remove dinput8.dll only if no other installed ASI mod needs that loader.
+
+Do not hot-unload the native module from a running game. Clean Pause deliberately keeps its MinHook detours and runtime identities for the lifetime of the KCD2 process.
 
 ## Architecture
 
@@ -130,17 +136,21 @@ The production architecture deliberately keeps KCD2 as the sole pause owner:
 - the physical Escape/Start event is forwarded to KCD2;
 - a validated IGameFramework::PauseGame(true, ...) hook can observe the real vanilla pause transition but never synthesizes a pause and forwards the original arguments unchanged;
 - the PauseGame observer is an optional capability: failure to resolve it does not block the PostInputEvent/Menu fallback;
-- Steam 1.5.6 resolves IGameFramework from the documented CCryAction singleton instead of interpreting IGame[16] as framework, and acquires the optional observer lazily on validated Pause input so bootstrap timing cannot permanently disable it;
+- the shared Clean Pause state/presentation core is used by all supported profiles;
+- storefront, build identity, ABI, environment discovery and optional engine capabilities are modeled separately;
+- Steam 1.5.6 resolves IGameFramework from the documented CCryAction singleton instead of interpreting IGame[16] as framework, and acquires the optional observer lazily on validated Pause input;
+- Xbox / Microsoft Store 1.5.6 keeps its separately proven legacy environment/framework adapter instead of exporting that assumption to other storefronts;
+- known distribution-specific canonical gEnv/framework RVAs are used only behind the matching exact build profile and strong live identity checks;
 - pending Start/release correlation alone performs no HUD replay;
 - HUD/subtitle preservation is armed only for the real vanilla pause transition when the barrier is available, with Menu visibility providing the compatibility fallback;
 - Menu@0 remains logically visible while only its Render() is suppressed during Clean Pause;
-- authoritative C_UIHudMask visibility is retained for safe vanilla-menu handoff/fail-open;
+- authoritative C_UIHudMask visibility is retained for safe vanilla-menu handoff/fail-open and for the fast gameplay snapshot;
 - exact root HUD visibility, dialogue subtitles, NPC overhead subtitles and DoF state are preserved;
-- supported native builds are selected by explicit build profiles, with storefront, build identity, ABI and environment discovery modeled separately;
-- known distribution-specific canonical gEnv RVAs may be used only behind the matching build profile and strong live object identity checks;
 - unknown or mismatched builds install no version-specific Clean Pause hooks.
 
 No action-map replacement, replacement overlay, long-lived movieclip pointer, destructive borrowed-handle release, synthetic B-resume replay, or unguarded cross-store binary assumption is used.
+
+The current production source still has one known maintainability debt: `clean_pause_native_profiled.cpp` textually includes the mature core translation unit behind macro-renamed bootstrap symbols. That compatibility wrapper is tracked in #45 and should be removed in a behavior-preserving refactor only after the current runtime line is frozen and regression-smoked.
 
 See [Runtime compatibility](docs/RUNTIME_COMPATIBILITY.md) and [Design](docs/DESIGN.md) for the complete production architecture.
 
