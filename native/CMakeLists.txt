@@ -98,13 +98,9 @@ set_target_properties(kcd2_clean_pause_version PROPERTIES OUTPUT_NAME "version")
 
 # Shared-loader package. An ASI file is a normal Windows DLL loaded by an ASI
 # loader; it uses the exact same Clean Pause runtime and only replaces the
-# version.dll proxy bootstrap with a minimal DllMain entry point. The temporary
-# Steam pause-state observer is ASI-only so production runtime behavior remains
-# unchanged while acceptance diagnostics measure IGameFramework::IsGamePaused.
+# version.dll proxy bootstrap with a minimal DllMain entry point.
 add_library(kcd2_clean_pause_asi SHARED
   src/asi_entry.cpp
-  src/steam_pause_state_probe.cpp
-  src/steam_pause_state_probe.h
   ${CLEAN_PAUSE_RUNTIME_SOURCES}
 )
 configure_clean_pause_target(kcd2_clean_pause_asi)
