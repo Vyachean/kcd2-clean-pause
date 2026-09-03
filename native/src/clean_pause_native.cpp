@@ -1903,6 +1903,17 @@ DWORD WINAPI BootstrapThread(void*)
         identity.buildCode.empty() ? "<unavailable>" : identity.buildCode.c_str());
 
     const auto* profile = kcd2::runtime::MatchSupportedBuild(identity);
+    // Diagnostic-only proof for the currently captured Xbox / Microsoft Store
+    // 1.5.6 binary. Force the production compatibility fallback instead of the
+    // exact profile so the anchor-derived gEnv resolver is exercised on retail.
+    const bool forceXboxCompatibilityFallback =
+        identity.fingerprint.timestamp == 0x6a391f7b
+        && identity.fingerprint.imageSize == 0x05bf2000
+        && identity.fingerprint.checksum == 0;
+    if (forceXboxCompatibilityFallback) {
+        Log("DIAGNOSTIC: forcing release_1_5 compatibility fallback for exact Xbox 1.5.6 fingerprint");
+        profile = nullptr;
+    }
     bool compatibilityFallback{};
     if (!profile) {
         if (!kcd2::runtime::BuildCompatibleRelease15Fallback(
