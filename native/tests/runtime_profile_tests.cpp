@@ -405,6 +405,53 @@ bool TestUnknownAndMismatchedBuildsFailClosed()
     return true;
 }
 
+bool TestRelease15CompatibilityFallback()
+{
+    kcd2::runtime::DetectedBuildIdentity identity{};
+    identity.fingerprint = {0x77777777, 0x6000, 0};
+    identity.storefront = kcd2::runtime::Storefront::Steam;
+    identity.buildCode = "release_1_5-99999";
+
+    CHECK(kcd2::runtime::MatchSupportedBuild(identity) == nullptr);
+
+    kcd2::runtime::BuildProfile fallback{};
+    CHECK(kcd2::runtime::BuildCompatibleRelease15Fallback(identity, fallback));
+    CHECK(fallback.identityStrategy
+        == kcd2::runtime::BuildIdentityStrategy::CompatibleReleaseBranch);
+    CHECK(fallback.environmentLocator
+        == kcd2::runtime::EnvironmentLocatorStrategy::AnchorDerivedEnvironment);
+    CHECK(fallback.expectedEnvironmentRva == 0);
+    CHECK(fallback.frameworkLocator == kcd2::runtime::FrameworkLocatorStrategy::None);
+    CHECK(fallback.expectedFrameworkRva == 0);
+    CHECK(fallback.expectedFrameworkVtableRva == 0);
+    CHECK(!fallback.capabilities.deferPauseBarrierUntilPauseInput);
+    CHECK(!fallback.capabilities.pinHudRootDuringPause);
+    CHECK(!fallback.capabilities.prehideMenuDuringPauseTransition);
+    CHECK(fallback.abi == &kcd2::runtime::Release15AbiProfile());
+    CHECK(fallback.validation == kcd2::runtime::BuildValidationLevel::CompatibilityFallback);
+
+    SyntheticWhGame image;
+    CHECK(image.valid());
+    std::uint8_t* environment{};
+    CHECK(kcd2::runtime::ResolveProfileEnvironmentBase(
+        image.module(), fallback, environment));
+    CHECK(environment == image.environment());
+
+    image.AddAmbiguousConsoleReference();
+    environment = reinterpret_cast<std::uint8_t*>(1);
+    CHECK(!kcd2::runtime::ResolveProfileEnvironmentBase(
+        image.module(), fallback, environment));
+    CHECK(environment == nullptr);
+
+    identity.buildCode = "release_1_6-10000";
+    CHECK(!kcd2::runtime::BuildCompatibleRelease15Fallback(identity, fallback));
+    identity.buildCode = "release_1_5-";
+    CHECK(!kcd2::runtime::BuildCompatibleRelease15Fallback(identity, fallback));
+    identity.buildCode.clear();
+    CHECK(!kcd2::runtime::BuildCompatibleRelease15Fallback(identity, fallback));
+    return true;
+}
+
 bool TestAmbiguousAnchorFailsClosedForSteam()
 {
     SyntheticWhGame image;
@@ -444,8 +491,10 @@ int main()
         return 6;
     if (!TestUnknownAndMismatchedBuildsFailClosed())
         return 7;
-    if (!TestAmbiguousAnchorFailsClosedForSteam())
+    if (!TestRelease15CompatibilityFallback())
         return 8;
+    if (!TestAmbiguousAnchorFailsClosedForSteam())
+        return 9;
 
     std::puts("runtime profile tests passed");
     return 0;

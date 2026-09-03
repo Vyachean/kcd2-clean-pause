@@ -339,6 +339,19 @@ bool BuildCodeMatches(const BuildProfile& profile, const DetectedBuildIdentity& 
         || identity.fingerprint.timestamp == profile.requiredTimestamp;
 }
 
+bool IsCompatibleRelease15BuildCode(const std::string& buildCode)
+{
+    static constexpr char kPrefix[] = "release_1_5-";
+    constexpr std::size_t kPrefixLength = sizeof(kPrefix) - 1;
+    if (buildCode.size() <= kPrefixLength
+        || buildCode.compare(0, kPrefixLength, kPrefix) != 0)
+        return false;
+    return std::all_of(
+        buildCode.begin() + static_cast<std::ptrdiff_t>(kPrefixLength),
+        buildCode.end(),
+        [](char value) { return value >= '0' && value <= '9'; });
+}
+
 std::vector<std::uint8_t*> FindLeaXrefs(const ImageView& image, const std::uint8_t* target)
 {
     std::vector<std::uint8_t*> matches;
@@ -516,11 +529,41 @@ const BuildProfile* MatchSupportedBuild(const DetectedBuildIdentity& identity)
             if (BuildCodeMatches(profile, identity))
                 return &profile;
             break;
+        case BuildIdentityStrategy::CompatibleReleaseBranch:
         default:
             break;
         }
     }
     return nullptr;
+}
+
+bool BuildCompatibleRelease15Fallback(
+    const DetectedBuildIdentity& identity,
+    BuildProfile& out)
+{
+    out = {};
+    if (!IsCompatibleRelease15BuildCode(identity.buildCode))
+        return false;
+
+    const AbiProfile* abi = &Release15AbiProfile();
+    if (const auto* storefront = FindStorefront(identity.storefront)) {
+        if (!storefront->release15Abi)
+            return false;
+        abi = storefront->release15Abi;
+    }
+    if (!abi || !MatureRuntimeSupports(*abi))
+        return false;
+
+    out.storefront = identity.storefront;
+    out.name = "release_1_5 compatibility fallback";
+    out.identityStrategy = BuildIdentityStrategy::CompatibleReleaseBranch;
+    out.buildCode = "release_1_5-*";
+    out.environmentLocator = EnvironmentLocatorStrategy::AnchorDerivedEnvironment;
+    out.frameworkLocator = FrameworkLocatorStrategy::None;
+    out.capabilities = {};
+    out.abi = abi;
+    out.validation = BuildValidationLevel::CompatibilityFallback;
+    return true;
 }
 
 const StorefrontDescriptor* KnownStorefronts(std::size_t& count)
@@ -551,6 +594,8 @@ const char* BuildIdentityStrategyName(BuildIdentityStrategy strategy)
         return "exact-pe-fingerprint";
     case BuildIdentityStrategy::StorefrontBuildCode:
         return "storefront-build-code";
+    case BuildIdentityStrategy::CompatibleReleaseBranch:
+        return "compatible-release-branch";
     default:
         return "unknown-build-identity";
     }
@@ -563,6 +608,8 @@ const char* EnvironmentLocatorName(EnvironmentLocatorStrategy strategy)
         return "exact-environment-rva";
     case EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation:
         return "exact-environment-rva+anchor-validation";
+    case EnvironmentLocatorStrategy::AnchorDerivedEnvironment:
+        return "anchor-derived-environment";
     default:
         return "unknown-locator";
     }
@@ -591,6 +638,8 @@ const char* BuildValidationName(BuildValidationLevel validation)
         return "static-reverse-engineering";
     case BuildValidationLevel::ExternalRuntimeEvidence:
         return "external-runtime-evidence";
+    case BuildValidationLevel::CompatibilityFallback:
+        return "compatibility-fallback";
     default:
         return "unknown-validation";
     }
@@ -602,11 +651,7 @@ bool ResolveProfileEnvironmentBase(
     std::uint8_t*& environmentBase)
 {
     environmentBase = nullptr;
-    if (!profile.abi || !profile.expectedEnvironmentRva)
-        return false;
-    if (profile.environmentLocator != EnvironmentLocatorStrategy::ExactEnvironmentRva
-        && profile.environmentLocator
-            != EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation)
+    if (!profile.abi)
         return false;
 
     ImageView image{};
@@ -624,12 +669,35 @@ bool ResolveProfileEnvironmentBase(
         return false;
 
     const auto environmentSize = profile.abi->environment.size;
-    const auto imageSize = static_cast<std::size_t>(image.nt->OptionalHeader.SizeOfImage);
-    const auto environmentRva = static_cast<std::size_t>(profile.expectedEnvironmentRva);
-    if (environmentRva >= imageSize || environmentSize > imageSize - environmentRva)
+    const auto consoleOffset = profile.abi->environment.consoleOffset;
+    if (environmentSize == 0 || consoleOffset > environmentSize - sizeof(void*))
         return false;
 
-    auto* candidate = image.base + environmentRva;
+    std::uint8_t* candidate{};
+    std::uint8_t* anchorConsoleStorage{};
+    if (profile.environmentLocator == EnvironmentLocatorStrategy::AnchorDerivedEnvironment) {
+        if (!ResolveUniqueConsoleStorage(image, anchorConsoleStorage))
+            return false;
+        const auto anchorAddress = reinterpret_cast<std::uintptr_t>(anchorConsoleStorage);
+        const auto imageBegin = reinterpret_cast<std::uintptr_t>(image.base);
+        if (anchorAddress < imageBegin + consoleOffset)
+            return false;
+        candidate = anchorConsoleStorage - consoleOffset;
+    } else {
+        if (profile.environmentLocator != EnvironmentLocatorStrategy::ExactEnvironmentRva
+            && profile.environmentLocator
+                != EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation)
+            return false;
+        if (!profile.expectedEnvironmentRva)
+            return false;
+
+        const auto imageSize = static_cast<std::size_t>(image.nt->OptionalHeader.SizeOfImage);
+        const auto environmentRva = static_cast<std::size_t>(profile.expectedEnvironmentRva);
+        if (environmentRva >= imageSize || environmentSize > imageSize - environmentRva)
+            return false;
+        candidate = image.base + environmentRva;
+    }
+
     if (!AddressInSection(
             image,
             candidate,
@@ -638,9 +706,6 @@ bool ResolveProfileEnvironmentBase(
         || !IsReadable(candidate, environmentSize))
         return false;
 
-    const auto consoleOffset = profile.abi->environment.consoleOffset;
-    if (consoleOffset > environmentSize - sizeof(void*))
-        return false;
     auto* expectedConsoleStorage = candidate + consoleOffset;
     if (!AddressInSection(
             image,
@@ -651,9 +716,12 @@ bool ResolveProfileEnvironmentBase(
 
     if (profile.environmentLocator
         == EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation) {
-        std::uint8_t* anchorConsoleStorage{};
         if (!ResolveUniqueConsoleStorage(image, anchorConsoleStorage)
             || anchorConsoleStorage != expectedConsoleStorage)
+            return false;
+    } else if (profile.environmentLocator
+        == EnvironmentLocatorStrategy::AnchorDerivedEnvironment) {
+        if (anchorConsoleStorage != expectedConsoleStorage)
             return false;
     }
 
