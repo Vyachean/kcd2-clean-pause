@@ -46,6 +46,7 @@ class SteamPauseStateProbeTests(unittest.TestCase):
         self.assertIn("kActiveSampleSleepMs = 1", PROBE)
         self.assertIn("ReadPausedStateDirect", PROBE)
         self.assertIn("g_originalIsGamePaused(g_framework)", PROBE)
+        self.assertIn("dedicated probe thread", PROBE)
         self.assertIn("active sample state=%s", PROBE)
         self.assertIn("samples=%u transitions=%u", PROBE)
         self.assertIn("avgIntervalMs=%.3f", PROBE)
