@@ -275,6 +275,10 @@ bool ReadPausedStateDirect(bool& paused)
     if (!g_framework || !g_originalIsGamePaused)
         return false;
 
+    // This is acceptance-only instrumentation. The retail game did not call the
+    // getter at all in the passive trace, so the diagnostic samples the verified
+    // accessor from its dedicated probe thread for one second after physical Escape.
+    // The call is read-only, SEH-guarded, and never used to drive Clean Pause state.
     __try {
         paused = g_originalIsGamePaused(g_framework);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
