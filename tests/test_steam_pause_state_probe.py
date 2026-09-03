@@ -39,6 +39,19 @@ class SteamPauseStateProbeTests(unittest.TestCase):
         self.assertIn("return paused;", hook)
         self.assertNotIn("PauseGameFn", hook)
 
+    def test_active_sampler_measures_physical_escape_window_without_game_input_mutation(self):
+        self.assertIn("GetAsyncKeyState(VK_ESCAPE)", PROBE)
+        self.assertIn("RunActiveEscapeSampleWindow", PROBE)
+        self.assertIn("kActiveSampleWindowMs = 1'000", PROBE)
+        self.assertIn("kActiveSampleSleepMs = 1", PROBE)
+        self.assertIn("ReadPausedStateDirect", PROBE)
+        self.assertIn("g_originalIsGamePaused(g_framework)", PROBE)
+        self.assertIn("active sample state=%s", PROBE)
+        self.assertIn("samples=%u transitions=%u", PROBE)
+        self.assertIn("avgIntervalMs=%.3f", PROBE)
+        self.assertNotIn("SendInput", PROBE)
+        self.assertNotIn("PostInputEvent", PROBE)
+
     def test_probe_does_not_compete_with_clean_pause_pausegame_hook(self):
         self.assertNotIn("kGameFrameworkPauseGameSlot", PROBE)
         self.assertNotIn("HookPauseGame", PROBE)
