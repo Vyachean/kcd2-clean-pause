@@ -83,6 +83,11 @@ inline constexpr std::size_t kGameGetNameSlot = 13;
 // IGameFramework. Their framework capability is resolved independently.
 inline constexpr std::size_t kGameGetFrameworkSlot = 16;
 inline constexpr std::size_t kGameFrameworkPauseGameSlot = 13;
+// Diagnostic surface for the exact Steam 1.5.6 profile. Canonical CryEngine
+// IGameFramework ordering places IsGamePaused immediately after PauseGame; the
+// surrounding KCD2 release_1_5 anchors are already verified at slots 13 and 19.
+// Runtime diagnostics must confirm this accessor before it becomes a required ABI gate.
+inline constexpr std::size_t kGameFrameworkIsGamePausedSlot = 14;
 inline constexpr std::size_t kGameFrameworkGetSystemSlot = 19;
 inline constexpr std::size_t kScriptExecuteBufferSlot = 6;
 inline constexpr std::size_t kScriptGetGlobalAnySlot = 32;
@@ -97,6 +102,7 @@ inline constexpr std::size_t kFlashVariableSetVisibleSlot = 33;
 using PostInputEventFn = void(__fastcall*)(void*, const InputEvent*, bool);
 using GetGameFrameworkFn = void*(__fastcall*)(void*);
 using PauseGameFn = void(__fastcall*)(void*, bool, bool, unsigned int);
+using IsGamePausedFn = bool(__fastcall*)(void*);
 using GameFrameworkGetSystemFn = void*(__fastcall*)(void*);
 using ExecuteBufferFn = bool(__fastcall*)(void*, const char*, std::size_t, const char*, void*);
 using GetUIElementByInstanceStrFn = void*(__fastcall*)(void*, const char*);
