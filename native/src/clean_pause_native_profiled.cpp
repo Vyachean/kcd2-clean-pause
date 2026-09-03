@@ -737,7 +737,7 @@ DWORD WINAPI BootstrapThread(void*)
 
     const auto* profile = kcd2::runtime::MatchSupportedBuild(identity);
     if (!profile) {
-        Log("unsupported WHGame build; Clean Pause disabled; no version-specific hooks installed");
+        Log("unsupported WHGame build; Clean Pause disabled; no hooks installed");
         return 0;
     }
     if (!profile->abi || !kcd2::runtime::MatureRuntimeSupports(*profile->abi)) {
