@@ -57,7 +57,8 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("RuntimeCapabilities capabilities", PROFILE_H)
         self.assertIn("const AbiProfile* abi", PROFILE_H)
         self.assertNotIn("StorefrontProfile", PROFILE_H)
-        self.assertIn("switch (profile.environmentLocator)", RUNTIME)
+        self.assertIn("ResolveProfileEnvironmentBase", RUNTIME)
+        self.assertNotIn("LegacyXbox156ValidatedScan", PROFILE_H)
         self.assertIn("MatureRuntimeSupports(*profile->abi)", RUNTIME)
 
     def test_gog_and_epic_use_independent_distribution_build_and_rva_evidence(self):
@@ -152,7 +153,7 @@ class RuntimeProfileContractTests(unittest.TestCase):
     def test_exact_profile_readiness_does_not_require_igame_slot16_framework(self):
         validate = RUNTIME[
             RUNTIME.index("const char* ValidateProfileEnvironment"):
-            RUNTIME.index("bool ResolveProfileFrameworkSingleton")
+            RUNTIME.index("bool ResolveProfileFramework")
         ]
         self.assertNotIn("kGameGetFrameworkSlot", validate)
         self.assertNotIn("kGameFrameworkPauseGameSlot", validate)

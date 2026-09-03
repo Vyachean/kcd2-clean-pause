@@ -244,52 +244,6 @@ struct RuntimeEnvironment {
     DWORD mainThreadId{};
 };
 
-bool ValidateEnvironmentCandidate(const std::uint8_t* candidate, RuntimeEnvironment& out)
-{
-    if (!IsReadable(candidate, kEnvSize))
-        return false;
-
-    RuntimeEnvironment value{};
-    __try {
-        value.base = const_cast<std::uint8_t*>(candidate);
-        value.scriptSystem = *reinterpret_cast<void* const*>(candidate + kEnvScriptSystemOffset);
-        value.input = *reinterpret_cast<void* const*>(candidate + kEnvInputOffset);
-        value.game = *reinterpret_cast<void* const*>(candidate + kEnvGameOffset);
-        value.system = *reinterpret_cast<void* const*>(candidate + kEnvSystemOffset);
-        value.flashUI = *reinterpret_cast<void* const*>(candidate + kEnvFlashUIOffset);
-        value.mainThreadId = *reinterpret_cast<const DWORD*>(candidate + kEnvMainThreadIdOffset);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-
-    if (!value.scriptSystem || !value.input || !value.game || !value.system
-        || !value.flashUI || value.mainThreadId == 0)
-        return false;
-    if (value.scriptSystem == value.input || value.input == value.game
-        || value.game == value.system || value.system == value.flashUI)
-        return false;
-
-    if (!ValidateObjectVtable(value.scriptSystem, {kScriptExecuteBufferSlot, kScriptGetGlobalAnySlot}))
-        return false;
-    if (!ValidateObjectVtable(value.input, {kInputPostInputEventSlot}))
-        return false;
-    if (!ValidateObjectVtable(value.game, {
-            kGameGetLongNameSlot, kGameGetNameSlot, kGameGetFrameworkSlot }))
-        return false;
-    if (!ValidateObjectVtable(value.system, {0}))
-        return false;
-    if (!ValidateObjectVtable(value.flashUI, {kFlashUIGetElementByInstanceStrSlot}))
-        return false;
-
-    HANDLE thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, value.mainThreadId);
-    if (!thread)
-        return false;
-    CloseHandle(thread);
-
-    out = value;
-    return true;
-}
-
 bool ResolveMenuElement(void*& menu)
 {
     menu = nullptr;
