@@ -53,11 +53,14 @@ class BubbleContractTests(unittest.TestCase):
         self.assertIn('bubbles == g_bubbleInterfaceObject.load', update)
         self.assertIn('bubbles == g_bubbleInterfaceObject.load', release)
         ensure = BUBBLES[BUBBLES.index('bool EnsureHooks'):]
-        self.assertLess(ensure.index('g_menuSetVisibleTarget'), ensure.index('g_bubbleInterfaceObject.store'))
+        self.assertLess(
+            ensure.index('EnsureSharedVisibilityHook(hudElement, menu)'),
+            ensure.index('g_bubbleInterfaceObject.store'),
+        )
 
     def test_menu_freeze_arms_before_vanilla_show_and_releases_after_hide(self):
         hook = BUBBLES[BUBBLES.index("void __fastcall HookMenuSetVisible"):]
-        hook = hook[: hook.index("} // namespace", 1)]
+        hook = hook[: hook.index("bool EnsureSharedVisibilityHook")]
         arm = 'g_pauseMenuVisible.store(true, std::memory_order_release);'
         forward = "g_originalMenuSetVisible(element, visible);"
         release = 'g_pauseMenuVisible.store(false, std::memory_order_release);'
