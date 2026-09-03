@@ -36,6 +36,7 @@ HMODULE g_profileWhGame{};
 const kcd2::runtime::BuildProfile* g_activeBuildProfile{};
 std::atomic_bool g_visiblePauseGesturePassthrough{false};
 std::atomic_bool g_hudRootVisibilitySuppressionLogged{false};
+std::atomic_bool g_steamEntryRenderPrehide{false};
 
 bool ThreadBelongsToCurrentProcess(DWORD threadId)
 {
@@ -315,6 +316,26 @@ bool RestoreGameplayHudRootAtPauseBarrier()
     return true;
 }
 
+bool ShouldPrehideSteamEntryRender()
+{
+    return g_activeBuildProfile
+        && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam
+        && g_menuElement
+        && g_renderTarget
+        && g_gameplayHudSnapshot.captured;
+}
+
+void RollBackSteamEntryRenderPrehide(const char* reason)
+{
+    if (!g_steamEntryRenderPrehide.exchange(false, std::memory_order_acq_rel))
+        return;
+    g_cleanHidden.store(false, std::memory_order_release);
+    g_renderSuppressionObserved.store(false, std::memory_order_release);
+    g_cleanHiddenSinceMs.store(0, std::memory_order_release);
+    Log("Steam Clean Pause entry render prehide rolled back (%s)",
+        reason ? reason : "handoff not accepted");
+}
+
 void __fastcall HookPauseGameProfiled(
     void* framework,
     bool pause,
@@ -327,12 +348,29 @@ void __fastcall HookPauseGameProfiled(
         && (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId);
     const ULONGLONG enteredAt = observe ? GetTickCount64() : 0;
 
-    if (observe)
+    if (observe) {
         g_pauseTransitionActive.store(true, std::memory_order_release);
 
+        // Menu@0 can render on a different engine/render path while the main thread
+        // spends hundreds of milliseconds restoring the complete gameplay HUD snapshot.
+        // Arm the existing render suppression before the verified vanilla PauseGame(true)
+        // call itself. This state is provisional: the PostInputEvent wrapper commits it
+        // only if TryEnterCleanPause publishes a real ownership timestamp, otherwise it
+        // is rolled back immediately and the ordinary vanilla pause menu remains usable.
+        if (ShouldPrehideSteamEntryRender()) {
+            g_cleanHiddenSinceMs.store(0, std::memory_order_release);
+            g_renderSuppressionObserved.store(false, std::memory_order_release);
+            g_steamEntryRenderPrehide.store(true, std::memory_order_release);
+            g_cleanHidden.store(true, std::memory_order_release);
+            Log("Steam Clean Pause entry render prehide armed before PauseGame(true)");
+        }
+    }
+
     if (!g_originalPauseGame) {
-        if (observe)
+        if (observe) {
+            RollBackSteamEntryRenderPrehide("PauseGame trampoline unavailable");
             g_pauseTransitionActive.store(false, std::memory_order_release);
+        }
         return;
     }
     g_originalPauseGame(framework, pause, force, fadeOutInMs);
@@ -346,8 +384,10 @@ void __fastcall HookPauseGameProfiled(
     }
 
     if (!observe || !g_pendingPauseAttempt.load(std::memory_order_acquire)) {
-        if (observe)
+        if (observe) {
+            RollBackSteamEntryRenderPrehide("pending pause correlation ended inside PauseGame");
             g_pauseTransitionActive.store(false, std::memory_order_release);
+        }
         return;
     }
 
@@ -515,6 +555,23 @@ void __fastcall HookPostInputEventProfiled(void* input, const InputEvent* event,
         TryInstallDeferredSteamPauseBarrier();
 
     LegacyHookPostInputEventProfiledCore(input, event, force);
+
+    // g_cleanHidden is deliberately reused as the already-proven Menu@0 render gate
+    // during the short provisional Steam handoff. A successful TryEnterCleanPause sets
+    // the ownership timestamp before returning. If that did not happen, clear the
+    // provisional gate immediately so fail-open vanilla rendering is never stranded.
+    if (g_steamEntryRenderPrehide.exchange(false, std::memory_order_acq_rel)) {
+        const bool accepted = g_cleanHidden.load(std::memory_order_acquire)
+            && g_cleanHiddenSinceMs.load(std::memory_order_acquire) != 0;
+        if (!accepted) {
+            g_cleanHidden.store(false, std::memory_order_release);
+            g_renderSuppressionObserved.store(false, std::memory_order_release);
+            g_cleanHiddenSinceMs.store(0, std::memory_order_release);
+            Log("Steam Clean Pause entry render prehide rolled back after input handoff");
+        } else {
+            Log("Steam Clean Pause entry render prehide committed to Clean Pause ownership");
+        }
+    }
 }
 
 bool InstallInputHook(const RuntimeEnvironment& environment)
@@ -802,6 +859,7 @@ bool Start(HMODULE selfModule)
     g_stopping.store(false, std::memory_order_relaxed);
     g_visiblePauseGesturePassthrough.store(false, std::memory_order_relaxed);
     g_hudRootVisibilitySuppressionLogged.store(false, std::memory_order_relaxed);
+    g_steamEntryRenderPrehide.store(false, std::memory_order_relaxed);
 
     HANDLE thread = CreateThread(nullptr, 0, BootstrapThread, nullptr, 0, nullptr);
     if (!thread)
@@ -814,6 +872,7 @@ void Stop()
 {
     g_stopping.store(true, std::memory_order_release);
     g_visiblePauseGesturePassthrough.store(false, std::memory_order_release);
+    g_steamEntryRenderPrehide.store(false, std::memory_order_release);
     bubbles::SetHudRootVisibilityFilter(nullptr);
 }
 
