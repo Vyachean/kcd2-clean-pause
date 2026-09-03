@@ -283,10 +283,16 @@ xbox_resolver = native[
 for needle in (
     "kGameGetFrameworkSlot",
     "kGameFrameworkGetSystemSlot",
-    "frameworkSystem == environment.system",
+    "frameworkSystem != environment.system",
 ):
     if needle not in xbox_resolver:
         raise SystemExit(f"Xbox framework identity adapter contract missing: {needle}")
+identity_gate = xbox_resolver.index("frameworkSystem != environment.system")
+if "return false;" not in xbox_resolver[identity_gate:]:
+    raise SystemExit("Xbox framework identity mismatch must fail closed")
+if "LogLegacyXboxFrameworkRootEvidence" in xbox_resolver:
+    if identity_gate > xbox_resolver.index("LogLegacyXboxFrameworkRootEvidence"):
+        raise SystemExit("Xbox diagnostic root logging must happen only after framework identity proof")
 
 profile_singleton_resolver = native[
     native.index("bool ResolveProfileFrameworkSingleton"):

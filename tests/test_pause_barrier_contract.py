@@ -23,7 +23,13 @@ class PauseBarrierContractTests(unittest.TestCase):
             NATIVE.index("bool LegacyResolveGameFramework_Xbox156Only"):
             NATIVE.index("} // namespace\n\n} // namespace clean_pause")
         ]
-        self.assertIn("frameworkSystem == environment.system", xbox)
+        self.assertIn("frameworkSystem != environment.system", xbox)
+        self.assertIn("return false;", xbox[xbox.index("frameworkSystem != environment.system"):])
+        self.assertIn("LogLegacyXboxFrameworkRootEvidence", xbox)
+        self.assertLess(
+            xbox.index("frameworkSystem != environment.system"),
+            xbox.index("LogLegacyXboxFrameworkRootEvidence"),
+        )
         self.assertIn("kGameGetFrameworkSlot", xbox)
         self.assertIn("kGameFrameworkGetSystemSlot", xbox)
 
