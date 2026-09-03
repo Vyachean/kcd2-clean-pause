@@ -34,6 +34,12 @@ class SharedVisibilityHookContractTests(unittest.TestCase):
         shared = ensure.index("EnsureSharedVisibilityHook(hudElement, menu)")
         self.assertLess(cached, shared)
 
+    def test_bubble_rtti_failure_does_not_remove_shared_visibility_observer(self):
+        ensure = BUBBLES[BUBBLES.index("bool EnsureHooks"):]
+        shared = ensure.index("EnsureSharedVisibilityHook(hudElement, menu)")
+        missing_bubbles = ensure.index("if (!bubbleInterface)\n        return false;")
+        self.assertLess(shared, missing_bubbles)
+
 
 if __name__ == "__main__":
     unittest.main()
