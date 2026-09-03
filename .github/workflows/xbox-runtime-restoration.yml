@@ -1,0 +1,34 @@
+name: Xbox Runtime Restoration
+
+on:
+  push:
+    branches:
+      - refactor/runtime-wrapper-removal
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    if: ${{ !contains(github.event.head_commit.message, '[xbox-runtime-restored]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore runtime-tested Xbox bootstrap boundary
+        run: python tools/restore_xbox_legacy_runtime.py
+
+      - name: Commit restoration when needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No restoration changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add native/src/clean_pause_native.cpp tests/test_runtime_profile_contract.py
+          git commit -m "fix: restore runtime-tested Xbox bootstrap boundary [xbox-runtime-restored]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
