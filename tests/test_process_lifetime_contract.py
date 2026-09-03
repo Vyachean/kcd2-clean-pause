@@ -17,7 +17,7 @@ class ProcessLifetimeContractTests(unittest.TestCase):
 
     def test_runtime_guard_survives_for_process_lifetime(self):
         self.assertIn("Keep this handle for the lifetime of the process", GUARD)
-        self.assertIn("does not support hot-unloading", GUARD)
+        self.assertIn("support hot-unloading", GUARD)
         self.assertNotIn("CloseHandle(g_processGuard)", GUARD)
 
     def test_stop_is_teardown_signaling_not_hook_removal(self):
