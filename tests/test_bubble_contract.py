@@ -3,6 +3,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 BUBBLES = (ROOT / "native/src/clean_pause_bubbles.cpp").read_text(encoding="utf-8")
+SUPPORT = (ROOT / "native/src/kcd2_runtime_support.h").read_text(encoding="utf-8")
 NATIVE = (ROOT / "native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
 CMAKE = (ROOT / "native/CMakeLists.txt").read_text(encoding="utf-8")
 
@@ -15,15 +16,17 @@ class BubbleContractTests(unittest.TestCase):
         runtime = CMAKE[runtime_start:runtime_end]
         self.assertIn("src/clean_pause_bubbles.cpp", runtime)
         self.assertIn("src/clean_pause_bubbles.h", runtime)
+        self.assertIn("src/kcd2_runtime_support.h", runtime)
 
     def test_discovers_hud_bubbles_from_listener_rtti_without_fixed_rva(self):
         self.assertIn("kHudListenersOffset = 0x1D0", BUBBLES)
         self.assertIn("kBubbleListenerOffset = 0x10", BUBBLES)
         self.assertIn("kBubbleInterfaceOffset = 0x58", BUBBLES)
         self.assertIn(".?AVC_UIHudBubbles@guimodule@wh@@", BUBBLES)
-        self.assertIn("CompleteObjectLocator64", BUBBLES)
-        self.assertIn("locator->selfRva", BUBBLES)
-        self.assertIn('GetModuleHandleW(L"WHGame.dll")', BUBBLES)
+        self.assertIn('using runtime_support::ResolveCompleteObjectByRtti;', BUBBLES)
+        self.assertIn("CompleteObjectLocator64", SUPPORT)
+        self.assertIn("locator->selfRva", SUPPORT)
+        self.assertIn('GetModuleHandleW(L"WHGame.dll")', SUPPORT)
         for forbidden in (
             "0x549D388",
             "0x3C297C8",

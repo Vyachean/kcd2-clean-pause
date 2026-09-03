@@ -61,6 +61,7 @@ set(CLEAN_PAUSE_RUNTIME_SOURCES
   src/kcd2_abi_profile.h
   src/kcd2_runtime_profile.cpp
   src/kcd2_runtime_profile.h
+  src/kcd2_runtime_support.h
   src/process_guard.cpp
   src/process_guard.h
 )
