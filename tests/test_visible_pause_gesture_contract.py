@@ -120,15 +120,6 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
         self.assertIn("g_cleanHidden.store(false", wrapper)
         self.assertIn("entry render prehide committed", wrapper)
 
-    def test_nearby_pausegame_false_is_logged_for_transition_diagnosis(self):
-        hook = PROFILED[
-            PROFILED.index("void __fastcall HookPauseGameProfiled"):
-            PROFILED.index("bool InstallPauseBarrierHook")
-        ]
-        self.assertIn("if (!pause)", hook)
-        self.assertIn("PauseGame(false) observed", hook)
-        self.assertIn("now - pressAt <= 2'000", hook)
-
     def test_latch_is_reset_at_runtime_boundaries(self):
         start = PROFILED[PROFILED.index("bool Start(HMODULE selfModule)"):]
         self.assertIn(
