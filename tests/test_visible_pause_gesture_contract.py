@@ -51,7 +51,30 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
             latched.index("g_visiblePauseGesturePassthrough.store(false"),
         )
 
-    def test_pause_barrier_restores_only_hud_root_before_full_handoff(self):
+    def test_steam_root_visibility_filter_pins_only_owned_pause_presentation(self):
+        helper = PROFILED[
+            PROFILED.index("bool ShouldSuppressSteamHudRootVisibility"):
+            PROFILED.index("bool RestoreGameplayHudRootAtPauseBarrier")
+        ]
+        self.assertIn("Storefront::Steam", helper)
+        self.assertIn("g_hudMaskPinSuspended.load", helper)
+        self.assertIn("g_gameplayHudSnapshot.captured", helper)
+        self.assertIn("g_pauseTransitionActive.load", helper)
+        self.assertIn("g_cleanHidden.load", helper)
+        self.assertIn("visible == g_gameplayHudSnapshot.rootVisible", helper)
+        self.assertIn("return true;", helper)
+
+        install = PROFILED[
+            PROFILED.index("bool InstallInputHook"):
+            PROFILED.index("bool PollRuntimeEnvironment")
+        ]
+        self.assertIn("bubbles::SetHudRootVisibilityFilter", install)
+        self.assertIn("&ShouldSuppressSteamHudRootVisibility", install)
+
+        stop = PROFILED[PROFILED.index("void Stop()"):]
+        self.assertIn("bubbles::SetHudRootVisibilityFilter(nullptr)", stop)
+
+    def test_pause_barrier_defensively_restores_only_hud_root(self):
         helper = PROFILED[
             PROFILED.index("bool RestoreGameplayHudRootAtPauseBarrier"):
             PROFILED.index("void __fastcall HookPauseGameProfiled")
