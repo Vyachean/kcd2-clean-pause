@@ -34,6 +34,7 @@ constexpr std::size_t kSteam156FrameworkVtableRva = 0x040472D0;
 
 HMODULE g_profileWhGame{};
 const kcd2::runtime::BuildProfile* g_activeBuildProfile{};
+std::atomic_bool g_visiblePauseGesturePassthrough{false};
 
 bool ThreadBelongsToCurrentProcess(DWORD threadId)
 {
@@ -388,8 +389,59 @@ bool ShouldTryDeferredSteamPauseBarrier(const InputEvent* event)
     return shouldTry;
 }
 
+bool ForwardVisiblePauseGestureIfNeeded(void* input, const InputEvent* event, bool force)
+{
+    if (!event || g_forwardDepth != 0 || g_cleanHidden.load(std::memory_order_acquire)
+        || !IsPauseKey(event->keyId))
+        return false;
+
+    const bool pressed = (event->state & InputState::Pressed) != 0;
+    const bool released = (event->state & InputState::Released) != 0;
+
+    if (g_visiblePauseGesturePassthrough.load(std::memory_order_acquire)) {
+        Forward(input, event, force);
+        if (released) {
+            g_visiblePauseGesturePassthrough.store(false, std::memory_order_release);
+            Log("visible vanilla pause menu Escape/Start gesture passthrough complete");
+        }
+        return true;
+    }
+
+    if (!pressed)
+        return false;
+
+    // Check visible Menu@0 before the legacy core performs the expensive 28-clip HUD
+    // snapshot. If the render hook has not been established yet, establish only that
+    // cheap identity first so an already-open vanilla menu still gets the fast path.
+    bool visible{};
+    if (!ReadVerifiedMenuVisible(visible)) {
+        if (!EnsureMenuRenderHook() || !ReadVerifiedMenuVisible(visible))
+            return false;
+    }
+    if (!visible)
+        return false;
+
+    // Latch the whole physical gesture. The first vanilla Pressed closes the menu;
+    // subsequent key-repeat Pressed events from the same held key must not become new
+    // Clean Pause requests after Menu@0 has disappeared. Release ends the passthrough.
+    g_visiblePauseGesturePassthrough.store(true, std::memory_order_release);
+    Log("visible vanilla pause menu: forwarding Escape/Start gesture without Clean Pause preparation");
+    Forward(input, event, force);
+    if (released) {
+        g_visiblePauseGesturePassthrough.store(false, std::memory_order_release);
+        Log("visible vanilla pause menu Escape/Start gesture passthrough complete");
+    }
+    return true;
+}
+
 void __fastcall HookPostInputEventProfiled(void* input, const InputEvent* event, bool force)
 {
+    // A visible vanilla pause menu owns Escape/Start completely. Detect that state
+    // before Steam barrier acquisition and before the legacy core can capture all 28
+    // HUD clips. Keep forwarding repeats until the matching physical release.
+    if (ForwardVisiblePauseGestureIfNeeded(input, event, force))
+        return;
+
     // The mature runtime already installs its Menu/HUD/Mask/Bubbles hooks from this
     // same first-Pause call stack, and pinned MinHook serializes its public API.
     // Acquire the optional Steam CCryAction barrier here as well: by real user input
@@ -676,6 +728,7 @@ bool Start(HMODULE selfModule)
 {
     g_selfModule = selfModule;
     g_stopping.store(false, std::memory_order_relaxed);
+    g_visiblePauseGesturePassthrough.store(false, std::memory_order_relaxed);
 
     HANDLE thread = CreateThread(nullptr, 0, BootstrapThread, nullptr, 0, nullptr);
     if (!thread)
@@ -687,6 +740,7 @@ bool Start(HMODULE selfModule)
 void Stop()
 {
     g_stopping.store(true, std::memory_order_release);
+    g_visiblePauseGesturePassthrough.store(false, std::memory_order_release);
 }
 
 } // namespace clean_pause
