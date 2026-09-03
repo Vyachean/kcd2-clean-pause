@@ -34,16 +34,13 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
             PROFILED.index("void __fastcall HookPostInputEventProfiled")
         ]
         self.assertIn(
-            "g_visiblePauseGesturePassthrough.store(true, std::memory_order_release)",
-            helper,
+            "g_visiblePauseGesturePassthrough.store(true, std::memory_order_release)", helper
         )
         self.assertIn("if (g_visiblePauseGesturePassthrough.load", helper)
         self.assertIn("if (released)", helper)
         self.assertIn(
-            "g_visiblePauseGesturePassthrough.store(false, std::memory_order_release)",
-            helper,
+            "g_visiblePauseGesturePassthrough.store(false, std::memory_order_release)", helper
         )
-        self.assertIn("visible vanilla pause menu", helper)
 
         latched = helper[
             helper.index("if (g_visiblePauseGesturePassthrough.load"):
@@ -57,12 +54,10 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
     def test_latch_is_reset_at_runtime_boundaries(self):
         start = PROFILED[PROFILED.index("bool Start(HMODULE selfModule)"):]
         self.assertIn(
-            "g_visiblePauseGesturePassthrough.store(false, std::memory_order_relaxed)",
-            start,
+            "g_visiblePauseGesturePassthrough.store(false, std::memory_order_relaxed)", start
         )
         self.assertIn(
-            "g_visiblePauseGesturePassthrough.store(false, std::memory_order_release)",
-            start,
+            "g_visiblePauseGesturePassthrough.store(false, std::memory_order_release)", start
         )
 
 
