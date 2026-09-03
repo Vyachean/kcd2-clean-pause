@@ -34,6 +34,9 @@ constexpr std::size_t kSteam156FrameworkVtableRva = 0x040472D0;
 
 HMODULE g_profileWhGame{};
 const kcd2::runtime::BuildProfile* g_activeBuildProfile{};
+std::atomic_bool g_visiblePauseGesturePassthrough{false};
+std::atomic_bool g_hudRootVisibilitySuppressionLogged{false};
+std::atomic_bool g_steamEntryRenderPrehide{false};
 
 bool ThreadBelongsToCurrentProcess(DWORD threadId)
 {
@@ -182,7 +185,11 @@ const char* ValidateProfileEnvironment(
     bool nameMatches{};
     __try {
         gameName = getName ? getName(candidate.game) : nullptr;
-        nameMatches = gameName && std::strcmp(gameName, "kcd2") == 0;
+        // Runtime captures prove different casing across supported retail builds:
+        // Xbox returned "kcd2", while Steam 1.5.6 release_1_5-15693 returns "KCD2".
+        // Keep the identity gate exact apart from those two observed spellings.
+        nameMatches = gameName && (std::strcmp(gameName, "kcd2") == 0
+            || std::strcmp(gameName, "KCD2") == 0);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         nameMatches = false;
     }
@@ -260,6 +267,75 @@ bool ResolveGameFramework(const RuntimeEnvironment& environment, void*& framewor
     return LegacyResolveGameFramework_Xbox156Only(environment, framework);
 }
 
+bool ShouldSuppressSteamHudRootVisibility(bool visible)
+{
+    if (!g_activeBuildProfile
+        || g_activeBuildProfile->storefront != kcd2::runtime::Storefront::Steam
+        || g_hudMaskPinSuspended.load(std::memory_order_acquire)
+        || !g_gameplayHudSnapshot.captured)
+        return false;
+
+    const bool pin = g_pauseTransitionActive.load(std::memory_order_acquire)
+        || g_cleanHidden.load(std::memory_order_acquire);
+    if (!pin || visible == g_gameplayHudSnapshot.rootVisible)
+        return false;
+
+    if (!g_hudRootVisibilitySuppressionLogged.exchange(true, std::memory_order_acq_rel))
+        Log("Steam pause transition suppressed hud@0 root visibility change; preserved gameplay root=%s",
+            g_gameplayHudSnapshot.rootVisible ? "visible" : "hidden");
+    return true;
+}
+
+bool RestoreGameplayHudRootAtPauseBarrier()
+{
+    if (!g_gameplayHudSnapshot.captured || !g_hudElement
+        || (g_mainThreadId && GetCurrentThreadId() != g_mainThreadId)
+        || !ValidateObjectVtable(g_hudElement, {
+            kUIElementSetVisibleSlot,
+            kUIElementIsVisibleSlot }))
+        return false;
+
+    const auto isVisible = VFunc<IsVisibleFn>(g_hudElement, kUIElementIsVisibleSlot);
+    const auto setVisible = VFunc<SetVisibleFn>(g_hudElement, kUIElementSetVisibleSlot);
+    if (!isVisible || !setVisible
+        || !IsExecutable(reinterpret_cast<void*>(isVisible))
+        || !IsExecutable(reinterpret_cast<void*>(setVisible)))
+        return false;
+
+    bool current{};
+    __try {
+        current = isVisible(g_hudElement);
+        if (current != g_gameplayHudSnapshot.rootVisible)
+            setVisible(g_hudElement, g_gameplayHudSnapshot.rootVisible);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+
+    if (current != g_gameplayHudSnapshot.rootVisible)
+        Log("pause barrier restored gameplay hud@0 root visibility before Clean Pause handoff");
+    return true;
+}
+
+bool ShouldPrehideSteamEntryRender()
+{
+    return g_activeBuildProfile
+        && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam
+        && g_menuElement
+        && g_renderTarget
+        && g_gameplayHudSnapshot.captured;
+}
+
+void RollBackSteamEntryRenderPrehide(const char* reason)
+{
+    if (!g_steamEntryRenderPrehide.exchange(false, std::memory_order_acq_rel))
+        return;
+    g_cleanHidden.store(false, std::memory_order_release);
+    g_renderSuppressionObserved.store(false, std::memory_order_release);
+    g_cleanHiddenSinceMs.store(0, std::memory_order_release);
+    Log("Steam Clean Pause entry render prehide rolled back (%s)",
+        reason ? reason : "handoff not accepted");
+}
+
 void __fastcall HookPauseGameProfiled(
     void* framework,
     bool pause,
@@ -272,21 +348,45 @@ void __fastcall HookPauseGameProfiled(
         && (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId);
     const ULONGLONG enteredAt = observe ? GetTickCount64() : 0;
 
-    if (observe)
+    if (observe) {
         g_pauseTransitionActive.store(true, std::memory_order_release);
 
+        // Menu@0 can render on a different engine/render path while the main thread
+        // restores the complete gameplay HUD snapshot. Arm the existing render
+        // suppression before the verified vanilla PauseGame(true) call itself. This
+        // state is provisional: the PostInputEvent wrapper commits it only if
+        // TryEnterCleanPause publishes a real ownership timestamp, otherwise it is
+        // rolled back immediately and the ordinary vanilla pause menu remains usable.
+        if (ShouldPrehideSteamEntryRender()) {
+            g_cleanHiddenSinceMs.store(0, std::memory_order_release);
+            g_renderSuppressionObserved.store(false, std::memory_order_release);
+            g_steamEntryRenderPrehide.store(true, std::memory_order_release);
+            g_cleanHidden.store(true, std::memory_order_release);
+            Log("Steam Clean Pause entry render prehide armed before PauseGame(true)");
+        }
+    }
+
     if (!g_originalPauseGame) {
-        if (observe)
+        if (observe) {
+            RollBackSteamEntryRenderPrehide("PauseGame trampoline unavailable");
             g_pauseTransitionActive.store(false, std::memory_order_release);
+        }
         return;
     }
     g_originalPauseGame(framework, pause, force, fadeOutInMs);
 
     if (!observe || !g_pendingPauseAttempt.load(std::memory_order_acquire)) {
-        if (observe)
+        if (observe) {
+            RollBackSteamEntryRenderPrehide("pending pause correlation ended inside PauseGame");
             g_pauseTransitionActive.store(false, std::memory_order_release);
+        }
         return;
     }
+
+    // The shared CFlashUIElement::SetVisible hook pins hud@0 root visibility while
+    // PauseGame(true) itself is running. Keep this post-call correction as a cheap
+    // defensive check for any root mutation that bypasses SetVisible entirely.
+    RestoreGameplayHudRootAtPauseBarrier();
 
     g_pauseBarrierObserved.store(true, std::memory_order_release);
     const ULONGLONG pressAt = g_pausePressAtMs.load(std::memory_order_acquire);
@@ -384,8 +484,59 @@ bool ShouldTryDeferredSteamPauseBarrier(const InputEvent* event)
     return shouldTry;
 }
 
+bool ForwardVisiblePauseGestureIfNeeded(void* input, const InputEvent* event, bool force)
+{
+    if (!event || g_forwardDepth != 0 || g_cleanHidden.load(std::memory_order_acquire)
+        || !IsPauseKey(event->keyId))
+        return false;
+
+    const bool pressed = (event->state & InputState::Pressed) != 0;
+    const bool released = (event->state & InputState::Released) != 0;
+
+    if (g_visiblePauseGesturePassthrough.load(std::memory_order_acquire)) {
+        Forward(input, event, force);
+        if (released) {
+            g_visiblePauseGesturePassthrough.store(false, std::memory_order_release);
+            Log("visible vanilla pause menu Escape/Start gesture passthrough complete");
+        }
+        return true;
+    }
+
+    if (!pressed)
+        return false;
+
+    // Check visible Menu@0 before the legacy core performs the expensive HUD snapshot.
+    // If the render hook has not been established yet, establish only that cheap
+    // identity first so an already-open vanilla menu still gets the fast path.
+    bool visible{};
+    if (!ReadVerifiedMenuVisible(visible)) {
+        if (!EnsureMenuRenderHook() || !ReadVerifiedMenuVisible(visible))
+            return false;
+    }
+    if (!visible)
+        return false;
+
+    // Latch the whole physical gesture. The first vanilla Pressed closes the menu;
+    // subsequent key-repeat Pressed events from the same held key must not become new
+    // Clean Pause requests after Menu@0 has disappeared. Release ends the passthrough.
+    g_visiblePauseGesturePassthrough.store(true, std::memory_order_release);
+    Log("visible vanilla pause menu: forwarding Escape/Start gesture without Clean Pause preparation");
+    Forward(input, event, force);
+    if (released) {
+        g_visiblePauseGesturePassthrough.store(false, std::memory_order_release);
+        Log("visible vanilla pause menu Escape/Start gesture passthrough complete");
+    }
+    return true;
+}
+
 void __fastcall HookPostInputEventProfiled(void* input, const InputEvent* event, bool force)
 {
+    // A visible vanilla pause menu owns Escape/Start completely. Detect that state
+    // before Steam barrier acquisition and before the legacy core can capture HUD
+    // presentation. Keep forwarding repeats until the matching physical release.
+    if (ForwardVisiblePauseGestureIfNeeded(input, event, force))
+        return;
+
     // The mature runtime already installs its Menu/HUD/Mask/Bubbles hooks from this
     // same first-Pause call stack, and pinned MinHook serializes its public API.
     // Acquire the optional Steam CCryAction barrier here as well: by real user input
@@ -396,6 +547,23 @@ void __fastcall HookPostInputEventProfiled(void* input, const InputEvent* event,
         TryInstallDeferredSteamPauseBarrier();
 
     LegacyHookPostInputEventProfiledCore(input, event, force);
+
+    // g_cleanHidden is deliberately reused as the already-proven Menu@0 render gate
+    // during the short provisional Steam handoff. A successful TryEnterCleanPause sets
+    // the ownership timestamp before returning. If that did not happen, clear the
+    // provisional gate immediately so fail-open vanilla rendering is never stranded.
+    if (g_steamEntryRenderPrehide.exchange(false, std::memory_order_acq_rel)) {
+        const bool accepted = g_cleanHidden.load(std::memory_order_acquire)
+            && g_cleanHiddenSinceMs.load(std::memory_order_acquire) != 0;
+        if (!accepted) {
+            g_cleanHidden.store(false, std::memory_order_release);
+            g_renderSuppressionObserved.store(false, std::memory_order_release);
+            g_cleanHiddenSinceMs.store(0, std::memory_order_release);
+            Log("Steam Clean Pause entry render prehide rolled back after input handoff");
+        } else {
+            Log("Steam Clean Pause entry render prehide committed to Clean Pause ownership");
+        }
+    }
 }
 
 bool InstallInputHook(const RuntimeEnvironment& environment)
@@ -406,6 +574,15 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
     g_flashUI = environment.flashUI;
     g_mainThreadId = environment.mainThreadId;
     blur::Initialize(environment.scriptSystem, environment.mainThreadId);
+
+    // bubbles::EnsureHooks lazily installs the one shared CFlashUIElement::SetVisible
+    // detour on the first Pause input. Register the Steam-only hud@0 root filter now,
+    // before that lazy installation can occur. Xbox/GOG/Epic behavior stays unchanged.
+    bubbles::SetHudRootVisibilityFilter(
+        g_activeBuildProfile
+            && g_activeBuildProfile->storefront == kcd2::runtime::Storefront::Steam
+        ? &ShouldSuppressSteamHudRootVisibility
+        : nullptr);
 
     g_postInputEventTarget = reinterpret_cast<void*>(
         VFunc<PostInputEventFn>(g_input, kInputPostInputEventSlot));
@@ -672,6 +849,9 @@ bool Start(HMODULE selfModule)
 {
     g_selfModule = selfModule;
     g_stopping.store(false, std::memory_order_relaxed);
+    g_visiblePauseGesturePassthrough.store(false, std::memory_order_relaxed);
+    g_hudRootVisibilitySuppressionLogged.store(false, std::memory_order_relaxed);
+    g_steamEntryRenderPrehide.store(false, std::memory_order_relaxed);
 
     HANDLE thread = CreateThread(nullptr, 0, BootstrapThread, nullptr, 0, nullptr);
     if (!thread)
@@ -683,6 +863,9 @@ bool Start(HMODULE selfModule)
 void Stop()
 {
     g_stopping.store(true, std::memory_order_release);
+    g_visiblePauseGesturePassthrough.store(false, std::memory_order_release);
+    g_steamEntryRenderPrehide.store(false, std::memory_order_release);
+    bubbles::SetHudRootVisibilityFilter(nullptr);
 }
 
 } // namespace clean_pause

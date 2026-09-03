@@ -691,6 +691,26 @@ bool CaptureVanillaHudFromInternalMask(HudVisibilitySnapshot& target)
     return true;
 }
 
+bool CaptureGameplayHudSnapshot()
+{
+    // Once the C_UIHudMask transaction has been validated, its internal 28 visibility
+    // flags are the authoritative source used by the rest of the transaction. Read
+    // those flags directly instead of asking Scaleform for every movieclip's display
+    // info synchronously on the physical Pause press. The old Flash walk remains a
+    // strict fallback for builds/lifetimes where the internal transaction is absent.
+    if (g_hudMaskTransactionAvailable.load(std::memory_order_acquire)) {
+        HudVisibilitySnapshot current{};
+        if (CaptureVanillaHudFromInternalMask(current)) {
+            g_gameplayHudSnapshot = current;
+            Log("HUD visibility snapshot captured from C_UIHudMask internal state (gameplay-pre-pause)");
+            return true;
+        }
+        Log("C_UIHudMask gameplay snapshot unavailable; falling back to Flash visibility capture");
+    }
+
+    return CaptureHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay-pre-pause");
+}
+
 bool RestoreVanillaHudPresentation(const char* label)
 {
     if (g_hudMaskTransactionAvailable.load(std::memory_order_acquire)) {
@@ -1281,7 +1301,7 @@ void __fastcall HookPostInputEvent(void* input, const InputEvent* event, bool fo
             static_cast<unsigned>(event->state));
         ResetHudSnapshots();
         if (!EnsureMenuRenderHook() || !EnsureHudSubtitleHook() || !EnsureHudUpdateHook()
-            || !CaptureHudVisibilitySnapshot(g_gameplayHudSnapshot, "gameplay-pre-pause")) {
+            || !CaptureGameplayHudSnapshot()) {
             g_pendingPauseAttempt.store(false, std::memory_order_release);
             ResetHudSnapshots();
             Log("pause input: Menu/HUD snapshot path unavailable; leaving vanilla behavior untouched");

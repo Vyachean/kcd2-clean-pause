@@ -40,6 +40,7 @@ BubbleReleaseFn g_originalBubbleRelease{};
 void* g_bubbleReleaseTarget{};
 std::atomic<void*> g_bubbleInterfaceObject{nullptr};
 std::atomic<void*> g_hudElementObject{nullptr};
+std::atomic<HudRootVisibilityFilterFn> g_hudRootVisibilityFilter{nullptr};
 
 struct CompleteObjectLocator64 {
     std::uint32_t signature;
@@ -295,6 +296,11 @@ void __fastcall HookBubbleRelease(void* bubbles, std::uint32_t bubbleId)
 
 void __fastcall HookMenuSetVisible(void* element, bool visible)
 {
+    const bool isHudRoot = element == g_hudElementObject.load(std::memory_order_acquire);
+    const auto hudFilter = g_hudRootVisibilityFilter.load(std::memory_order_acquire);
+    if (isHudRoot && hudFilter && hudFilter(visible))
+        return;
+
     const bool isPauseMenu = element == g_menuElement;
     if (isPauseMenu && visible)
         g_pauseMenuVisible.store(true, std::memory_order_release);
@@ -308,7 +314,44 @@ void __fastcall HookMenuSetVisible(void* element, bool visible)
         g_pauseMenuVisible.store(false, std::memory_order_release);
 }
 
+bool EnsureSharedVisibilityHook(void* hudElement, void* menu)
+{
+    if (!hudElement || !menu)
+        return false;
+
+    const auto menuSetVisibleTarget = reinterpret_cast<void*>(
+        VFunc<SetVisibleFn>(menu, kUIElementSetVisibleSlot));
+    if (!IsExecutable(menuSetVisibleTarget))
+        return false;
+
+    // Publish identities before enabling the shared method hook. Any immediate call
+    // after MH_EnableHook can then be classified as Menu@0, hud@0, or unrelated.
+    g_menuElement = menu;
+    g_hudElementObject.store(hudElement, std::memory_order_release);
+    if (!InstallHook(
+            menuSetVisibleTarget,
+            reinterpret_cast<void*>(&HookMenuSetVisible),
+            reinterpret_cast<void**>(&g_originalMenuSetVisible),
+            g_menuSetVisibleTarget))
+        return false;
+
+    bool visible{};
+    const auto isVisible = VFunc<IsVisibleFn>(menu, kUIElementIsVisibleSlot);
+    __try {
+        visible = isVisible && isVisible(menu);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        visible = false;
+    }
+    g_pauseMenuVisible.store(visible, std::memory_order_release);
+    return true;
+}
+
 } // namespace
+
+void SetHudRootVisibilityFilter(HudRootVisibilityFilterFn filter)
+{
+    g_hudRootVisibilityFilter.store(filter, std::memory_order_release);
+}
 
 bool EnsureHooks(void* hudElement, void* flashUI)
 {
@@ -316,9 +359,14 @@ bool EnsureHooks(void* hudElement, void* flashUI)
     if (!menu)
         return false;
 
-    void* bubbleInterface{};
+    // Capture cache identity before the shared visibility hook republishes the current
+    // hud/menu objects. Otherwise a recreated HUD would incorrectly appear cached.
     const bool cached = g_hudElementObject.load(std::memory_order_acquire) == hudElement
         && g_menuElement == menu;
+    if (!EnsureSharedVisibilityHook(hudElement, menu))
+        return false;
+
+    void* bubbleInterface{};
     if (cached)
         bubbleInterface = g_bubbleInterfaceObject.load(std::memory_order_acquire);
     if (!bubbleInterface)
@@ -330,21 +378,14 @@ bool EnsureHooks(void* hudElement, void* flashUI)
         VFunc<BubbleUpdateFn>(bubbleInterface, kBubbleUpdateSlot));
     const auto bubbleReleaseTarget = reinterpret_cast<void*>(
         VFunc<BubbleReleaseFn>(bubbleInterface, kBubbleReleaseSlot));
-    const auto menuSetVisibleTarget = reinterpret_cast<void*>(
-        VFunc<SetVisibleFn>(menu, kUIElementSetVisibleSlot));
-    if (!IsExecutable(bubbleUpdateTarget)
-        || !IsExecutable(bubbleReleaseTarget)
-        || !IsExecutable(menuSetVisibleTarget))
+    if (!IsExecutable(bubbleUpdateTarget) || !IsExecutable(bubbleReleaseTarget))
         return false;
 
     if (cached
         && g_bubbleUpdateTarget == bubbleUpdateTarget
-        && g_bubbleReleaseTarget == bubbleReleaseTarget
-        && g_menuSetVisibleTarget == menuSetVisibleTarget)
+        && g_bubbleReleaseTarget == bubbleReleaseTarget)
         return true;
 
-    // Install suppression hooks before the menu-visibility hook. Until the final hook
-    // is active, g_pauseMenuVisible remains false, so partial installation is inert.
     if (!InstallHook(
             bubbleUpdateTarget,
             reinterpret_cast<void*>(&HookBubbleUpdate),
@@ -358,28 +399,9 @@ bool EnsureHooks(void* hudElement, void* flashUI)
             g_bubbleReleaseTarget))
         return false;
 
-    g_menuElement = menu;
-    if (!InstallHook(
-            menuSetVisibleTarget,
-            reinterpret_cast<void*>(&HookMenuSetVisible),
-            reinterpret_cast<void**>(&g_originalMenuSetVisible),
-            g_menuSetVisibleTarget))
-        return false;
-
-    // Publish the exact object identity only after every required hook is installed.
     // Repeated discovery can safely retarget this to a recreated hud@0 instance while
     // the globally patched methods continue forwarding all unrelated objects.
     g_bubbleInterfaceObject.store(bubbleInterface, std::memory_order_release);
-    g_hudElementObject.store(hudElement, std::memory_order_release);
-
-    bool visible{};
-    const auto isVisible = VFunc<IsVisibleFn>(menu, kUIElementIsVisibleSlot);
-    __try {
-        visible = isVisible && isVisible(menu);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        visible = false;
-    }
-    g_pauseMenuVisible.store(visible, std::memory_order_release);
     return true;
 }
 
