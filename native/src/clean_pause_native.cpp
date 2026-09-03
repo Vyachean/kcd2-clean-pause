@@ -466,6 +466,8 @@ bool EnsureHudSubtitleHook()
 
     const MH_STATUS enable = MH_EnableHook(target);
     if (enable != MH_OK) {
+        MH_RemoveHook(target);
+        g_originalHudCallFunction = nullptr;
         Log("MH_EnableHook(HUD CallFunction) failed: %d", static_cast<int>(enable));
         g_hudElement = nullptr;
         return false;
@@ -929,6 +931,8 @@ bool EnsureHudUpdateHook()
     }
     const MH_STATUS enable = MH_EnableHook(target);
     if (enable != MH_OK) {
+        MH_RemoveHook(target);
+        g_originalHudUpdate = nullptr;
         Log("MH_EnableHook(HUD Update) failed: %d", static_cast<int>(enable));
         return false;
     }
@@ -980,6 +984,8 @@ bool EnsureMenuRenderHook()
 
     const MH_STATUS enable = MH_EnableHook(renderTarget);
     if (enable != MH_OK) {
+        MH_RemoveHook(renderTarget);
+        g_originalRender = nullptr;
         Log("MH_EnableHook(Menu Render) failed: %d", static_cast<int>(enable));
         g_menuElement = nullptr;
         return false;
@@ -1532,6 +1538,8 @@ bool InstallInputHook(const RuntimeEnvironment& environment)
 
     const MH_STATUS enable = MH_EnableHook(g_postInputEventTarget);
     if (enable != MH_OK) {
+        MH_RemoveHook(g_postInputEventTarget);
+        g_originalPostInputEvent = nullptr;
         Log("MH_EnableHook(PostInputEvent) failed: %d", static_cast<int>(enable));
         return false;
     }
