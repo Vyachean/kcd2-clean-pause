@@ -27,14 +27,17 @@ class PauseBarrierContractTests(unittest.TestCase):
         self.assertIn("kGameGetFrameworkSlot", xbox)
         self.assertIn("kGameFrameworkGetSystemSlot", xbox)
 
-        steam = NATIVE[
+        profile_singleton = NATIVE[
             NATIVE.index("bool ResolveProfileFrameworkSingleton"):
             NATIVE.index("bool ResolveGameFramework")
         ]
-        self.assertIn("frameworkSystem != environment.system", steam)
-        self.assertIn("kGameFrameworkGetSystemSlot", steam)
-        self.assertIn("kSteam156FrameworkVtableRva", steam)
-        self.assertNotIn("kGameGetFrameworkSlot", steam)
+        self.assertIn("FrameworkLocatorStrategy::ExactSingletonRva", profile_singleton)
+        self.assertIn("expectedFrameworkStorageRva", profile_singleton)
+        self.assertIn("expectedFrameworkVtableRva", profile_singleton)
+        self.assertIn("frameworkSystem != environment.system", profile_singleton)
+        self.assertIn("kGameFrameworkGetSystemSlot", profile_singleton)
+        self.assertNotIn("Storefront::Steam", profile_singleton)
+        self.assertNotIn("kGameGetFrameworkSlot", profile_singleton)
 
     def test_pause_hook_keeps_exact_vanilla_ownership_and_scopes_pinning_to_pause_call(self):
         hook = NATIVE[NATIVE.index("void __fastcall HookPauseGame"):NATIVE.index("bool InstallPauseBarrierHook")]
