@@ -51,12 +51,13 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
             latched.index("g_visiblePauseGesturePassthrough.store(false"),
         )
 
-    def test_steam_root_visibility_filter_pins_only_owned_pause_presentation(self):
+    def test_profile_root_visibility_filter_pins_only_owned_pause_presentation(self):
         helper = RUNTIME[
             RUNTIME.index("bool ShouldSuppressProfileHudRootVisibility"):
             RUNTIME.index("bool RestoreGameplayHudRootAtPauseBarrier")
         ]
-        self.assertIn("Storefront::Steam", helper)
+        self.assertIn("ActiveRuntimeCapabilities().pinHudRootDuringPause", helper)
+        self.assertNotIn("Storefront::Steam", helper)
         self.assertIn("g_hudMaskPinSuspended.load", helper)
         self.assertIn("g_gameplayHudSnapshot.captured", helper)
         self.assertIn("g_pauseTransitionActive.load", helper)
@@ -69,7 +70,9 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
             RUNTIME.index("bool PollRuntimeEnvironment")
         ]
         self.assertIn("bubbles::SetHudRootVisibilityFilter", install)
+        self.assertIn("ActiveRuntimeCapabilities().pinHudRootDuringPause", install)
         self.assertIn("&ShouldSuppressProfileHudRootVisibility", install)
+        self.assertNotIn("Storefront::Steam", install)
 
         stop = RUNTIME[RUNTIME.index("void Stop()"):]
         self.assertIn("bubbles::SetHudRootVisibilityFilter(nullptr)", stop)
@@ -96,7 +99,14 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
         self.assertLess(original, root_restore)
         self.assertLess(root_restore, barrier)
 
-    def test_steam_entry_render_prehide_covers_pause_handoff(self):
+    def test_profile_entry_render_prehide_covers_pause_handoff(self):
+        prehide = RUNTIME[
+            RUNTIME.index("bool ShouldPrehideEntryRender"):
+            RUNTIME.index("void RollBackEntryRenderPrehide")
+        ]
+        self.assertIn("ActiveRuntimeCapabilities().prehideMenuDuringPauseTransition", prehide)
+        self.assertNotIn("Storefront::Steam", prehide)
+
         hook = RUNTIME[
             RUNTIME.index("void __fastcall HookPauseGameProfiled"):
             RUNTIME.index("bool InstallPauseBarrierHook")
