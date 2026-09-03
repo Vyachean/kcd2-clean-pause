@@ -47,7 +47,6 @@ required_abi = (
     "kUIElementGetMovieClipByNameSlot = 71",
     "kFlashVariableGetDisplayInfoSlot = 26",
     "kFlashVariableSetVisibleSlot = 33",
-    "kGameGetFrameworkSlot = 16",
     "kGameFrameworkPauseGameSlot = 13",
     "kGameFrameworkGetSystemSlot = 19",
     "XiStart = 516",
@@ -57,6 +56,9 @@ required_abi = (
 for needle in required_abi:
     if needle not in abi:
         raise SystemExit(f"missing verified ABI contract: {needle}")
+
+if "kGameGetFrameworkSlot" in abi or "GetGameFrameworkFn" in abi:
+    raise SystemExit("legacy IGame[16] framework ABI must not remain in production")
 
 required_runtime = (
     'getElement(g_flashUI, "Menu@0")',

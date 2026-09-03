@@ -77,11 +77,6 @@ inline constexpr std::size_t kEnvSize = 0x1C0;
 inline constexpr std::size_t kInputPostInputEventSlot = 13;
 inline constexpr std::size_t kGameGetLongNameSlot = 12;
 inline constexpr std::size_t kGameGetNameSlot = 13;
-// Legacy compatibility name retained because the runtime-tested Xbox path uses
-// IGame[16] this way. Public Steam 1.5.6 RE identifies slot 16 as a different
-// engine-root accessor, so profiled non-Xbox builds must not use it to obtain
-// IGameFramework. Their framework capability is resolved independently.
-inline constexpr std::size_t kGameGetFrameworkSlot = 16;
 inline constexpr std::size_t kGameFrameworkPauseGameSlot = 13;
 inline constexpr std::size_t kGameFrameworkGetSystemSlot = 19;
 inline constexpr std::size_t kScriptExecuteBufferSlot = 6;
@@ -95,7 +90,6 @@ inline constexpr std::size_t kFlashVariableGetDisplayInfoSlot = 26;
 inline constexpr std::size_t kFlashVariableSetVisibleSlot = 33;
 
 using PostInputEventFn = void(__fastcall*)(void*, const InputEvent*, bool);
-using GetGameFrameworkFn = void*(__fastcall*)(void*);
 using PauseGameFn = void(__fastcall*)(void*, bool, bool, unsigned int);
 using GameFrameworkGetSystemFn = void*(__fastcall*)(void*);
 using ExecuteBufferFn = bool(__fastcall*)(void*, const char*, std::size_t, const char*, void*);

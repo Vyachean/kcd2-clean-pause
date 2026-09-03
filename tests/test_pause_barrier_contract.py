@@ -11,7 +11,6 @@ BUBBLES = (ROOT / "native/src/clean_pause_bubbles.cpp").read_text(encoding="utf-
 class PauseBarrierContractTests(unittest.TestCase):
     def test_verified_framework_surface_is_declared(self):
         for needle in (
-            "kGameGetFrameworkSlot = 16",
             "kGameFrameworkPauseGameSlot = 13",
             "kGameFrameworkGetSystemSlot = 19",
             "using PauseGameFn =",
@@ -29,6 +28,8 @@ class PauseBarrierContractTests(unittest.TestCase):
         self.assertIn("expectedFrameworkVtableRva", resolver)
         self.assertIn("frameworkSystem != environment.system", resolver)
         self.assertIn("kGameFrameworkGetSystemSlot", resolver)
+        self.assertNotIn("kGameGetFrameworkSlot", ABI)
+        self.assertNotIn("GetGameFrameworkFn", ABI)
         self.assertNotIn("kGameGetFrameworkSlot", resolver)
         self.assertNotIn("LegacyResolveGameFramework_Xbox156Only", resolver)
 
