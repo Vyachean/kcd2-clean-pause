@@ -264,17 +264,17 @@ Both native editions statically link MinHook v1.3.4. The dependency is pinned to
 
 ## Current maintainability debt
 
-`clean_pause_native_profiled.cpp` currently macro-renames the old bootstrap/discovery symbols and textually includes `clean_pause_native.cpp` so the mature accepted Clean Pause core can be reused without invasive movement. This was a deliberate compatibility-preservation choice during storefront acceptance, but it is not the desired final translation-unit structure.
+The translation-unit wrapper has been removed: production compiles `clean_pause_native.cpp` directly, `clean_pause_native_profiled.cpp` no longer exists, and no bootstrap symbol is substituted through preprocessor macros or textual `.cpp` inclusion. A source contract rejects regressions back to that structure.
 
-Issue #45 tracks the behavior-preserving refactor to:
+Issue #45 remains open for the next behavior-preserving architecture stage:
 
-- compile production `.cpp` files normally;
-- separate build discovery/storefront adapters from core runtime state/hook installation;
-- expose the minimum private internal API rather than depending on textual inclusion;
-- keep Xbox legacy discovery isolated as an explicit compatibility adapter;
-- preserve the same Steam/Xbox runtime contract and smoke coverage.
+- separate storefront/build discovery and capability adapters from shared Clean Pause state/presentation code through a private internal API;
+- expose only the minimum core operations required by bootstrap/adapters rather than broad runtime globals;
+- keep Xbox legacy discovery/framework behavior isolated as an explicit adapter;
+- preserve exact Steam/Xbox/GOG/Epic profile gates and fail-open semantics;
+- require focused Steam and current-source Xbox regression smoke before merging the deeper split.
 
-Common Win32 memory validation, MSVC RTTI and MinHook-install helpers are also candidates for deduplication as part of that refactor. Do not combine this structural cleanup with compatibility or AV/reputation changes unless a concrete defect requires it.
+The common Win32 memory validation, MSVC RTTI and MinHook-install helpers used by HUD-mask/bubble subsystems have already been centralized in `kcd2_runtime_support.h`; they must not be duplicated again as part of the remaining refactor. Structural cleanup must remain separate from compatibility or AV/reputation changes unless a concrete defect requires otherwise.
 
 ## Rejected designs
 
