@@ -290,33 +290,6 @@ bool ValidateEnvironmentCandidate(const std::uint8_t* candidate, RuntimeEnvironm
     return true;
 }
 
-void LogWhGameFingerprint(HMODULE whGame)
-{
-    const auto* base = reinterpret_cast<const std::uint8_t*>(whGame);
-    if (!IsReadable(base, sizeof(IMAGE_DOS_HEADER))) {
-        Log("WHGame fingerprint unavailable: unreadable DOS header");
-        return;
-    }
-
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
-        Log("WHGame fingerprint unavailable: invalid DOS signature");
-        return;
-    }
-
-    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
-    if (!IsReadable(nt, sizeof(*nt)) || nt->Signature != IMAGE_NT_SIGNATURE) {
-        Log("WHGame fingerprint unavailable: invalid PE header");
-        return;
-    }
-
-    Log(
-        "WHGame fingerprint: TimeDateStamp=0x%08lx SizeOfImage=0x%08lx CheckSum=0x%08lx",
-        static_cast<unsigned long>(nt->FileHeader.TimeDateStamp),
-        static_cast<unsigned long>(nt->OptionalHeader.SizeOfImage),
-        static_cast<unsigned long>(nt->OptionalHeader.CheckSum));
-}
-
 bool LegacyFindRuntimeEnvironment_Xbox156Only(HMODULE whGame, RuntimeEnvironment& result)
 {
     const auto* base = reinterpret_cast<const std::uint8_t*>(whGame);
@@ -1248,7 +1221,7 @@ void HandleHiddenInput(void* input, const InputEvent* event, bool force)
     // dialogue / cutscene actions cannot leak through.
 }
 
-void __fastcall LegacyHookPostInputEventProfiledCore(void* input, const InputEvent* event, bool force)
+void __fastcall HookPostInputEventCore(void* input, const InputEvent* event, bool force)
 {
     if (!event || g_stopping.load(std::memory_order_relaxed)) {
         Forward(input, event, force);
@@ -1415,203 +1388,7 @@ bool LegacyResolveGameFramework_Xbox156Only(const RuntimeEnvironment& environmen
     return frameworkSystem == environment.system;
 }
 
-void __fastcall HookPauseGame(
-    void* framework,
-    bool pause,
-    bool force,
-    unsigned int fadeOutInMs)
-{
-    const bool observe = framework == g_gameFramework
-        && pause
-        && g_pendingPauseAttempt.load(std::memory_order_acquire)
-        && (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId);
-    const ULONGLONG enteredAt = observe ? GetTickCount64() : 0;
-
-    // Pending input correlation does not own presentation. Arm the narrow
-    // transaction only for the real vanilla pause call, so C_UIHudMask changes made
-    // inside PauseGame are rolled back in the same stack without doing 28-clip Flash
-    // work throughout the physical press/release window.
-    if (observe)
-        g_pauseTransitionActive.store(true, std::memory_order_release);
-
-    // KCD2 remains the sole pause owner and receives the exact vanilla arguments.
-    // If the trampoline is unexpectedly unavailable, fail open rather than publishing
-    // a barrier for a pause call that never reached vanilla.
-    if (!g_originalPauseGame) {
-        if (observe)
-            g_pauseTransitionActive.store(false, std::memory_order_release);
-        return;
-    }
-    g_originalPauseGame(framework, pause, force, fadeOutInMs);
-
-    if (!observe || !g_pendingPauseAttempt.load(std::memory_order_acquire)) {
-        if (observe)
-            g_pauseTransitionActive.store(false, std::memory_order_release);
-        return;
-    }
-
-    g_pauseBarrierObserved.store(true, std::memory_order_release);
-    const ULONGLONG pressAt = g_pausePressAtMs.load(std::memory_order_acquire);
-    Log(
-        "vanilla IGameFramework::PauseGame(true) returned during pending pause; force=%s fadeMs=%u callMs=%llu pressToPauseMs=%llu",
-        force ? "true" : "false",
-        fadeOutInMs,
-        static_cast<unsigned long long>(GetTickCount64() - enteredAt),
-        static_cast<unsigned long long>(pressAt ? enteredAt - pressAt : 0));
-}
-
-bool LegacyInstallPauseBarrierHook_Xbox156Only(const RuntimeEnvironment& environment)
-{
-    void* framework{};
-    if (!LegacyResolveGameFramework_Xbox156Only(environment, framework)) {
-        Log("IGameFramework pause barrier unavailable: verified framework identity could not be resolved");
-        return false;
-    }
-
-    const auto target = reinterpret_cast<void*>(
-        VFunc<PauseGameFn>(framework, kGameFrameworkPauseGameSlot));
-    if (!target || !IsExecutable(target))
-        return false;
-
-    if (g_pauseGameTarget) {
-        if (target != g_pauseGameTarget)
-            return false;
-        g_gameFramework = framework;
-        return true;
-    }
-
-    const MH_STATUS create = MH_CreateHook(
-        target,
-        reinterpret_cast<void*>(&HookPauseGame),
-        reinterpret_cast<void**>(&g_originalPauseGame));
-    if (create != MH_OK) {
-        Log("MH_CreateHook(IGameFramework::PauseGame) failed: %d", static_cast<int>(create));
-        return false;
-    }
-    const MH_STATUS enable = MH_EnableHook(target);
-    if (enable != MH_OK) {
-        MH_RemoveHook(target);
-        Log("MH_EnableHook(IGameFramework::PauseGame) failed: %d", static_cast<int>(enable));
-        return false;
-    }
-
-    g_gameFramework = framework;
-    g_pauseGameTarget = target;
-    Log("vanilla IGameFramework::PauseGame observer active; framework=%p PauseGame=%p",
-        g_gameFramework, g_pauseGameTarget);
-    return true;
-}
-
-bool LegacyInstallInputHook_Xbox156Only(const RuntimeEnvironment& environment)
-{
-    g_environment = environment.base;
-    g_input = environment.input;
-    g_game = environment.game;
-    g_flashUI = environment.flashUI;
-    g_mainThreadId = environment.mainThreadId;
-    blur::Initialize(environment.scriptSystem, environment.mainThreadId);
-
-    g_postInputEventTarget = reinterpret_cast<void*>(
-        VFunc<PostInputEventFn>(g_input, kInputPostInputEventSlot));
-    if (!g_postInputEventTarget || !IsExecutable(g_postInputEventTarget)) {
-        Log("PostInputEvent vtable target is invalid; hook not installed");
-        return false;
-    }
-
-    const MH_STATUS init = MH_Initialize();
-    if (init != MH_OK && init != MH_ERROR_ALREADY_INITIALIZED) {
-        Log("MH_Initialize failed: %d", static_cast<int>(init));
-        return false;
-    }
-
-    // Optional event-driven pause barrier. If it cannot be validated, the existing
-    // Menu visibility path remains the fail-open compatibility behavior.
-    LegacyInstallPauseBarrierHook_Xbox156Only(environment);
-
-    const MH_STATUS create = MH_CreateHook(
-        g_postInputEventTarget,
-        reinterpret_cast<void*>(&LegacyHookPostInputEventProfiledCore),
-        reinterpret_cast<void**>(&g_originalPostInputEvent));
-    if (create != MH_OK) {
-        Log("MH_CreateHook(PostInputEvent) failed: %d", static_cast<int>(create));
-        return false;
-    }
-
-    const MH_STATUS enable = MH_EnableHook(g_postInputEventTarget);
-    if (enable != MH_OK) {
-        MH_RemoveHook(g_postInputEventTarget);
-        g_originalPostInputEvent = nullptr;
-        Log("MH_EnableHook(PostInputEvent) failed: %d", static_cast<int>(enable));
-        return false;
-    }
-
-    Log(
-        "KCD2 Clean Pause v%s build=%s active; env=%p input=%p game(IGame*)=%p flashUI=%p mainThread=%lu PostInputEvent=%p",
-        CLEAN_PAUSE_VERSION,
-        CLEAN_PAUSE_BUILD_ID,
-        g_environment,
-        g_input,
-        g_game,
-        g_flashUI,
-        static_cast<unsigned long>(g_mainThreadId),
-        g_postInputEventTarget);
-    return true;
-}
-
-DWORD WINAPI LegacyBootstrapThread_Unreachable(void*)
-{
-    Log("native bootstrap started; target=KCD2 1.5.6 Windows retail; KCD2 Clean Pause v%s build=%s",
-        CLEAN_PAUSE_VERSION, CLEAN_PAUSE_BUILD_ID);
-
-    HMODULE whGame{};
-    for (DWORD elapsed = 0; elapsed < kWaitForWhGameMs && !g_stopping.load(); elapsed += kPollMs) {
-        whGame = GetModuleHandleW(L"WHGame.dll");
-        if (whGame)
-            break;
-        Sleep(kPollMs);
-    }
-
-    if (!whGame) {
-        Log("WHGame.dll not found; Clean Pause disabled");
-        return 0;
-    }
-
-    LogWhGameFingerprint(whGame);
-
-    RuntimeEnvironment environment{};
-    for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs && !g_stopping.load(); elapsed += kPollMs) {
-        if (LegacyFindRuntimeEnvironment_Xbox156Only(whGame, environment))
-            break;
-        Sleep(kPollMs);
-    }
-
-    if (!environment.base) {
-        Log("KCD2 1.5.6 runtime environment could not be validated; no hook installed");
-        return 0;
-    }
-
-    LegacyInstallInputHook_Xbox156Only(environment);
-    return 0;
-}
-
 } // namespace
-
-bool LegacyStart_Unreachable(HMODULE selfModule)
-{
-    g_selfModule = selfModule;
-    g_stopping.store(false, std::memory_order_relaxed);
-
-    HANDLE thread = CreateThread(nullptr, 0, LegacyBootstrapThread_Unreachable, nullptr, 0, nullptr);
-    if (!thread)
-        return false;
-    CloseHandle(thread);
-    return true;
-}
-
-void LegacyStop_Unreachable()
-{
-    g_stopping.store(true, std::memory_order_release);
-}
 
 } // namespace clean_pause
 
@@ -2096,7 +1873,7 @@ bool ForwardVisiblePauseGestureIfNeeded(void* input, const InputEvent* event, bo
     if (!pressed)
         return false;
 
-    // Check visible Menu@0 before the legacy core performs the expensive HUD snapshot.
+    // Check visible Menu@0 before the shared core performs the expensive HUD snapshot.
     // If the render hook has not been established yet, establish only that cheap
     // identity first so an already-open vanilla menu still gets the fast path.
     bool visible{};
@@ -2123,7 +1900,7 @@ bool ForwardVisiblePauseGestureIfNeeded(void* input, const InputEvent* event, bo
 void __fastcall HookPostInputEventProfiled(void* input, const InputEvent* event, bool force)
 {
     // A visible vanilla pause menu owns Escape/Start completely. Detect that state
-    // before Steam barrier acquisition and before the legacy core can capture HUD
+    // before Steam barrier acquisition and before the shared core can capture HUD
     // presentation. Keep forwarding repeats until the matching physical release.
     if (ForwardVisiblePauseGestureIfNeeded(input, event, force))
         return;
@@ -2137,7 +1914,7 @@ void __fastcall HookPostInputEventProfiled(void* input, const InputEvent* event,
     if (ShouldTryDeferredSteamPauseBarrier(event))
         TryInstallDeferredSteamPauseBarrier();
 
-    LegacyHookPostInputEventProfiledCore(input, event, force);
+    HookPostInputEventCore(input, event, force);
 
     // g_cleanHidden is deliberately reused as the already-proven Menu@0 render gate
     // during the short provisional Steam handoff. A successful TryEnterCleanPause sets
