@@ -9,8 +9,9 @@ namespace clean_pause {
 // the loader lock.
 bool Start(HMODULE selfModule);
 
-// Best-effort shutdown used on process detach. The game process normally tears
-// the module down as a whole, so this is intentionally conservative.
+// Marks the runtime as stopping during normal process teardown. Clean Pause hooks
+// are process-lifetime state: Stop() does not remove MinHook detours and must not
+// be interpreted as support for loader-initiated hot unload/reload.
 void Stop();
 
 } // namespace clean_pause
