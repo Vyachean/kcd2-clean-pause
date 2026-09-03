@@ -288,31 +288,45 @@ for needle in (
     if needle not in xbox_resolver:
         raise SystemExit(f"Xbox framework identity adapter contract missing: {needle}")
 
-steam_resolver = native[
+profile_singleton_resolver = native[
     native.index("bool ResolveProfileFrameworkSingleton"):
     native.index("bool ResolveGameFramework")
 ]
 for needle in (
-    "kSteam156FrameworkStorageRva",
-    "kSteam156FrameworkVtableRva",
+    "FrameworkLocatorStrategy::ExactSingletonRva",
+    "expectedFrameworkStorageRva",
+    "expectedFrameworkVtableRva",
     "kGameFrameworkGetSystemSlot",
     "frameworkSystem != environment.system",
 ):
-    if needle not in steam_resolver:
-        raise SystemExit(f"Steam framework identity adapter contract missing: {needle}")
-if "kGameGetFrameworkSlot" in steam_resolver:
-    raise SystemExit("Steam framework adapter must not fall back to Xbox IGame[16]")
+    if needle not in profile_singleton_resolver:
+        raise SystemExit(f"profile singleton framework identity contract missing: {needle}")
+if "Storefront::Steam" in profile_singleton_resolver:
+    raise SystemExit("profile singleton framework resolver must not branch on storefront")
+if "kGameGetFrameworkSlot" in profile_singleton_resolver:
+    raise SystemExit("profile singleton framework resolver must not fall back to legacy IGame[16]")
 
 dispatcher = native[
     native.index("bool ResolveGameFramework"):
     native.index("bool ShouldSuppressProfileHudRootVisibility")
 ]
-if "ResolveProfileFrameworkSingleton" not in dispatcher:
-    raise SystemExit("framework dispatcher must route Steam through CCryAction singleton")
-if "LegacyResolveGameFramework_Xbox156Only" not in dispatcher:
-    raise SystemExit("framework dispatcher must retain the isolated Xbox adapter")
-if "Storefront::XboxMicrosoftStore" not in dispatcher:
-    raise SystemExit("framework dispatcher must scope legacy fallback to Xbox")
+for needle in (
+    "FrameworkLocatorStrategy::ExactSingletonRva",
+    "FrameworkLocatorStrategy::LegacyGameFrameworkSlot",
+    "FrameworkLocatorStrategy::None",
+    "ResolveProfileFrameworkSingleton",
+    "LegacyResolveGameFramework_Xbox156Only",
+):
+    if needle not in dispatcher:
+        raise SystemExit(f"framework strategy dispatcher contract missing: {needle}")
+for storefront in (
+    "Storefront::Steam",
+    "Storefront::XboxMicrosoftStore",
+    "Storefront::GOG",
+    "Storefront::EpicGamesStore",
+):
+    if storefront in dispatcher:
+        raise SystemExit(f"framework dispatcher must not branch on storefront: {storefront}")
 
 post = native[native.index("void __fastcall HookPostInputEvent"):native.index("bool ResolveGameFramework")]
 barrier_exchange = post.index("g_pauseBarrierObserved.exchange(false")
