@@ -96,7 +96,7 @@ class VisiblePauseGestureContractTests(unittest.TestCase):
         self.assertLess(original, root_restore)
         self.assertLess(root_restore, barrier)
 
-    def test_steam_entry_render_prehide_covers_pause_and_slow_handoff(self):
+    def test_steam_entry_render_prehide_covers_pause_handoff(self):
         hook = PROFILED[
             PROFILED.index("void __fastcall HookPauseGameProfiled"):
             PROFILED.index("bool InstallPauseBarrierHook")
