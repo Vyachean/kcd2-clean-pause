@@ -182,7 +182,11 @@ const char* ValidateProfileEnvironment(
     bool nameMatches{};
     __try {
         gameName = getName ? getName(candidate.game) : nullptr;
-        nameMatches = gameName && std::strcmp(gameName, "kcd2") == 0;
+        // Runtime captures prove different casing across supported retail builds:
+        // Xbox returned "kcd2", while Steam 1.5.6 release_1_5-15693 returns "KCD2".
+        // Keep the identity gate exact apart from those two observed spellings.
+        nameMatches = gameName && (std::strcmp(gameName, "kcd2") == 0
+            || std::strcmp(gameName, "KCD2") == 0);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         nameMatches = false;
     }
