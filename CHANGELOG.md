@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Release policy: antivirus / Smart App Control heuristic detections are documented compatibility/reputation signals, not release blockers by themselves. Vendor reclassification is optional evidence rather than a prerequisite for stable publication.
+
 ## v0.3.0-rc.5 — 2026-09-04
 
 Fifth v0.3.0 release candidate, consolidating the accepted Steam/Xbox runtime architecture and adding a conservative compatibility fallback for otherwise-unmatched builds in the verified `release_1_5` ABI family.
