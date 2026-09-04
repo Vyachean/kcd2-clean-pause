@@ -169,7 +169,8 @@ jobs:
           $asiHash = (Get-FileHash "release/$asiAsset" -Algorithm SHA256).Hash.ToLowerInvariant()
           $versionHash = (Get-FileHash "release/$versionAsset" -Algorithm SHA256).Hash.ToLowerInvariant()
           # Public checksums cover only assets we intentionally distribute. The standalone
-          # package is still built, packaged and hashed in CI while Defender issue #38 is open.
+          # package is still built, packaged and hashed in CI under the current ASI-first
+          # edition-publication policy; antivirus/reputation status is not the gate.
           "$asiHash  $asiAsset" | Set-Content release/SHA256SUMS.txt -Encoding ascii
           @(
             "$asiHash  $asiAsset",
@@ -273,7 +274,7 @@ jobs:
           set -euo pipefail
           remote_tag_sha="$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')"
           [[ "$remote_tag_sha" == "$GITHUB_SHA" ]] || { echo "Tag points to $remote_tag_sha, workflow commit is $GITHUB_SHA" >&2; exit 1; }
-          # Standalone version.dll is intentionally not a public v0.2.1 asset while #38 is unresolved.
+          # Standalone version.dll remains non-public under the current ASI-first edition policy.
           args=("$TAG" "release/$ASI_ASSET" "release/SHA256SUMS.txt" --title "KCD2 Clean Pause $TAG" --notes-file docs/RELEASE_NOTES.md --verify-tag)
           [[ "$PRERELEASE" == "true" ]] && args+=(--prerelease)
           gh release create "${args[@]}"
