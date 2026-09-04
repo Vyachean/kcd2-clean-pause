@@ -2,7 +2,7 @@
 
 Prepared for the currently published Nexus ASI edition.
 
-> Release-candidate note: v0.2.2 remains the immutable Nexus/stable release. GitHub prerelease v0.3.0-rc.5 is published after final Steam/Xbox exact-profile acceptance and a successful forced test of the conservative release_1_5 fallback. The rc.5 ASI has known heuristic/ML antivirus detections documented below; stable v0.3.0 and Nexus promotion remain deferred while #38 is under vendor review.
+> Release-candidate note: v0.2.2 remains the immutable Nexus/stable release. GitHub prerelease v0.3.0-rc.5 is published after final Steam/Xbox exact-profile acceptance and a successful forced test of the conservative release_1_5 fallback. The rc.5 ASI has known heuristic/ML antivirus detections documented below; #38 tracks them as a non-blocking compatibility/reputation issue rather than a stable-release gate.
 
 ## Page metadata
 
@@ -61,7 +61,7 @@ Clean Pause does not create a separate pause system. KCD2 remains the owner of t
 
 Reported heuristic/ML detections currently include Microsoft `Program:Win32/Wacapew.C!ml`, Cynet `Malicious (score: 100)`, and Symantec `ML.Attribute.HighConfidence`.
 
-These detections are not, by themselves, proof that the file is malicious. The source is public, the release is produced by the repository's GitHub Actions workflow, and the published package includes exact hashes/provenance. Vendor-review status is tracked in #38.
+These detections are not, by themselves, proof that the file is malicious. The source is public, the release is produced by the repository's GitHub Actions workflow, and the published package includes exact hashes/provenance. Vendor-review status is tracked in #38, but vendor reclassification is not required for project release decisions.
 
 For the public mod page, present the detections and provenance factually and let users make their own installation decision. Exact release hashes should be taken from the published `SHA256SUMS.txt`.
 
@@ -165,7 +165,7 @@ KCD2 Clean Pause v0.2.2 — ASI
 
 Main ASI release. Includes KCD2 Clean Pause, the pinned official x64 Ultimate ASI Loader for fresh installation, installation instructions, provenance/hashes, and required third-party license notices.
 
-Do **not** upload a CI/development build as v0.2.2 and do **not** upload the CI-only standalone `version.dll` package while issue #38 remains unresolved.
+Do **not** upload a CI/development build as v0.2.2. The current standalone `version.dll` package remains CI-only under the project's ASI-first edition-publication policy.
 
 ## Changelog
 
