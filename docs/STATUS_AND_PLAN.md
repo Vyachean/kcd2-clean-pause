@@ -3,15 +3,14 @@
 ## Release status
 
 - **Stable public release:** v0.2.2 ASI.
-- **Published GitHub prerelease:** v0.3.0-rc.4 ASI.
-- **Prepared candidate:** v0.3.0-rc.5.
+- **Published GitHub prerelease:** v0.3.0-rc.5 ASI.
 - **Steam 1.5.6 `release_1_5-15693`:** exact-profile runtime accepted.
 - **Xbox / Microsoft Store 1.5.6:** exact-profile runtime accepted.
 - **GOG / Epic Games Store 1.5.6:** exact environment profiles implemented; Clean Pause-specific smoke QA pending.
 - **Standalone version.dll:** built and validated in CI; new public distribution withheld.
-- **Public rc.5 / stable v0.3.0:** blocked by Defender / Smart App Control issue #38.
+- **Stable v0.3.0:** blocked by Defender / Smart App Control issue #38 pending vendor review.
 
-Nexus remains on stable v0.2.2 while #38 is unresolved.
+Nexus remains on stable v0.2.2 while the stable-release gate is unresolved.
 
 ## Accepted architecture
 
@@ -59,15 +58,15 @@ Steam and Xbox final exact-profile smoke tests passed repeated Clean Pause -> va
 8. Native hooks are process-lifetime state; hot DLL unload/reload is unsupported.
 9. Retail controller IDs remain authoritative: `xi_start=516`, `xi_a=526`, `xi_b=527`.
 
-## Release blocker #38
+## Antivirus / reputation status (#38)
 
-Runtime acceptance is complete enough to assemble RC5, but public native publication remains blocked by security/reputation evidence.
+v0.3.0-rc.5 is intentionally published as a prerelease with the known heuristic/ML detections documented in its release notes. The source, public CI provenance and release checksums are available for independent review.
 
-Until #38 is resolved: do not promote stable v0.3.0; do not require users to disable Defender/Smart App Control or add exclusions; do not use packing/obfuscation/renaming as evasion; keep standalone publication disabled; submit the exact frozen candidate intended for publication to Microsoft Security Intelligence and record its submission ID/verdict.
+Issue #38 remains open as the **stable v0.3.0 gate**: submit the exact published rc.5 ASI to Microsoft Security Intelligence, record the submission ID/verdict, and recheck the exact published binary after vendor review. Standalone publication remains withheld.
 
 ## Remaining work
 
 - #45: physical private C++ API split between bootstrap/profile resolution and the shared Clean Pause core.
 - #52: residual non-blocking single-frame Steam presentation issue.
 - GOG/Epic Clean Pause-specific runtime smoke.
-- #38: Microsoft / Smart App Control review before public native promotion.
+- #38: Microsoft / Smart App Control review before stable v0.3.0 promotion.
