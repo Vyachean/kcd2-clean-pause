@@ -1,8 +1,6 @@
-# Nexus Mods publication copy — KCD2 Clean Pause v0.2.2
+# Nexus Mods publication copy — KCD2 Clean Pause v0.3.0
 
-Prepared for the currently published Nexus ASI edition.
-
-> Release-candidate note: v0.2.2 remains the immutable Nexus/stable release. GitHub prerelease v0.3.0-rc.5 is published after final Steam/Xbox exact-profile acceptance and a successful forced test of the conservative release_1_5 fallback. The rc.5 ASI has known heuristic/ML antivirus detections documented below; #38 tracks them as a non-blocking compatibility/reputation issue rather than a stable-release gate.
+Prepared for the stable v0.3.0 ASI release.
 
 ## Page metadata
 
@@ -12,7 +10,7 @@ KCD2 Clean Pause
 
 **Version**
 
-0.2.2
+0.3.0
 
 **Category**
 
@@ -20,21 +18,28 @@ User Interface
 
 **Summary**
 
-Pause Kingdom Come: Deliverance II without covering the current gameplay view, keeping the HUD and subtitles visible while the game is paused.
+Pause Kingdom Come: Deliverance II while keeping the current gameplay view, HUD and subtitles visible.
 
-**Runtime-tested version for v0.2.2**
+**Runtime-tested**
 
-Kingdom Come: Deliverance II 1.5.6 — PC Xbox Store / Xbox app version, tested with an Xbox controller.
+- Kingdom Come: Deliverance II 1.5.6 — Steam, `release_1_5-15693`.
+- Kingdom Come: Deliverance II 1.5.6 — PC Xbox Store / Xbox app.
 
-**Other storefronts**
+Steam was tested with keyboard Escape. Xbox / Microsoft Store was tested with the accepted keyboard/controller pause flow.
 
-The v0.3.0-rc.5 candidate uses one profile-driven runtime. Steam 1.5.6 and Xbox / Microsoft Store 1.5.6 are both runtime-accepted on exact build profiles. Xbox now uses exact captured `gEnv` and static `IGameFramework` roots instead of the old writable-memory scan / historical `IGame[16]` path. For an otherwise-unmatched build in the verified `release_1_5-<numeric id>` family, Clean Pause may use a conservative anchor-derived `gEnv` fallback only after full live ABI validation; fallback mode has no version-specific framework/PauseGame observer or presentation quirks. GOG/Epic exact environment profiles remain implemented but should not yet be described as Clean Pause runtime-tested by this project.
+**Additional compatibility**
+
+GOG and Epic Games Store 1.5.6 exact environment profiles are implemented from distribution-specific evidence, but this project has not completed Clean Pause-specific in-game smoke QA on those storefronts. Do not describe GOG/Epic as runtime-tested.
+
+For an otherwise-unmatched build whose metadata still identifies the verified `release_1_5-<numeric id>` ABI family, the mod can attempt a conservative compatibility fallback. It resolves `gEnv` from unique executable anchor evidence, validates the live runtime before installing hooks, and deliberately avoids borrowing known-build framework roots or presentation quirks. Other ABI branches and ambiguous evidence fail closed.
 
 ## Description
 
 KCD2 Clean Pause changes how the normal pause action is presented.
 
-Pressing Escape or Xbox Start pauses the game through KCD2's own pause lifecycle, but keeps the current gameplay frame visible instead of immediately drawing the normal pause-menu surface. The HUD, dialogue subtitles, and active NPC overhead subtitles remain visible, and the retained image stays sharp without the normal pause depth-of-field blur.
+Pressing **Escape** or **Xbox Start** pauses the game through KCD2's own pause lifecycle, but keeps the current gameplay frame visible instead of immediately drawing the normal pause-menu surface. The HUD, dialogue subtitles and active NPC overhead subtitles remain visible, and the retained image stays sharp without the normal pause depth-of-field blur.
+
+KCD2 remains the owner of the actual pause state. The mod does not implement a separate pause system.
 
 ### Controls
 
@@ -47,90 +52,96 @@ Xbox B intentionally reveals the normal pause menu rather than resuming directly
 
 ### What the mod preserves
 
-- the current gameplay frame;
+- current gameplay frame;
 - gameplay HUD visibility;
 - dialogue subtitles;
 - active NPC overhead subtitles;
 - synchronized game/audio pause;
-- sharp presentation without the normal pause DoF blur;
-- the ordinary KCD2 pause menu for settings, save, quit, and normal resume behavior.
+- sharp presentation without normal pause DoF blur;
+- the ordinary KCD2 pause menu for settings, save, quit and normal resume behavior.
 
-Clean Pause does not create a separate pause system. KCD2 remains the owner of the actual pause state; the mod changes presentation around the verified vanilla pause transition and falls back to the visible vanilla menu if required state cannot be resolved safely.
+### v0.3.0 compatibility changes
 
-## Antivirus / Smart App Control notice for v0.3.0-rc.5
+v0.3.0 replaces the older cross-build assumptions with explicit runtime profiles:
 
-Reported heuristic/ML detections currently include Microsoft `Program:Win32/Wacapew.C!ml`, Cynet `Malicious (score: 100)`, and Symantec `ML.Attribute.HighConfidence`.
+- Steam 1.5.6 uses its exact PE/build identity, canonical `gEnv`, independent anchor validation and canonical `CCryAction` / `IGameFramework` root.
+- Xbox / Microsoft Store 1.5.6 uses exact runtime roots captured from the retail binary instead of the previous writable-memory `gEnv` scan and historical `IGame[16]` framework path.
+- Shared Clean Pause behavior is profile/capability-driven rather than storefront-branched.
+- Unknown `release_1_5` builds may use only the conservative validated fallback described above.
+- Unsupported future ABI branches remain fail-closed.
 
-These detections are not, by themselves, proof that the file is malicious. The source is public, the release is produced by the repository's GitHub Actions workflow, and the published package includes exact hashes/provenance. Vendor-review status is tracked in #38, but vendor reclassification is not required for project release decisions.
+## Antivirus / Smart App Control notice
 
-For the public mod page, present the detections and provenance factually and let users make their own installation decision. Exact release hashes should be taken from the published `SHA256SUMS.txt`.
+The v0.3.0 native ASI may be reported by heuristic/ML antivirus scanners. Current reported detections include:
+
+- Microsoft Defender: `Program:Win32/Wacapew.C!ml`;
+- Cynet: `Malicious (score: 100)`;
+- Symantec: `ML.Attribute.HighConfidence`.
+
+These detections are not, by themselves, proof that the file is malicious. The project is open source, releases are built by the public GitHub Actions workflow, third-party dependencies are pinned/verified, and the release publishes exact provenance/checksums.
+
+Issue #38 tracks antivirus/security-product compatibility and reputation as non-blocking follow-up work. Vendor reclassification is not required for this stable release.
+
+Use the exact hashes from the published GitHub Release `SHA256SUMS.txt` when verifying the downloaded asset.
 
 ## Installation
 
-The main v0.2.2 package includes the official x64 **Ultimate ASI Loader** used by the tested setup.
+The v0.3.0 ASI package includes the pinned official x64 **Ultimate ASI Loader** used by the supported installation path.
 
 ### Fresh installation
 
 1. Close Kingdom Come: Deliverance II.
-2. Open the directory containing the game executable / `WHGame.dll`.
-3. Copy both files from the package into that same directory:
+2. Remove any old standalone Clean Pause `version.dll` installation.
+3. Open the directory containing the game executable / `WHGame.dll`.
+4. Copy both files from the package into that same directory:
    - `dinput8.dll`
    - `KCD2CleanPause.asi`
-4. Start the game normally.
+5. Start the game normally.
 
 ### Existing ASI loader
 
 If another mod already installed a compatible `dinput8.dll`, **do not overwrite it blindly**.
 
-`KCD2CleanPause.asi` must be placed where that existing ASI loader actually searches for plugins. With Ultimate ASI Loader, the simplest shared-loader layout is to put `KCD2CleanPause.asi` beside the existing `dinput8.dll`. Ultimate ASI Loader can also load plugins from its `scripts/` and `plugins/` directories.
-
-Do not leave `dinput8.dll` in one directory and put `KCD2CleanPause.asi` beside `WHGame.dll` in another directory unless the existing loader is explicitly configured to scan that location.
-
-Multiple ASI plugins can share one compatible loader, but the loader location and plugin search paths still matter.
-
-## Uninstall
-
-Close the game and remove:
-
-- `KCD2CleanPause.asi`
-- optional `kcd2_clean_pause_native.log`
-
-Remove `dinput8.dll` only if no other installed ASI mod needs it.
-
-## Troubleshooting
-
-When Clean Pause is successfully loaded, it writes `kcd2_clean_pause_native.log` beside `KCD2CleanPause.asi`.
-
-### No native log is created
-
-If `kcd2_clean_pause_native.log` is not created at all, first verify that the ASI loader is actually loading `KCD2CleanPause.asi` from its configured plugin location. An ASI file placed beside `WHGame.dll` is not automatically discovered by a loader located elsewhere.
-
-### Game crashes while loading native mods
-
-Isolate the loader from Clean Pause:
-
-1. Keep the ASI loader in the location being tested.
-2. Temporarily remove `KCD2CleanPause.asi` and any other `.asi` files from that loader's search path.
-3. Start the game.
-4. If the game starts normally, add only `KCD2CleanPause.asi` and test again.
-
-If the game works with the loader alone but crashes after adding Clean Pause, report it as a Clean Pause compatibility issue and include:
-
-- game version;
-- storefront/build — Steam, GOG, Epic Games Store, Xbox Store / Xbox app, or another build;
-- location of `dinput8.dll`;
-- location of `KCD2CleanPause.asi`;
-- whether the game starts with the loader present and Clean Pause removed;
-- `kcd2_clean_pause_native.log`, if one was created before the crash.
-
-For v0.3.0-rc.5, the native log records exact-profile or compatibility-fallback identity, environment/framework locator strategy, runtime capabilities, and core hook installation. Exact Steam/Xbox profiles normally report an active PauseGame observer; compatibility fallback intentionally reports no framework observer and uses the shared input/Menu path.
+`KCD2CleanPause.asi` must be placed where that existing loader actually searches for plugins. With Ultimate ASI Loader, the simplest shared-loader layout is to put `KCD2CleanPause.asi` beside the existing `dinput8.dll`. Ultimate ASI Loader can also load plugins from its `scripts/` and `plugins/` directories.
 
 Do not install the ASI edition together with an old standalone Clean Pause `version.dll` edition.
 
+## Known behavior
+
+- Xbox B from Clean Pause reveals the ordinary pause menu rather than resuming directly.
+- On Steam, a single residual visual frame can still be visible during Clean Pause entry. It is non-blocking and tracked in #52.
+
+## Troubleshooting
+
+When Clean Pause is loaded successfully, it writes `kcd2_clean_pause_native.log` beside `KCD2CleanPause.asi`.
+
+If no log is created, verify that the ASI loader is actually loading the plugin from its configured search path.
+
+If the game starts with the loader alone but fails after adding only `KCD2CleanPause.asi`, report:
+
+- KCD2 version;
+- storefront/build;
+- locations of `dinput8.dll` and `KCD2CleanPause.asi`;
+- whether the game starts with the loader present and Clean Pause removed;
+- `kcd2_clean_pause_native.log`, if one was created.
+
+The native log records build/profile identity, environment/framework locator strategy, runtime capabilities and hook installation.
+
+## Uninstall
+
+Close KCD2 and remove:
+
+- `KCD2CleanPause.asi`;
+- optional `kcd2_clean_pause_native.log`.
+
+Remove `dinput8.dll` only if no other installed ASI mod needs that loader.
+
+Native hooks are process-lifetime state; hot unload/reload is unsupported.
+
 ## Credits
 
-- **ThirteenAG** — Ultimate ASI Loader, distributed under the MIT License. The release ZIP contains the exact upstream version/provenance and license text.
-- **TsudaKageyu / MinHook contributors** — MinHook native hooking library and bundled HDE components under their respective licenses.
+- **ThirteenAG** — Ultimate ASI Loader, MIT License.
+- **TsudaKageyu / MinHook contributors** — MinHook and bundled HDE components under their respective licenses.
 - **Warhorse Studios** — Kingdom Come: Deliverance II.
 
 Source code and issue tracker:
@@ -145,67 +156,52 @@ Until the project adopts an explicit license for its own Clean Pause source, use
 - asset use in other mods: permission required;
 - commercial use: not permitted without permission.
 
-These permissions do not replace or restrict the separate licenses of bundled third-party components such as Ultimate ASI Loader and MinHook.
+These permissions do not replace or restrict the separate licenses of bundled third-party components.
 
 ## Main file
 
 **File name**
 
-KCD2 Clean Pause v0.2.2 — ASI
+KCD2 Clean Pause v0.3.0 — ASI
 
 **Version**
 
-0.2.2
+0.3.0
 
 **Upload this artifact**
 
-`kcd2-clean-pause-v0.2.2-asi.zip`
+`kcd2-clean-pause-v0.3.0-asi.zip`
 
 **File description**
 
-Main ASI release. Includes KCD2 Clean Pause, the pinned official x64 Ultimate ASI Loader for fresh installation, installation instructions, provenance/hashes, and required third-party license notices.
+Stable ASI release for KCD2 1.5.6. Runtime-tested on Steam and Xbox / Microsoft Store. Includes KCD2 Clean Pause, the pinned official x64 Ultimate ASI Loader for fresh installation, installation instructions, provenance/checksums and required third-party license notices.
 
-Do **not** upload a CI/development build as v0.2.2. The current standalone `version.dll` package remains CI-only under the project's ASI-first edition-publication policy.
+Upload only the immutable GitHub Release artifact, not a local or CI rebuild. The standalone `version.dll` package remains CI-only under the current ASI-first publication policy.
 
 ## Changelog
 
-### 0.2.2
+### 0.3.0
 
-- Bundles the official x64 Ultimate ASI Loader for a complete fresh installation.
-- Pins and verifies the upstream loader release and SHA-256 during packaging.
-- Includes upstream loader provenance and MIT license.
-- Supports shared compatible ASI loaders, with the plugin installed in that loader's actual plugin search path.
-- Clean Pause runtime behavior is unchanged from v0.2.1.
+- Adds the runtime-tested Steam 1.5.6 exact profile.
+- Replaces Xbox legacy scanning/`IGame[16]` framework discovery with exact retail-captured runtime roots.
+- Unifies build/profile/capability handling around one shared Clean Pause runtime.
+- Adds a conservative compatibility fallback for otherwise-unmatched builds in the verified `release_1_5` ABI family.
+- Removes the production translation-unit wrapper.
+- Preserves HUD, dialogue subtitles, active NPC overhead subtitles and sharp pause presentation.
+- Keeps KCD2 as the sole logical pause owner with fail-open vanilla-menu behavior.
+- Documents known heuristic/ML antivirus detections and public build provenance.
 
-### 0.2.1 runtime changes included in this release
+## Nexus upload checklist — v0.3.0
 
-- Removes the pre-pause visual stall so picture/simulation and dialogue audio pause together.
-- Prevents the hidden-HUD transition blink.
-- Preserves dialogue subtitles and active NPC overhead subtitles.
-- Keeps the retained frame sharp without pause DoF blur.
-- Keeps KCD2 as the sole logical pause owner with a fail-open vanilla-menu fallback.
-
-## Nexus upload checklist — v0.2.2 historical release
-
-- Upload only the immutable GitHub Release `kcd2-clean-pause-v0.2.2-asi.zip`, not a local/CI rebuild.
+- Upload only the immutable GitHub Release `kcd2-clean-pause-v0.3.0-asi.zip`.
+- Set file version to **0.3.0**.
 - Category: **User Interface**.
 - Add relevant UI / Quality of Life tags if available.
-- Apply the required **AI-Generated Content** tag because generative AI was used for code development.
-- Do not apply the **Nexus Mods Turns 25** event tag; the 2026 event rules prohibit generative-AI code/assets for participating mods.
-- Keep the page hidden/unpublished until the uploaded file has completed Nexus security scanning.
-- If the file is quarantined, do not delete/reupload it repeatedly; retain the file and provide the GitHub release/provenance information to Nexus moderation.
-- Before pressing Publish, confirm the displayed Nexus file version is **0.2.2** and the archive contains no nested archives.
-
-## Next-release compatibility checklist
-
-Before changing the Nexus compatibility claim for Steam/GOG/Epic:
-
-- test the exact frozen v0.3.0-rc.5 candidate rather than an earlier RC/diagnostic build;
-- complete the intended Clean Pause in-game smoke QA for every storefront being claimed as runtime-tested;
-- if the Steam RC is accepted, publish stable v0.3.0 through the normal immutable GitHub release workflow;
-- update the Nexus page version/changelog and tested-storefront wording together;
-- upload only the stable v0.3.0 GitHub ASI artifact, not the RC artifact;
-- retain fail-closed wording for unknown/mismatched KCD2 builds.
+- Apply any Nexus-required AI-generated-content disclosure/tag applicable to the project.
+- Do not claim GOG/Epic as runtime-tested until their smoke QA is completed.
+- Keep the antivirus notice factual and point to source/provenance/checksums.
+- If Nexus quarantines the file, keep the immutable artifact and provide its GitHub release/provenance information to Nexus moderation rather than repeatedly rebuilding/reuploading.
+- Confirm the archive contains no nested archive and the displayed Nexus file version is **0.3.0** before publishing.
 
 ## Optional presentation asset
 
