@@ -48,6 +48,4 @@ CI always builds and validates **both** editions:
 - each ZIP must contain exactly its expected release files;
 - internal Actions checksums cover both packages.
 
-Public release assets are edition-gated. For **v0.2.1**, only the ASI ZIP was published because Defender investigation #38 blocks distribution of the new standalone binary. That immutable v0.2.1 package predates bundled-loader packaging; the bundled loader contract applies to subsequent releases generated after this change. The standalone ZIP remains a CI-only validation artifact until #38 is resolved.
-
-Do not obtain/whitelist an unofficial standalone build to bypass that gate.
+Public release assets are edition-gated. Historical v0.2.1 published only the ASI ZIP while the project was still treating Defender investigation #38 as a release gate. That policy has since changed: antivirus/reputation verdicts are not release blockers by themselves. The standalone ZIP remains a CI-only validation artifact under the current ASI-first publication policy; changing that edition policy is a separate release decision.
