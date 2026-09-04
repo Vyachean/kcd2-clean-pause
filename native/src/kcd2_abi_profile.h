@@ -32,7 +32,6 @@ struct VtableLayout {
     std::size_t inputPostInputEvent{};
     std::size_t gameGetLongName{};
     std::size_t gameGetName{};
-    std::size_t gameGetFramework{};
     std::size_t gameFrameworkPauseGame{};
     std::size_t gameFrameworkGetSystem{};
     std::size_t scriptExecuteBuffer{};

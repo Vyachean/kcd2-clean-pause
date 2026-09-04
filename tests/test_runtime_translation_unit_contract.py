@@ -48,11 +48,12 @@ class RuntimeTranslationUnitContractTests(unittest.TestCase):
             "LegacyInstallPauseBarrierHook_Xbox156Only",
             "LegacyInstallInputHook_Xbox156Only",
             "LegacyHookPostInputEventProfiledCore",
+            "LegacyFindRuntimeEnvironment_Xbox156Only",
+            "LegacyResolveGameFramework_Xbox156Only",
         ):
             self.assertNotIn(token, RUNTIME)
         self.assertIn("void __fastcall HookPostInputEventCore", RUNTIME)
-        self.assertIn("LegacyFindRuntimeEnvironment_Xbox156Only", RUNTIME)
-        self.assertIn("LegacyResolveGameFramework_Xbox156Only", RUNTIME)
+        self.assertIn("bool ResolveProfileFramework", RUNTIME)
 
 
 if __name__ == "__main__":

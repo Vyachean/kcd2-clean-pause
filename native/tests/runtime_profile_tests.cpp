@@ -290,6 +290,13 @@ bool TestSteamExactFingerprintAndEnvironmentValidation()
     CHECK(steam->identityStrategy == kcd2::runtime::BuildIdentityStrategy::ExactPeFingerprint);
     CHECK(steam->environmentLocator
         == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation);
+    CHECK(steam->frameworkLocator
+        == kcd2::runtime::FrameworkLocatorStrategy::ExactPointerStorageRva);
+    CHECK(steam->expectedFrameworkRva == 0x0549d328);
+    CHECK(steam->expectedFrameworkVtableRva == 0x040472d0);
+    CHECK(steam->capabilities.deferPauseBarrierUntilPauseInput);
+    CHECK(steam->capabilities.pinHudRootDuringPause);
+    CHECK(steam->capabilities.prehideMenuDuringPauseTransition);
     CHECK(steam->abi == &kcd2::runtime::Release15AbiProfile());
 
     auto syntheticProfile = *steam;
@@ -321,6 +328,7 @@ bool TestGogAndEpicBuildIdentity()
     CHECK(gogProfile->environmentLocator
         == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva);
     CHECK(gogProfile->expectedEnvironmentRva == 0x049177f8);
+    CHECK(gogProfile->frameworkLocator == kcd2::runtime::FrameworkLocatorStrategy::None);
     CHECK(gogProfile->validation == kcd2::runtime::BuildValidationLevel::ExternalRuntimeEvidence);
 
     auto wrongGog = gog;
@@ -338,6 +346,7 @@ bool TestGogAndEpicBuildIdentity()
         == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva);
     CHECK(epicProfile->requiredTimestamp == 0x6a34f917);
     CHECK(epicProfile->expectedEnvironmentRva == 0x0491d8b8);
+    CHECK(epicProfile->frameworkLocator == kcd2::runtime::FrameworkLocatorStrategy::None);
 
     auto wrongEpicTimestamp = epic;
     wrongEpicTimestamp.fingerprint.timestamp ^= 1;
@@ -383,7 +392,15 @@ bool TestUnknownAndMismatchedBuildsFailClosed()
     CHECK(xboxProfile->storefront == kcd2::runtime::Storefront::XboxMicrosoftStore);
     CHECK(xboxProfile->identityStrategy == kcd2::runtime::BuildIdentityStrategy::ExactPeFingerprint);
     CHECK(xboxProfile->environmentLocator
-        == kcd2::runtime::EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan);
+        == kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva);
+    CHECK(xboxProfile->expectedEnvironmentRva == 0x049d6ef8);
+    CHECK(xboxProfile->frameworkLocator
+        == kcd2::runtime::FrameworkLocatorStrategy::ExactObjectRva);
+    CHECK(xboxProfile->expectedFrameworkRva == 0x056ec680);
+    CHECK(xboxProfile->expectedFrameworkVtableRva == 0x040daf18);
+    CHECK(!xboxProfile->capabilities.deferPauseBarrierUntilPauseInput);
+    CHECK(!xboxProfile->capabilities.pinHudRootDuringPause);
+    CHECK(!xboxProfile->capabilities.prehideMenuDuringPauseTransition);
     CHECK(xboxProfile->validation == kcd2::runtime::BuildValidationLevel::RuntimeTested);
     return true;
 }
