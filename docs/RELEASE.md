@@ -37,17 +37,17 @@ GOG/Epic exact environment profiles remain implemented but are not yet runtime-t
 
 - v0.2.2 ASI: current stable public release.
 - v0.3.0-rc.5 ASI: current published prerelease.
-- new standalone `version.dll`: CI-only while #38 is unresolved.
+- new standalone `version.dll`: CI-only under the current ASI-first edition-publication policy.
 - `SHA256SUMS.txt`: only intentionally public assets.
 - `CI_SHA256SUMS.txt`: both internally validated packages.
 
 ## Antivirus / Smart App Control status (#38)
 
-rc.5 is allowed to publish as a prerelease with a clear factual warning about its known heuristic/ML detections and full source/build provenance.
+Known heuristic/ML detections are disclosed with clear source/build provenance, but antivirus or Smart App Control verdicts are **not release gates by themselves**.
 
-Issue #38 remains the stable v0.3.0 gate. The exact published rc.5 ASI should be submitted to Microsoft Security Intelligence and its submission ID/verdict recorded before stable promotion.
+Issue #38 tracks platform compatibility/reputation. Vendor submissions and reclassification results are useful evidence and should be recorded when pursued, but a Microsoft/Symantec/Cynet clean verdict is not required for prerelease or stable promotion.
 
-No packing, obfuscation, payload renaming, or similar AV-evasion work is part of the release process.
+A release is blocked only by project-controlled evidence such as failed QA/compatibility gates, broken provenance, an unexplained source/artifact mismatch, or evidence of actual malicious/compromised behavior. No packing, obfuscation, payload renaming, or similar AV-evasion work is part of the release process.
 
 ## Publication flow
 
