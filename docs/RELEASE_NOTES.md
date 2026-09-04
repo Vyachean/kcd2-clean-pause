@@ -40,7 +40,7 @@ A diagnostic build forced the known Xbox 1.5.6 binary through this fallback, res
 
 The ASI package contains `KCD2CleanPause.asi`, the pinned official x64 Ultimate ASI Loader, installation instructions, provenance/hashes, upstream license, and third-party notices.
 
-The standalone `version.dll` target is still built, validated, packaged and hashed in CI, but remains non-public while #38 is unresolved.
+The standalone `version.dll` target is still built, validated, packaged and hashed in CI, but remains non-public under the current ASI-first edition-publication policy.
 
 v0.3.0-rc.5 is published as a prerelease with a known antivirus/Smart App Control warning. Current reported heuristic/ML detections include:
 
@@ -50,6 +50,6 @@ v0.3.0-rc.5 is published as a prerelease with a known antivirus/Smart App Contro
 
 These detections are not treated as proof of malware, but neither are they ignored. The project is open source, the release is built by public GitHub Actions, dependencies are pinned, and release hashes/provenance are published so users can independently evaluate the prerelease.
 
-Exact published asset hashes are provided in `SHA256SUMS.txt`. Vendor-review status is tracked in #38.
+Exact published asset hashes are provided in `SHA256SUMS.txt`. Vendor-review status is tracked in #38 as non-blocking compatibility/reputation work.
 
-Stable v0.3.0 remains blocked until #38's vendor-review acceptance criteria are satisfied.
+These antivirus/Smart App Control detections do not by themselves block stable v0.3.0. Stable promotion is governed by the project's own QA, compatibility, provenance, and release criteria.
