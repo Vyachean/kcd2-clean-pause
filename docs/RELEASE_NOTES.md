@@ -36,26 +36,20 @@ A diagnostic build forced the known Xbox 1.5.6 binary through this fallback, res
 - Xbox B from Clean Pause reveals the normal vanilla pause menu rather than resuming directly.
 - Steam can still show a residual single visual frame after pause ownership is established; tracked separately in #52.
 
-## Package and publication status
+## Package and antivirus notice
 
 The ASI package contains `KCD2CleanPause.asi`, the pinned official x64 Ultimate ASI Loader, installation instructions, provenance/hashes, upstream license, and third-party notices.
 
 The standalone `version.dll` target is still built, validated, packaged and hashed in CI, but remains non-public while #38 is unresolved.
 
-v0.3.0-rc.5 is published as a prerelease with a known antivirus/Smart App Control warning.
-
-Exact ASI SHA-256:
-
-`223e62c4a1f4fc2ff47ab4723e742570275dfccadd2ed67def0ca9dc169352a5`
-
-Current reported heuristic/ML detections include:
+v0.3.0-rc.5 is published as a prerelease with a known antivirus/Smart App Control warning. Current reported heuristic/ML detections include:
 
 - Microsoft Defender: `Program:Win32/Wacapew.C!ml`;
 - Cynet: `Malicious (score: 100)`;
 - Symantec: `ML.Attribute.HighConfidence`.
 
-These detections are not treated as proof of malware, but neither are they ignored. The exact binary, source, build provenance and hashes are retained for vendor review in #38.
+These detections are not treated as proof of malware, but neither are they ignored. The project is open source, the release is built by public GitHub Actions, dependencies are pinned, and release hashes/provenance are published so users can independently evaluate the prerelease.
 
-Do **not** disable Defender or Smart App Control, add exclusions, or whitelist the ASI solely to install the mod. If a security product blocks rc.5, leave the protection enabled and wait for the vendor verdict or use a version that your security policy accepts.
+Exact published asset hashes are provided in `SHA256SUMS.txt`. Vendor-review status is tracked in #38.
 
 Stable v0.3.0 remains blocked until #38's vendor-review acceptance criteria are satisfied.
