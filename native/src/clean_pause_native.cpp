@@ -1282,6 +1282,7 @@ constexpr DWORD kProfileSlowPollMs = 1'000;
 constexpr ULONGLONG kProfileWaitHeartbeatMs = 30'000;
 
 HMODULE g_profileWhGame{};
+kcd2::runtime::BuildProfile g_compatibilityFallbackProfile{};
 const kcd2::runtime::BuildProfile* g_activeBuildProfile{};
 std::atomic_bool g_visiblePauseGesturePassthrough{false};
 std::atomic_bool g_hudRootVisibilitySuppressionLogged{false};
@@ -1902,9 +1903,17 @@ DWORD WINAPI BootstrapThread(void*)
         identity.buildCode.empty() ? "<unavailable>" : identity.buildCode.c_str());
 
     const auto* profile = kcd2::runtime::MatchSupportedBuild(identity);
+    bool compatibilityFallback{};
     if (!profile) {
-        Log("unsupported WHGame build; Clean Pause disabled; no hooks installed");
-        return 0;
+        if (!kcd2::runtime::BuildCompatibleRelease15Fallback(
+                identity, g_compatibilityFallbackProfile)) {
+            Log("unsupported WHGame build/release branch; Clean Pause disabled; no hooks installed");
+            return 0;
+        }
+        profile = &g_compatibilityFallbackProfile;
+        compatibilityFallback = true;
+        Log(
+            "no exact registered build profile; attempting conservative release_1_5 compatibility fallback; framework observer and profile presentation quirks disabled");
     }
     if (!profile->abi || !kcd2::runtime::MatureRuntimeSupports(*profile->abi)) {
         Log("matched build %s selects an ABI unsupported by this Clean Pause runtime; no hooks installed",
@@ -1980,10 +1989,11 @@ DWORD WINAPI BootstrapThread(void*)
         return 0;
     }
 
-    Log("runtime profile validated for %s; env=%p mainThread=%lu",
+    Log("runtime profile validated for %s; env=%p mainThread=%lu%s",
         profile->name,
         environment.base,
-        static_cast<unsigned long>(environment.mainThreadId));
+        static_cast<unsigned long>(environment.mainThreadId),
+        compatibilityFallback ? " compatibilityFallback=yes" : "");
     if (!InstallInputHook(environment))
         Log("Clean Pause hook installation failed for %s; vanilla behavior retained where possible",
             profile->name);
