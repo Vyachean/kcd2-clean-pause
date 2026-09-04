@@ -11,7 +11,14 @@ Runtime status:
 - Otherwise-unmatched release_1_5-<numeric id> builds may use a conservative compatibility fallback only after unique-anchor resolution and full live ABI validation.
 - Fallback mode intentionally has no version-specific framework/PauseGame observer or exact-profile presentation quirks.
 - Other ABI branches and ambiguous evidence fail closed.
-- Public rc.5/stable v0.3.0 publication remains blocked by Defender / Smart App Control investigation #38.
+- v0.3.0-rc.5 is published as a prerelease with a known antivirus/Smart App Control warning; stable v0.3.0 remains blocked by #38 pending vendor review.
+
+Antivirus / Smart App Control notice:
+- Exact KCD2CleanPause.asi SHA-256 for v0.3.0-rc.5: 223e62c4a1f4fc2ff47ab4723e742570275dfccadd2ed67def0ca9dc169352a5
+- Current reported heuristic/ML detections include Microsoft Program:Win32/Wacapew.C!ml, Cynet Malicious (score: 100), and Symantec ML.Attribute.HighConfidence.
+- These detections are not by themselves proof that the file is malicious, but they remain under vendor review in issue #38.
+- Do not disable Defender or Smart App Control, add exclusions, or whitelist KCD2CleanPause.asi solely to install the mod.
+- If your security product blocks the file, leave the protection enabled and do not install that binary.
 
 Fresh installation:
 1. Close Kingdom Come: Deliverance II.

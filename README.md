@@ -4,21 +4,20 @@ Clean Pause for **Kingdom Come: Deliverance II** on Windows.
 
 The current stable release, **v0.2.2**, was runtime-tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbox controller.
 
-The current published GitHub prerelease is **v0.3.0-rc.4**. **v0.3.0-rc.5** is the current release candidate assembled from the accepted source architecture; public promotion remains blocked by Defender / Smart App Control investigation #38.
+The current published GitHub prerelease is **v0.3.0-rc.5**. It contains the accepted Steam/Xbox architecture and the conservative `release_1_5` compatibility fallback. The ASI is published with an explicit antivirus/Smart App Control warning; investigation #38 remains open before any stable v0.3.0 promotion.
 
 Steam 1.5.6 `release_1_5-15693` and Xbox / Microsoft Store 1.5.6 are runtime-accepted on the current source. Both now use exact build profiles and exact engine roots while sharing one Clean Pause input/state/presentation runtime. GOG/Epic profiles are backed by distribution-specific evidence but are not yet claimed as Clean Pause runtime-tested by this project.
 
 ## Release status
 
 - **Current stable release:** v0.2.2.
-- **Current published GitHub prerelease:** v0.3.0-rc.4.
-- **Current prepared candidate:** v0.3.0-rc.5.
+- **Current published GitHub prerelease:** v0.3.0-rc.5.
 - **Runtime acceptance:** Steam 1.5.6 `release_1_5-15693` and Xbox / Microsoft Store 1.5.6 exact-profile paths are accepted.
 - **Compatibility fallback:** otherwise-unmatched `release_1_5-<numeric id>` builds may use a conservative anchor-derived `gEnv` fallback after full live ABI validation; other ABI branches remain fail-closed.
 - **GOG / Epic Games Store:** exact environment profiles implemented; Clean Pause-specific smoke QA still pending.
 - **Published edition:** KCD2CleanPause.asi, using the upstream Ultimate ASI Loader.
 - **Standalone version.dll:** built and validated, but new publication remains withheld.
-- **Stable v0.3.0 / public rc.5 publication:** blocked by Defender / Smart App Control issue #38 until the exact candidate receives the required security/reputation review.
+- **Stable v0.3.0:** remains blocked by Defender / Smart App Control issue #38 pending vendor review of the exact rc.5 binary.
 
 Use the GitHub Releases page as the source of truth for versions and assets that are actually published.
 
@@ -39,6 +38,18 @@ Vanilla pause menu
 Clean Pause uses KCD2's own pause lifecycle. The vanilla pause menu remains logically open, but its render surface is suppressed while the gameplay presentation is retained. The mod does not manufacture a second pause state.
 
 Clean Pause keeps the retained frame sharp by removing the vanilla pause depth-of-field blur and preserves normal dialogue subtitles plus active NPC overhead speech bubbles.
+
+### Antivirus / Smart App Control notice
+
+The exact v0.3.0-rc.5 ASI (`SHA-256 223e62c4a1f4fc2ff47ab4723e742570275dfccadd2ed67def0ca9dc169352a5`) is currently flagged by several heuristic/ML scanners, including:
+
+- Microsoft Defender: `Program:Win32/Wacapew.C!ml`;
+- Cynet: `Malicious (score: 100)`;
+- Symantec: `ML.Attribute.HighConfidence`.
+
+These are heuristic/ML detections and are **not, by themselves, proof that the file is malicious**. This project does not ask users to bypass platform security to install it. If Windows Defender, Smart App Control, or another security product blocks the file, do not disable the protection, add an exclusion, or whitelist the ASI solely to make the mod run.
+
+The complete source, build workflow, pinned third-party dependencies, package provenance, and exact hashes are published in this repository so the binary can be reviewed and independently rebuilt. Microsoft/vendor review is tracked in #38.
 
 ### Known behavior
 

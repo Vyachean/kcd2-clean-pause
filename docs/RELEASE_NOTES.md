@@ -42,6 +42,20 @@ The ASI package contains `KCD2CleanPause.asi`, the pinned official x64 Ultimate 
 
 The standalone `version.dll` target is still built, validated, packaged and hashed in CI, but remains non-public while #38 is unresolved.
 
-Defender / Smart App Control investigation #38 remains a release blocker. RC5 is the next exact frozen candidate for packaging/provenance and Microsoft false-positive review. Normal distribution must not require users to disable Smart App Control or Defender, whitelist the module, or add exclusions.
+v0.3.0-rc.5 is published as a prerelease with a known antivirus/Smart App Control warning.
 
-No stable v0.3.0 promotion should occur until #38's acceptance criteria are satisfied.
+Exact ASI SHA-256:
+
+`223e62c4a1f4fc2ff47ab4723e742570275dfccadd2ed67def0ca9dc169352a5`
+
+Current reported heuristic/ML detections include:
+
+- Microsoft Defender: `Program:Win32/Wacapew.C!ml`;
+- Cynet: `Malicious (score: 100)`;
+- Symantec: `ML.Attribute.HighConfidence`.
+
+These detections are not treated as proof of malware, but neither are they ignored. The exact binary, source, build provenance and hashes are retained for vendor review in #38.
+
+Do **not** disable Defender or Smart App Control, add exclusions, or whitelist the ASI solely to install the mod. If a security product blocks rc.5, leave the protection enabled and wait for the vendor verdict or use a version that your security policy accepts.
+
+Stable v0.3.0 remains blocked until #38's vendor-review acceptance criteria are satisfied.

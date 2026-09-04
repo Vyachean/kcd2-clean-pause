@@ -2,7 +2,7 @@
 
 Prepared for the currently published ASI edition.
 
-> Release-candidate note: v0.2.2 remains the immutable Nexus/stable release. v0.3.0-rc.5 is the prepared current-source candidate after final Steam/Xbox exact-profile acceptance and a successful forced test of the conservative release_1_5 fallback. Do not publish rc.5 or promote Nexus to v0.3.0 while Defender / Smart App Control issue #38 remains unresolved.
+> Release-candidate note: v0.2.2 remains the immutable Nexus/stable release. GitHub prerelease v0.3.0-rc.5 is published after final Steam/Xbox exact-profile acceptance and a successful forced test of the conservative release_1_5 fallback. The rc.5 ASI has known heuristic/ML antivirus detections documented below; stable v0.3.0 and Nexus promotion remain deferred while #38 is under vendor review.
 
 ## Page metadata
 
@@ -56,6 +56,16 @@ Xbox B intentionally reveals the normal pause menu rather than resuming directly
 - the ordinary KCD2 pause menu for settings, save, quit, and normal resume behavior.
 
 Clean Pause does not create a separate pause system. KCD2 remains the owner of the actual pause state; the mod changes presentation around the verified vanilla pause transition and falls back to the visible vanilla menu if required state cannot be resolved safely.
+
+## Antivirus / Smart App Control notice for v0.3.0-rc.5
+
+Exact rc.5 `KCD2CleanPause.asi` SHA-256:
+
+`223e62c4a1f4fc2ff47ab4723e742570275dfccadd2ed67def0ca9dc169352a5`
+
+Reported heuristic/ML detections currently include Microsoft `Program:Win32/Wacapew.C!ml`, Cynet `Malicious (score: 100)`, and Symantec `ML.Attribute.HighConfidence`.
+
+Do not describe these detections as proven malware or as proven false positives. Do not instruct users to disable Defender/Smart App Control, add exclusions, or whitelist the file. Point users to the open-source repository, exact release hashes/provenance, and issue #38 for the vendor-review status.
 
 ## Installation
 
