@@ -1,55 +1,74 @@
-# KCD2 Clean Pause v0.3.0-rc.5
+# KCD2 Clean Pause v0.3.0
 
-Fifth release candidate for **Kingdom Come: Deliverance II 1.5.6** multi-store compatibility on Windows.
+Stable release for **Kingdom Come: Deliverance II 1.5.6** on Windows.
 
-RC5 consolidates the accepted Steam and Xbox runtime paths into one profile-driven architecture and adds a conservative compatibility bridge for otherwise-unmatched builds that still identify as the verified `release_1_5` ABI family.
+v0.3.0 promotes the runtime accepted through the rc.5 cycle. The stable release uses one profile-driven Clean Pause runtime, exact proven roots for the tested Steam and Xbox / Microsoft Store binaries, and a conservative fallback for otherwise-unmatched builds that still identify as the verified `release_1_5` ABI family.
 
-## Highlights
+## Runtime-tested
 
-- Steam 1.5.6 `release_1_5-15693` remains on its exact PE fingerprint, canonical `gEnv` RVA, independent anchor validation, and canonical `CCryAction` framework root.
-- Xbox / Microsoft Store 1.5.6 no longer uses the old writable-memory `gEnv` scan or historical `IGame[16]` framework accessor.
-- Runtime evidence captured from the real Xbox 1.5.6 binary established:
-  - `gEnv` RVA `0x049D6EF8`;
-  - static `IGameFramework` object RVA `0x056EC680`;
-  - expected framework vtable RVA `0x040DAF18`.
-- Both exact storefront paths converge on the same strong framework validation and the same Clean Pause state/presentation runtime.
-- The production translation-unit wrapper is gone; both native editions compile the shared runtime normally.
+### Steam 1.5.6
 
-## Conservative compatibility fallback
+- exact PE/build profile;
+- canonical `gEnv` with independent anchor validation;
+- canonical `CCryAction` / `IGameFramework` root;
+- deferred PauseGame observer;
+- repeated Clean Pause -> vanilla pause menu -> resume cycles passed.
 
-If an exact registered profile does not match, RC5 may attempt a fallback **only** when Warhorse build metadata has the form `release_1_5-<numeric assembly id>`.
+### Xbox / Microsoft Store 1.5.6
 
-The fallback derives `gEnv` from unique executable anchor evidence, validates the complete release_1_5 runtime, and installs only the shared input/Menu path. It deliberately does **not** reuse a known build's framework RVA, framework vtable, PauseGame observer, root-HUD pin, or Menu-prehide capability. Ambiguous evidence, malformed metadata, or another ABI branch leaves vanilla behavior untouched.
+- exact PE/build profile;
+- exact `gEnv` RVA `0x049D6EF8`;
+- exact static `IGameFramework` object RVA `0x056EC680`;
+- framework vtable RVA `0x040DAF18`;
+- repeated Clean Pause -> vanilla pause menu -> resume cycles passed.
 
-A diagnostic build forced the known Xbox 1.5.6 binary through this fallback, resolved the same `gEnv` RVA `0x049D6EF8`, and completed repeated Clean Pause -> vanilla-menu -> resume cycles.
+The previous Xbox writable-memory environment scan and historical `IGame[16]` framework adapter are no longer used in production.
 
-## Runtime acceptance
+## Compatibility fallback
 
-**Steam 1.5.6:** exact environment/framework validated, lazy PauseGame observer active, repeated Clean Pause cycles and vanilla-menu handoff/resume passed.
+For an otherwise-unmatched build whose Warhorse metadata matches `release_1_5-<numeric assembly id>`, Clean Pause may use a conservative compatibility path.
 
-**Xbox / Microsoft Store 1.5.6:** exact environment and static framework object validated, PauseGame observer active, repeated Clean Pause cycles and vanilla-menu handoff/resume passed.
+The fallback:
 
-**GOG / Epic Games Store:** exact environment profiles remain implemented, but Clean Pause-specific in-game smoke QA is still pending.
+1. derives `gEnv` from unique executable anchor evidence;
+2. performs full live release_1_5 ABI/interface validation;
+3. installs only the shared input/Menu compatibility runtime.
+
+It deliberately does not reuse a known build's framework RVA, PauseGame observer, root-HUD pin, or Menu-prehide capability. Ambiguous evidence, malformed metadata, or another ABI branch fails closed.
+
+A diagnostic build forced the retail Xbox 1.5.6 binary through this path and resolved the same independently known `gEnv` root while completing repeated Clean Pause cycles.
+
+## GOG / Epic Games Store
+
+Exact environment profiles are implemented from distribution-specific evidence, but Clean Pause-specific in-game smoke QA has not been completed by this project. They are therefore not advertised as runtime-tested in v0.3.0.
 
 ## Known behavior
 
 - Xbox B from Clean Pause reveals the normal vanilla pause menu rather than resuming directly.
-- Steam can still show a residual single visual frame after pause ownership is established; tracked separately in #52.
+- Steam can still show a residual single visual frame during Clean Pause entry; this is non-blocking and tracked in #52.
 
-## Package and antivirus notice
+## Antivirus / Smart App Control notice
 
-The ASI package contains `KCD2CleanPause.asi`, the pinned official x64 Ultimate ASI Loader, installation instructions, provenance/hashes, upstream license, and third-party notices.
-
-The standalone `version.dll` target is still built, validated, packaged and hashed in CI, but remains non-public under the current ASI-first edition-publication policy.
-
-v0.3.0-rc.5 is published as a prerelease with a known antivirus/Smart App Control warning. Current reported heuristic/ML detections include:
+The native ASI is currently reported by some heuristic/ML scanners, including:
 
 - Microsoft Defender: `Program:Win32/Wacapew.C!ml`;
 - Cynet: `Malicious (score: 100)`;
 - Symantec: `ML.Attribute.HighConfidence`.
 
-These detections are not treated as proof of malware, but neither are they ignored. The project is open source, the release is built by public GitHub Actions, dependencies are pinned, and release hashes/provenance are published so users can independently evaluate the prerelease.
+These detections are not, by themselves, proof that the file is malicious. KCD2 Clean Pause is open source; release binaries are produced by the repository's public GitHub Actions workflow with pinned/verified dependencies and published provenance/checksums.
 
-Exact published asset hashes are provided in `SHA256SUMS.txt`. Vendor-review status is tracked in #38 as non-blocking compatibility/reputation work.
+Issue #38 tracks antivirus/security-product compatibility and reputation as non-blocking follow-up work. Vendor reclassification is not a prerequisite for this release.
 
-These antivirus/Smart App Control detections do not by themselves block stable v0.3.0. Stable promotion is governed by the project's own QA, compatibility, provenance, and release criteria.
+The exact hashes of the published assets are included in `SHA256SUMS.txt`.
+
+## Package
+
+The public stable package is the ASI edition and contains:
+
+- `KCD2CleanPause.asi`;
+- the pinned official x64 Ultimate ASI Loader `dinput8.dll`;
+- installation instructions;
+- loader provenance;
+- third-party license notices.
+
+The standalone `version.dll` target continues to build and validate in CI but is not part of the current ASI-first public distribution.

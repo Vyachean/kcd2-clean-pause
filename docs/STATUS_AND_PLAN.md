@@ -2,15 +2,14 @@
 
 ## Release status
 
-- **Stable public release:** v0.2.2 ASI.
-- **Published GitHub prerelease:** v0.3.0-rc.5 ASI.
+- **Stable public release:** v0.3.0 ASI.
 - **Steam 1.5.6 `release_1_5-15693`:** exact-profile runtime accepted.
 - **Xbox / Microsoft Store 1.5.6:** exact-profile runtime accepted.
 - **GOG / Epic Games Store 1.5.6:** exact environment profiles implemented; Clean Pause-specific smoke QA pending.
 - **Standalone version.dll:** built and validated in CI; new public distribution is currently withheld by edition policy.
-- **Stable v0.3.0:** not blocked by antivirus/Smart App Control detections; promotion depends on project QA/support scope and an explicit release decision.
+- **Antivirus / Smart App Control:** known heuristic/ML detections are documented in #38 as non-blocking compatibility/reputation signals.
 
-Nexus remains on stable v0.2.2 until the project chooses to promote the next stable release.
+Nexus distribution should use the immutable v0.3.0 GitHub ASI artifact and the updated `docs/NEXUS.md` copy.
 
 ## Accepted architecture
 
@@ -60,7 +59,7 @@ Steam and Xbox final exact-profile smoke tests passed repeated Clean Pause -> va
 
 ## Antivirus / reputation status (#38)
 
-v0.3.0-rc.5 is intentionally published as a prerelease with the known heuristic/ML detections documented in its release notes. The source, public CI provenance and release checksums are available for independent review.
+v0.3.0 is published with the known heuristic/ML detections documented in its release notes. The source, public CI provenance and release checksums are available for independent review.
 
 Issue #38 is a **non-blocking compatibility/reputation tracker**. Microsoft or other vendor submissions may still be made and their verdicts recorded, but no vendor reclassification is required for prerelease or stable publication. Actual evidence of malicious behavior, a compromised dependency/build, or an unexplained source/artifact mismatch would be a real release blocker.
 

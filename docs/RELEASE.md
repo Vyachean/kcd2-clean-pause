@@ -4,7 +4,7 @@ GitHub Releases are the canonical public distribution channel. Generated native 
 
 ## Versioning
 
-The project follows Semantic Versioning (SemVer) with immutable tag-backed releases. Before 1.0, backward-compatible features increment **MINOR** and backward-compatible fixes increment **PATCH**. A release-candidate number increments only when another candidate for the same target release is needed. It is not incremented for every merged PR. The current target is stable v0.3.0. v0.3.0-rc.1 through rc.4 remain immutable history. v0.3.0-rc.5 is the current prerelease containing the accepted Steam/Xbox exact-profile architecture plus the conservative release_1_5 compatibility fallback.
+The project follows Semantic Versioning (SemVer) with immutable tag-backed releases. Before 1.0, backward-compatible features increment **MINOR** and backward-compatible fixes increment **PATCH**. A release-candidate number increments only when another candidate for the same target release is needed. It is not incremented for every merged PR. v0.3.0 is the current stable release. v0.3.0-rc.1 through rc.5 remain immutable prerelease history.
 
 ## Required CI gates
 
@@ -19,11 +19,11 @@ A PR builds release-shaped artifacts but never publishes a GitHub Release.
 3. Update `docs/RELEASE_NOTES.md` and current support/compatibility docs.
 4. Run release-shaped PR CI.
 5. Confirm the release notes accurately disclose known runtime/security-reputation caveats.
-6. Merge to `main` to publish the immutable prerelease when the prerelease gate is accepted.
+6. Merge to `main` to publish the immutable release after the target's project-controlled QA and compatibility gates are accepted.
 
 A qualifying main push with a previously unpublished VERSION automatically creates the exact `v<VERSION>` tag and matching GitHub Release.
 
-## rc.5 runtime baseline
+## v0.3.0 runtime baseline
 
 Steam 1.5.6 exact-profile runtime is accepted with canonical `gEnv`, anchor validation, CCryAction framework root, lazy PauseGame observer, and repeated Clean Pause/menu/resume cycles.
 
@@ -35,8 +35,8 @@ GOG/Epic exact environment profiles remain implemented but are not yet runtime-t
 
 ## Edition publication
 
-- v0.2.2 ASI: current stable public release.
-- v0.3.0-rc.5 ASI: current published prerelease.
+- v0.3.0 ASI: current stable public release.
+- v0.3.0-rc.5 ASI: immutable prerelease history.
 - new standalone `version.dll`: CI-only under the current ASI-first edition-publication policy.
 - `SHA256SUMS.txt`: only intentionally public assets.
 - `CI_SHA256SUMS.txt`: both internally validated packages.
