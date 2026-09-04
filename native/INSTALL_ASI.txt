@@ -3,7 +3,7 @@ KCD2 Clean Pause — ASI installation
 This package includes the retail-tested x64 Ultimate ASI Loader dinput8.dll from the pinned official ThirteenAG release. See ASI_LOADER_SOURCE.txt for exact provenance/hashes and ULTIMATE_ASI_LOADER_LICENSE.txt for its MIT license.
 
 Runtime status:
-- Version: v0.3.0-rc.5 prerelease.
+- Version: v0.3.0 stable.
 - Steam 1.5.6 release_1_5-15693: runtime-accepted exact profile.
 - Xbox / Microsoft Store 1.5.6: runtime-accepted exact profile.
 - Xbox exact roots: gEnv RVA 0x049D6EF8; static IGameFramework object RVA 0x056EC680; framework vtable RVA 0x040DAF18.
@@ -18,7 +18,7 @@ Antivirus / Smart App Control notice:
 - These detections are not by themselves proof that the file is malicious; vendor review remains tracked in issue #38 as non-blocking reputation work.
 - This project is open source and the release is produced by the public GitHub Actions workflow with pinned dependencies and published provenance.
 - Exact release hashes are provided in SHA256SUMS.txt.
-- Review the source, provenance, scanner results, and your own security policy when deciding whether to install this prerelease.
+- Review the source, provenance, scanner results, and your own security policy when deciding whether to install this release.
 
 Fresh installation:
 1. Close Kingdom Come: Deliverance II.
