@@ -4,7 +4,7 @@ GitHub Releases are the canonical public distribution channel. Generated native 
 
 ## Versioning
 
-The project follows Semantic Versioning (SemVer) with immutable tag-backed releases. Before 1.0, backward-compatible features increment **MINOR** and backward-compatible fixes increment **PATCH**. A release-candidate number increments only when another candidate for the same target release is needed. It is not incremented for every merged PR. The current target is stable v0.3.0. v0.3.0-rc.1 through rc.4 remain immutable history. v0.3.0-rc.5 is the prepared candidate containing the accepted Steam/Xbox exact-profile architecture plus the conservative release_1_5 compatibility fallback.
+The project follows Semantic Versioning (SemVer) with immutable tag-backed releases. Before 1.0, backward-compatible features increment **MINOR** and backward-compatible fixes increment **PATCH**. A release-candidate number increments only when another candidate for the same target release is needed. It is not incremented for every merged PR. The current target is stable v0.3.0. v0.3.0-rc.1 through rc.4 remain immutable history. v0.3.0-rc.5 is the current prerelease containing the accepted Steam/Xbox exact-profile architecture plus the conservative release_1_5 compatibility fallback.
 
 ## Required CI gates
 
@@ -18,8 +18,8 @@ A PR builds release-shaped artifacts but never publishes a GitHub Release.
 2. Add the target to `CHANGELOG.md`.
 3. Update `docs/RELEASE_NOTES.md` and current support/compatibility docs.
 4. Run release-shaped PR CI.
-5. Freeze the exact candidate identity before external security/reputation review.
-6. Merge to `main` only after every publication blocker is satisfied.
+5. Confirm the release notes accurately disclose known runtime/security-reputation caveats.
+6. Merge to `main` to publish the immutable prerelease when the prerelease gate is accepted.
 
 A qualifying main push with a previously unpublished VERSION automatically creates the exact `v<VERSION>` tag and matching GitHub Release.
 
@@ -36,20 +36,19 @@ GOG/Epic exact environment profiles remain implemented but are not yet runtime-t
 ## Edition publication
 
 - v0.2.2 ASI: current stable public release.
-- v0.3.0-rc.4 ASI: most recent published prerelease.
-- v0.3.0-rc.5: assembled next candidate.
+- v0.3.0-rc.5 ASI: current published prerelease.
 - new standalone `version.dll`: CI-only while #38 is unresolved.
 - `SHA256SUMS.txt`: only intentionally public assets.
 - `CI_SHA256SUMS.txt`: both internally validated packages.
 
-## Defender / Smart App Control gate (#38)
+## Antivirus / Smart App Control status (#38)
 
-Runtime acceptance alone is not permission to publish rc.5 or stable v0.3.0.
+rc.5 is allowed to publish as a prerelease with a clear factual warning about its known heuristic/ML detections and full source/build provenance.
 
-Before public native publication, freeze the exact candidate, submit the exact ASI to Microsoft Security Intelligence, record the submission ID/verdict, and recheck the exact candidate under current Defender / Smart App Control expectations.
+Issue #38 remains the stable v0.3.0 gate. The exact published rc.5 ASI should be submitted to Microsoft Security Intelligence and its submission ID/verdict recorded before stable promotion.
 
-Do not ask users to disable security controls, whitelist the module, or add exclusions. Do not use packing, obfuscation, renaming, or other AV-evasion techniques.
+No packing, obfuscation, payload renaming, or similar AV-evasion work is part of the release process.
 
 ## Publication flow
 
-For an approved unpublished VERSION on `main`, the workflow reruns all tests/build/package checks, verifies the pinned ASI loader, creates the immutable tag if absent, and publishes only approved assets. While #38 is open, keep release-preparation work on a PR/branch so release-shaped artifacts can be built without triggering public publication.
+For an approved unpublished VERSION on `main`, the workflow reruns all tests/build/package checks, verifies the pinned ASI loader, creates the immutable tag if absent, and publishes only approved assets. Prerelease versions are marked as prereleases automatically.
