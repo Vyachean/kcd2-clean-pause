@@ -4,7 +4,7 @@ GitHub Releases are the canonical public distribution channel. Generated native 
 
 ## Versioning
 
-The project follows SemVer with immutable tag-backed releases. The current target is stable v0.3.0. v0.3.0-rc.1 through rc.4 remain immutable history. v0.3.0-rc.5 is the prepared candidate containing the accepted Steam/Xbox exact-profile architecture plus the conservative release_1_5 compatibility fallback.
+The project follows Semantic Versioning (SemVer) with immutable tag-backed releases. Before 1.0, backward-compatible features increment **MINOR** and backward-compatible fixes increment **PATCH**. A release-candidate number increments only when another candidate for the same target release is needed. It is not incremented for every merged PR. The current target is stable v0.3.0. v0.3.0-rc.1 through rc.4 remain immutable history. v0.3.0-rc.5 is the prepared candidate containing the accepted Steam/Xbox exact-profile architecture plus the conservative release_1_5 compatibility fallback.
 
 ## Required CI gates
 
@@ -21,7 +21,7 @@ A PR builds release-shaped artifacts but never publishes a GitHub Release.
 5. Freeze the exact candidate identity before external security/reputation review.
 6. Merge to `main` only after every publication blocker is satisfied.
 
-A qualifying main push with a previously unpublished VERSION creates the immutable matching tag and GitHub Release automatically.
+A qualifying main push with a previously unpublished VERSION automatically creates the exact `v<VERSION>` tag and matching GitHub Release.
 
 ## rc.5 runtime baseline
 
