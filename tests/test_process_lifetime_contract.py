@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HEADER = (ROOT / "native/src/clean_pause_native.h").read_text(encoding="utf-8")
-PROFILED = (ROOT / "native/src/clean_pause_native_profiled.cpp").read_text(encoding="utf-8")
+RUNTIME = (ROOT / "native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
 GUARD = (ROOT / "native/src/process_guard.cpp").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 ASI_INSTALL = (ROOT / "native/INSTALL_ASI.txt").read_text(encoding="utf-8")
@@ -21,7 +21,7 @@ class ProcessLifetimeContractTests(unittest.TestCase):
         self.assertNotIn("CloseHandle(g_processGuard)", GUARD)
 
     def test_stop_is_teardown_signaling_not_hook_removal(self):
-        stop = PROFILED[PROFILED.rindex("void Stop()") :]
+        stop = RUNTIME[RUNTIME.rindex("void Stop()") :]
         self.assertIn("g_stopping.store(true", stop)
         self.assertNotIn("MH_DisableHook", stop)
         self.assertNotIn("MH_RemoveHook", stop)

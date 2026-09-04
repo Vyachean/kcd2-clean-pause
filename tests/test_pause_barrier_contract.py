@@ -19,10 +19,22 @@ class PauseBarrierContractTests(unittest.TestCase):
             self.assertIn(needle, ABI)
 
     def test_framework_identity_is_not_shape_only(self):
-        resolver = NATIVE[NATIVE.index("bool ResolveGameFramework"):NATIVE.index("void __fastcall HookPauseGame")]
-        self.assertIn("frameworkSystem == environment.system", resolver)
-        self.assertIn("kGameGetFrameworkSlot", resolver)
-        self.assertIn("kGameFrameworkGetSystemSlot", resolver)
+        xbox = NATIVE[
+            NATIVE.index("bool LegacyResolveGameFramework_Xbox156Only"):
+            NATIVE.index("} // namespace\n\n} // namespace clean_pause")
+        ]
+        self.assertIn("frameworkSystem == environment.system", xbox)
+        self.assertIn("kGameGetFrameworkSlot", xbox)
+        self.assertIn("kGameFrameworkGetSystemSlot", xbox)
+
+        steam = NATIVE[
+            NATIVE.index("bool ResolveSteamFrameworkSingleton"):
+            NATIVE.index("bool ResolveGameFramework")
+        ]
+        self.assertIn("frameworkSystem != environment.system", steam)
+        self.assertIn("kGameFrameworkGetSystemSlot", steam)
+        self.assertIn("kSteam156FrameworkVtableRva", steam)
+        self.assertNotIn("kGameGetFrameworkSlot", steam)
 
     def test_pause_hook_keeps_exact_vanilla_ownership_and_scopes_pinning_to_pause_call(self):
         hook = NATIVE[NATIVE.index("void __fastcall HookPauseGame"):NATIVE.index("bool InstallPauseBarrierHook")]

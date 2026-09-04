@@ -82,6 +82,7 @@ Current source is covered by:
 - Steam root-visibility/render-handoff contracts;
 - authoritative `C_UIHudMask` gameplay snapshot plus Flash fallback;
 - complete rollback when a created MinHook detour fails to enable;
+- a translation-unit contract that forbids production `.cpp` inclusion and bootstrap macro substitution;
 - validation and packaging of both native editions.
 
 PR #51 passed Validate and Release-shaped workflows before merge; `main` passed both workflows again after the squash merge, with public release publication correctly skipped.
@@ -113,12 +114,13 @@ Non-blocking follow-up:
 - GOG/Epic Clean Pause-specific smoke QA and canonical framework locators if stronger PauseGame barriers are desired;
 - coexistence with additional real KCD2 ASI plugins;
 - broader cutscene/dialogue and repeated-cycle/load-transition robustness;
-- remove the profiled translation-unit wrapper in #45 after the current runtime line is frozen and regression-smoked;
-- deduplicate common Win32 memory/RTTI/MinHook helpers as part of that behavior-preserving architecture refactor.
+- finish #45 by separating storefront/build bootstrap adapters from the shared Clean Pause core through a private internal API after the direct-compilation refactor is regression-smoked.
 
 ## Architecture debt policy
 
-The compatibility wrapper in #45 is acknowledged production debt: `clean_pause_native_profiled.cpp` macro-renames legacy bootstrap symbols and textually includes the mature core translation unit. It was deliberately kept during storefront acceptance to minimize behavior change. Do not combine its removal with compatibility or security/reputation fixes. The eventual refactor should establish normal internal APIs between build discovery/adapters and the shared Clean Pause core without changing accepted runtime behavior.
+Stage 1 of #45 removes the translation-unit wrapper: `clean_pause_native.cpp` is compiled directly, `clean_pause_native_profiled.cpp` is gone, and production source no longer relies on macro-renamed bootstrap symbols or textual `.cpp` inclusion. PR #54 already centralized the duplicated Win32 memory validation, MSVC RTTI and MinHook-install support used by HUD-mask/bubble subsystems.
+
+The remaining #45 debt is narrower but still real: storefront/build bootstrap policy and shared Clean Pause state/presentation implementation currently live in the same production translation unit. The next behavior-preserving stage should establish the minimum private API between those layers while keeping Steam/Xbox decisions and fail-open behavior unchanged. Do not combine that split with compatibility changes or security/reputation work.
 
 ## Decision rule
 

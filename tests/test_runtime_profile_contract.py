@@ -6,8 +6,7 @@ PROFILE = (ROOT / "native/src/kcd2_runtime_profile.cpp").read_text(encoding="utf
 PROFILE_H = (ROOT / "native/src/kcd2_runtime_profile.h").read_text(encoding="utf-8")
 ABI_PROFILE = (ROOT / "native/src/kcd2_abi_profile.cpp").read_text(encoding="utf-8")
 ABI_PROFILE_H = (ROOT / "native/src/kcd2_abi_profile.h").read_text(encoding="utf-8")
-BOOTSTRAP = (ROOT / "native/src/clean_pause_native_profiled.cpp").read_text(encoding="utf-8")
-LEGACY = (ROOT / "native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
+RUNTIME = (ROOT / "native/src/clean_pause_native.cpp").read_text(encoding="utf-8")
 BUBBLES = (ROOT / "native/src/clean_pause_bubbles.cpp").read_text(encoding="utf-8")
 HUD_MASK = (ROOT / "native/src/clean_pause_hud_mask.cpp").read_text(encoding="utf-8")
 CMAKE = (ROOT / "native/CMakeLists.txt").read_text(encoding="utf-8")
@@ -56,8 +55,8 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("EnvironmentLocatorStrategy environmentLocator", PROFILE_H)
         self.assertIn("const AbiProfile* abi", PROFILE_H)
         self.assertNotIn("StorefrontProfile", PROFILE_H)
-        self.assertIn("switch (profile.environmentLocator)", BOOTSTRAP)
-        self.assertIn("MatureRuntimeSupports(*profile->abi)", BOOTSTRAP)
+        self.assertIn("switch (profile.environmentLocator)", RUNTIME)
+        self.assertIn("MatureRuntimeSupports(*profile->abi)", RUNTIME)
 
     def test_gog_and_epic_use_independent_distribution_build_and_rva_evidence(self):
         self.assertIn('"steam_api64.dll"', PROFILE)
@@ -99,10 +98,10 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("kMaskIsElementVisibleSlot = 1", HUD_MASK)
         self.assertIn("kModuleMessageIdOffset = 0x08", HUD_MASK)
         self.assertIn("kHudRefreshModuleMessageId = 52", HUD_MASK)
-        self.assertIn("kFlashDisplayInfoSize = 0x38", LEGACY)
-        self.assertIn("kFlashDisplayInfoVisibleOffset = 0x28", LEGACY)
-        self.assertIn("kUIElementRenderSlot = 24", LEGACY)
-        self.assertIn("kUIElementCallFunctionByNameSlot = 69", LEGACY)
+        self.assertIn("kFlashDisplayInfoSize = 0x38", RUNTIME)
+        self.assertIn("kFlashDisplayInfoVisibleOffset = 0x28", RUNTIME)
+        self.assertIn("kUIElementRenderSlot = 24", RUNTIME)
+        self.assertIn("kUIElementCallFunctionByNameSlot = 69", RUNTIME)
 
     def test_profiled_non_xbox_environment_resolution_is_one_time_and_evidence_specific(self):
         self.assertIn("EnvironmentLocatorStrategy::ExactEnvironmentRva", PROFILE)
@@ -114,7 +113,7 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("anchorConsoleStorage != expectedConsoleStorage", PROFILE)
 
         marker = "DWORD WINAPI BootstrapThread(void*)"
-        bootstrap = BOOTSTRAP[BOOTSTRAP.index(marker):]
+        bootstrap = RUNTIME[RUNTIME.index(marker):]
         self.assertEqual(bootstrap.count("ResolveProfileEnvironmentBase("), 1)
         resolve = bootstrap.index("ResolveProfileEnvironmentBase")
         exact_poll = bootstrap.index("while (!g_stopping.load())")
@@ -124,7 +123,7 @@ class RuntimeProfileContractTests(unittest.TestCase):
 
     def test_profiled_runtime_wait_does_not_permanently_disable_slow_supported_builds(self):
         marker = "DWORD WINAPI BootstrapThread(void*)"
-        bootstrap = BOOTSTRAP[BOOTSTRAP.index(marker):]
+        bootstrap = RUNTIME[RUNTIME.index(marker):]
         exact_start = bootstrap.index("if (hasExactEnvironment)", bootstrap.index("RuntimeEnvironment environment"))
         legacy_loop = bootstrap.index(
             "for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs",
@@ -133,7 +132,7 @@ class RuntimeProfileContractTests(unittest.TestCase):
         exact_wait = bootstrap[exact_start:legacy_loop]
         self.assertIn("while (!g_stopping.load())", exact_wait)
         self.assertIn("kProfileSlowPollMs", exact_wait)
-        self.assertIn("kProfileWaitHeartbeatMs", BOOTSTRAP)
+        self.assertIn("kProfileWaitHeartbeatMs", RUNTIME)
         self.assertNotIn("could not be validated", exact_wait)
         self.assertIn(
             "for (DWORD elapsed = 0; elapsed < kWaitForRuntimeMs",
@@ -152,15 +151,15 @@ class RuntimeProfileContractTests(unittest.TestCase):
             "main-thread-owner-mismatch",
             "game-name-mismatch",
         ):
-            self.assertIn(reason, BOOTSTRAP)
-        self.assertIn("RuntimeEnvironment& observedCandidate", BOOTSTRAP)
-        self.assertIn("observedCandidate = candidate", BOOTSTRAP)
-        self.assertIn("reason=%s env=%p script=%p input=%p game=%p system=%p flashUI=%p mainThread=%lu", BOOTSTRAP)
+            self.assertIn(reason, RUNTIME)
+        self.assertIn("RuntimeEnvironment& observedCandidate", RUNTIME)
+        self.assertIn("observedCandidate = candidate", RUNTIME)
+        self.assertIn("reason=%s env=%p script=%p input=%p game=%p system=%p flashUI=%p mainThread=%lu", RUNTIME)
 
     def test_exact_profile_readiness_does_not_require_igame_slot16_framework(self):
-        validate = BOOTSTRAP[
-            BOOTSTRAP.index("const char* ValidateProfileEnvironment"):
-            BOOTSTRAP.index("bool ResolveSteamFrameworkSingleton")
+        validate = RUNTIME[
+            RUNTIME.index("const char* ValidateProfileEnvironment"):
+            RUNTIME.index("bool ResolveSteamFrameworkSingleton")
         ]
         self.assertNotIn("kGameGetFrameworkSlot", validate)
         self.assertNotIn("kGameFrameworkPauseGameSlot", validate)
@@ -170,21 +169,21 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("kFlashUIGetElementByInstanceStrSlot", validate)
 
     def test_steam_framework_uses_canonical_ccryaction_singleton(self):
-        resolver = BOOTSTRAP[
-            BOOTSTRAP.index("bool ResolveSteamFrameworkSingleton"):
-            BOOTSTRAP.index("bool ResolveGameFramework")
+        resolver = RUNTIME[
+            RUNTIME.index("bool ResolveSteamFrameworkSingleton"):
+            RUNTIME.index("bool ResolveGameFramework")
         ]
-        self.assertIn("kSteam156FrameworkStorageRva = 0x0549D328", BOOTSTRAP)
-        self.assertIn("kSteam156FrameworkVtableRva = 0x040472D0", BOOTSTRAP)
+        self.assertIn("kSteam156FrameworkStorageRva = 0x0549D328", RUNTIME)
+        self.assertIn("kSteam156FrameworkVtableRva = 0x040472D0", RUNTIME)
         self.assertIn("kGameFrameworkPauseGameSlot", resolver)
         self.assertIn("kGameFrameworkGetSystemSlot", resolver)
         self.assertIn("frameworkSystem != environment.system", resolver)
         self.assertNotIn("kGameGetFrameworkSlot", resolver)
 
     def test_required_input_hook_is_installed_before_optional_pause_barrier(self):
-        install = BOOTSTRAP[
-            BOOTSTRAP.index("bool InstallInputHook"):
-            BOOTSTRAP.index("bool PollRuntimeEnvironment")
+        install = RUNTIME[
+            RUNTIME.index("bool InstallInputHook"):
+            RUNTIME.index("bool PollRuntimeEnvironment")
         ]
         create_input = install.index("MH_CreateHook(\n        g_postInputEventTarget")
         enable_input = install.index("MH_EnableHook(g_postInputEventTarget)")
@@ -197,10 +196,10 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("will be acquired lazily on the first Pause input", install)
 
     def test_steam_pause_barrier_has_one_lazy_installation_path(self):
-        self.assertIn("#define HookPostInputEvent LegacyHookPostInputEventProfiledCore", BOOTSTRAP)
-        retry = BOOTSTRAP[
-            BOOTSTRAP.index("bool TryInstallDeferredSteamPauseBarrier"):
-            BOOTSTRAP.index("bool InstallInputHook")
+        self.assertNotIn("#define HookPostInputEvent", RUNTIME)
+        retry = RUNTIME[
+            RUNTIME.index("bool TryInstallDeferredSteamPauseBarrier"):
+            RUNTIME.index("bool InstallInputHook")
         ]
         self.assertIn("ShouldTryDeferredSteamPauseBarrier", retry)
         self.assertIn("HookPostInputEventProfiled", retry)
@@ -211,15 +210,15 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("EXCEPTION_EXECUTE_HANDLER", retry)
         self.assertIn("g_mainThreadId && GetCurrentThreadId() != g_mainThreadId", retry)
         self.assertIn("TryInstallDeferredSteamPauseBarrier();", retry)
-        self.assertIn("LegacyHookPostInputEventProfiledCore(input, event, force);", retry)
+        self.assertIn("HookPostInputEventCore(input, event, force);", retry)
         self.assertLess(
             retry.index("TryInstallDeferredSteamPauseBarrier();"),
-            retry.index("LegacyHookPostInputEventProfiledCore(input, event, force);"),
+            retry.index("HookPostInputEventCore(input, event, force);"),
         )
 
-        install = BOOTSTRAP[
-            BOOTSTRAP.index("bool InstallInputHook"):
-            BOOTSTRAP.index("bool PollRuntimeEnvironment")
+        install = RUNTIME[
+            RUNTIME.index("bool InstallInputHook"):
+            RUNTIME.index("bool PollRuntimeEnvironment")
         ]
         steam_branch = install[
             install.index("Storefront::Steam"):
@@ -229,9 +228,9 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("will be acquired lazily on the first Pause input", steam_branch)
 
     def test_non_xbox_profiles_never_fallback_to_igame_slot16(self):
-        resolver = BOOTSTRAP[
-            BOOTSTRAP.index("bool ResolveGameFramework"):
-            BOOTSTRAP.index("void __fastcall HookPauseGameProfiled")
+        resolver = RUNTIME[
+            RUNTIME.index("bool ResolveGameFramework"):
+            RUNTIME.index("void __fastcall HookPauseGameProfiled")
         ]
         self.assertIn("Storefront::Steam", resolver)
         self.assertIn("Storefront::XboxMicrosoftStore", resolver)
@@ -239,17 +238,26 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertNotIn("kGameGetFrameworkSlot", resolver)
 
     def test_xbox_legacy_discovery_is_locator_scoped(self):
-        self.assertIn("LegacyFindRuntimeEnvironment_Xbox156Only", BOOTSTRAP)
-        self.assertIn("EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan", BOOTSTRAP)
-        self.assertIn("StronglyValidateEnvironment", BOOTSTRAP)
-        self.assertIn("ValidateLegacyXboxGameAndFrameworkIdentity", BOOTSTRAP)
-        self.assertNotIn("src/clean_pause_native.cpp\n", CMAKE)
-        self.assertIn("src/clean_pause_native_profiled.cpp", CMAKE)
-        self.assertIn("for (std::size_t offset = 0; offset <= limit", LEGACY)
+        self.assertIn("LegacyFindRuntimeEnvironment_Xbox156Only", RUNTIME)
+        self.assertIn("EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan", RUNTIME)
+        self.assertIn("src/clean_pause_native.cpp", CMAKE)
+        self.assertNotIn("src/clean_pause_native_profiled.cpp", CMAKE)
+        self.assertIn("for (std::size_t offset = 0; offset <= limit", RUNTIME)
+
+        legacy = RUNTIME[
+            RUNTIME.index("case kcd2::runtime::EnvironmentLocatorStrategy::LegacyXbox156ValidatedScan"):
+            RUNTIME.index("case kcd2::runtime::EnvironmentLocatorStrategy::ExactEnvironmentRva")
+        ]
+        self.assertIn("LegacyFindRuntimeEnvironment_Xbox156Only(whGame, result)", legacy)
+        self.assertIn("observedCandidate = result;", legacy)
+        self.assertNotIn("StronglyValidateEnvironment", legacy)
+        self.assertNotIn("ValidateLegacyXboxGameAndFrameworkIdentity", RUNTIME)
+        self.assertNotIn("ThreadBelongsToCurrentProcess", RUNTIME)
+        self.assertIn("Xbox legacy runtime environment discovered", legacy)
 
     def test_unknown_build_is_rejected_before_abi_or_runtime_discovery(self):
         marker = "DWORD WINAPI BootstrapThread(void*)"
-        bootstrap = BOOTSTRAP[BOOTSTRAP.index(marker):]
+        bootstrap = RUNTIME[RUNTIME.index(marker):]
         read_identity = bootstrap.index("ReadBuildIdentity")
         match = bootstrap.index("MatchSupportedBuild")
         abi_gate = bootstrap.index("MatureRuntimeSupports")
@@ -264,10 +272,10 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertIn("unsupported WHGame build; Clean Pause disabled; no hooks installed", bootstrap)
 
     def test_required_candidate_identity_is_strongly_validated(self):
-        self.assertIn("GetProcessIdOfThread", BOOTSTRAP)
-        self.assertIn("GetCurrentProcessId", BOOTSTRAP)
-        self.assertIn('std::strcmp(gameName, "kcd2") == 0', BOOTSTRAP)
-        self.assertIn("frameworkSystem != environment.system", BOOTSTRAP)
+        self.assertIn("GetProcessIdOfThread", RUNTIME)
+        self.assertIn("GetCurrentProcessId", RUNTIME)
+        self.assertIn('std::strcmp(gameName, "kcd2") == 0', RUNTIME)
+        self.assertIn("frameworkSystem != environment.system", RUNTIME)
 
     def test_profile_sources_are_compiled_into_both_runtime_artifacts(self):
         self.assertIn("src/kcd2_abi_profile.cpp", CMAKE)

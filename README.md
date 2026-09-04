@@ -150,7 +150,7 @@ The production architecture deliberately keeps KCD2 as the sole pause owner:
 
 No action-map replacement, replacement overlay, long-lived movieclip pointer, destructive borrowed-handle release, synthetic B-resume replay, or unguarded cross-store binary assumption is used.
 
-The current production source still has one known maintainability debt: `clean_pause_native_profiled.cpp` textually includes the mature core translation unit behind macro-renamed bootstrap symbols. That compatibility wrapper is tracked in #45 and should be removed in a behavior-preserving refactor only after the current runtime line is frozen and regression-smoked.
+The translation-unit wrapper tracked in #45 has been removed in this refactor: production compiles `clean_pause_native.cpp` directly, with no macro bootstrap substitution and no textual `.cpp` inclusion. The remaining #45 work is a behavior-preserving private boundary between storefront/build bootstrap adapters and the shared Clean Pause state/presentation core; that deeper structural split remains gated on focused Steam and Xbox regression smoke.
 
 See [Runtime compatibility](docs/RUNTIME_COMPATIBILITY.md) and [Design](docs/DESIGN.md) for the complete production architecture.
 

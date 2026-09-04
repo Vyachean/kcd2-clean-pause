@@ -89,10 +89,16 @@ class HudMaskTransactionContractTests(unittest.TestCase):
         self.assertIn('fallback.captured ? &fallback : nullptr', reconcile)
 
     def test_runtime_logs_whgame_fingerprint_for_future_abi_gating(self):
-        self.assertIn('void LogWhGameFingerprint(HMODULE whGame)', NATIVE)
-        self.assertIn('TimeDateStamp=0x%08lx SizeOfImage=0x%08lx CheckSum=0x%08lx', NATIVE)
         bootstrap = NATIVE[NATIVE.index('DWORD WINAPI BootstrapThread'):]
-        self.assertIn('LogWhGameFingerprint(whGame);', bootstrap)
+        self.assertIn('kcd2::runtime::ReadBuildIdentity(whGame, identity)', bootstrap)
+        self.assertIn('TimeDateStamp=0x%08lx SizeOfImage=0x%08lx CheckSum=0x%08lx', bootstrap)
+        self.assertIn('identity.fingerprint.timestamp', bootstrap)
+        self.assertIn('identity.fingerprint.imageSize', bootstrap)
+        self.assertIn('identity.fingerprint.checksum', bootstrap)
+        self.assertLess(
+            bootstrap.index('kcd2::runtime::ReadBuildIdentity(whGame, identity)'),
+            bootstrap.index('kcd2::runtime::MatchSupportedBuild(identity)'),
+        )
 
     def test_transaction_never_whole_snapshots_partial_flash_state(self):
         callback = NATIVE[NATIVE.index('void ReconcileHudMaskMutation()'):NATIVE.index('void FailOpenHudMaintenance')]

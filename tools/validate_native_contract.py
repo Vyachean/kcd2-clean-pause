@@ -79,7 +79,8 @@ required_runtime = (
     "RestoreBlurBestEffort",
     "CLEAN_PAUSE_VERSION",
     "CLEAN_PAUSE_BUILD_ID",
-    "LogWhGameFingerprint",
+    "kcd2::runtime::ReadBuildIdentity(whGame, identity)",
+    "TimeDateStamp=0x%08lx SizeOfImage=0x%08lx CheckSum=0x%08lx",
     "ResolveGameFramework",
     "HookPauseGame",
     "InstallPauseBarrierHook",
@@ -274,11 +275,45 @@ if pause_hook.index("g_pauseTransitionActive.store(true") > pause_hook.index("g_
     raise SystemExit("pause transition pinning must arm before vanilla PauseGame mutates HUD")
 if "g_pendingPauseAttempt.load" not in pause_hook or "framework == g_gameFramework" not in pause_hook:
     raise SystemExit("PauseGame observer must be scoped to target framework + pending physical pause")
-resolver = native[native.index("bool ResolveGameFramework"):native.index("void __fastcall HookPauseGame")]
-if "kGameGetFrameworkSlot" not in resolver or "kGameFrameworkGetSystemSlot" not in resolver:
-    raise SystemExit("framework discovery must use the verified IGame/IGameFramework accessors")
-if "frameworkSystem == environment.system" not in resolver:
-    raise SystemExit("framework identity must be proven against gEnv ISystem")
+
+xbox_resolver = native[
+    native.index("bool LegacyResolveGameFramework_Xbox156Only"):
+    native.index("} // namespace\n\n} // namespace clean_pause")
+]
+for needle in (
+    "kGameGetFrameworkSlot",
+    "kGameFrameworkGetSystemSlot",
+    "frameworkSystem == environment.system",
+):
+    if needle not in xbox_resolver:
+        raise SystemExit(f"Xbox framework identity adapter contract missing: {needle}")
+
+steam_resolver = native[
+    native.index("bool ResolveSteamFrameworkSingleton"):
+    native.index("bool ResolveGameFramework")
+]
+for needle in (
+    "kSteam156FrameworkStorageRva",
+    "kSteam156FrameworkVtableRva",
+    "kGameFrameworkGetSystemSlot",
+    "frameworkSystem != environment.system",
+):
+    if needle not in steam_resolver:
+        raise SystemExit(f"Steam framework identity adapter contract missing: {needle}")
+if "kGameGetFrameworkSlot" in steam_resolver:
+    raise SystemExit("Steam framework adapter must not fall back to Xbox IGame[16]")
+
+dispatcher = native[
+    native.index("bool ResolveGameFramework"):
+    native.index("bool ShouldSuppressSteamHudRootVisibility")
+]
+if "ResolveSteamFrameworkSingleton" not in dispatcher:
+    raise SystemExit("framework dispatcher must route Steam through CCryAction singleton")
+if "LegacyResolveGameFramework_Xbox156Only" not in dispatcher:
+    raise SystemExit("framework dispatcher must retain the isolated Xbox adapter")
+if "Storefront::XboxMicrosoftStore" not in dispatcher:
+    raise SystemExit("framework dispatcher must scope legacy fallback to Xbox")
+
 post = native[native.index("void __fastcall HookPostInputEvent"):native.index("bool ResolveGameFramework")]
 barrier_exchange = post.index("g_pauseBarrierObserved.exchange(false")
 forward_press = post.rfind("Forward(input, event, force);", 0, barrier_exchange)
@@ -298,6 +333,7 @@ for needle in (
         raise SystemExit(f"pause transition timing diagnostic missing: {needle}")
 if "g_originalPauseGame(" not in native:
     raise SystemExit("missing vanilla PauseGame forwarding call")
+
 # The only direct PauseGame call in production must be the trampoline forward inside the detour.
 if native.count("g_originalPauseGame(") != 1:
     raise SystemExit("production must never synthesize its own PauseGame calls")
