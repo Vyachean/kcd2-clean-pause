@@ -1,6 +1,6 @@
 KCD2 Clean Pause — ASI installation
 
-This package includes the pinned official x64 Ultimate ASI Loader dinput8.dll from ThirteenAG. See ASI_LOADER_SOURCE.txt for exact provenance/hashes and ULTIMATE_ASI_LOADER_LICENSE.txt for its MIT license.
+This package includes the retail-tested x64 Ultimate ASI Loader dinput8.dll from the pinned official ThirteenAG release. See ASI_LOADER_SOURCE.txt for exact provenance/hashes and ULTIMATE_ASI_LOADER_LICENSE.txt for its MIT license.
 
 Runtime status:
 - Candidate: v0.3.0-rc.5.
@@ -21,7 +21,11 @@ Fresh installation:
 5. Start the game normally.
 
 Existing ASI loader:
-If another mod already installed a compatible dinput8.dll, do not overwrite it blindly. Place KCD2CleanPause.asi in that loader's actual plugin search path.
+If another mod already installed a compatible dinput8.dll, do not overwrite it blindly.
+
+KCD2CleanPause.asi must be placed where that existing ASI loader actually searches for plugins. With Ultimate ASI Loader, the simplest shared-loader layout is to place KCD2CleanPause.asi beside the existing dinput8.dll. Ultimate ASI Loader can also load plugins from its scripts/ and plugins/ directories.
+
+Do not leave dinput8.dll in one directory and place KCD2CleanPause.asi beside WHGame.dll in another directory unless that loader is explicitly configured to scan the latter location.
 
 Do not install the ASI edition together with the standalone Clean Pause version.dll edition.
 
@@ -38,7 +42,7 @@ Troubleshooting:
 If no kcd2_clean_pause_native.log is created, verify that the ASI loader is actually loading KCD2CleanPause.asi from its configured plugin location. Do not disable Defender or Smart App Control, add exclusions, or whitelist the module to work around a security block; report the exact candidate/hash instead.
 
 Process lifetime:
-Native hooks are process-lifetime state. Hot unload/reload is unsupported. Close KCD2 before replacing, moving, or removing KCD2CleanPause.asi.
+Native hooks are process-lifetime state. Hot-unloading or hot-reloading KCD2CleanPause.asi while the game is running is not supported. Stop KCD2 before replacing, removing or moving KCD2CleanPause.asi.
 
 Uninstall:
 Close KCD2 and remove KCD2CleanPause.asi plus the optional kcd2_clean_pause_native.log. Remove dinput8.dll only if no other installed mod needs that ASI loader.
