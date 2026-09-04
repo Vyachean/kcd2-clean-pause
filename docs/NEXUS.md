@@ -1,6 +1,6 @@
 # Nexus Mods publication copy — KCD2 Clean Pause v0.2.2
 
-Prepared for the currently published ASI edition.
+Prepared for the currently published Nexus ASI edition.
 
 > Release-candidate note: v0.2.2 remains the immutable Nexus/stable release. GitHub prerelease v0.3.0-rc.5 is published after final Steam/Xbox exact-profile acceptance and a successful forced test of the conservative release_1_5 fallback. The rc.5 ASI has known heuristic/ML antivirus detections documented below; stable v0.3.0 and Nexus promotion remain deferred while #38 is under vendor review.
 
@@ -59,13 +59,11 @@ Clean Pause does not create a separate pause system. KCD2 remains the owner of t
 
 ## Antivirus / Smart App Control notice for v0.3.0-rc.5
 
-Exact rc.5 `KCD2CleanPause.asi` SHA-256:
-
-`223e62c4a1f4fc2ff47ab4723e742570275dfccadd2ed67def0ca9dc169352a5`
-
 Reported heuristic/ML detections currently include Microsoft `Program:Win32/Wacapew.C!ml`, Cynet `Malicious (score: 100)`, and Symantec `ML.Attribute.HighConfidence`.
 
-Do not describe these detections as proven malware or as proven false positives. Do not instruct users to disable Defender/Smart App Control, add exclusions, or whitelist the file. Point users to the open-source repository, exact release hashes/provenance, and issue #38 for the vendor-review status.
+These detections are not, by themselves, proof that the file is malicious. The source is public, the release is produced by the repository's GitHub Actions workflow, and the published package includes exact hashes/provenance. Vendor-review status is tracked in #38.
+
+For the public mod page, present the detections and provenance factually and let users make their own installation decision. Exact release hashes should be taken from the published `SHA256SUMS.txt`.
 
 ## Installation
 
