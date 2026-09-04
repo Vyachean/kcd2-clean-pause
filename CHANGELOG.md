@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## v0.3.0-rc.5 — 2026-09-04
+
+Fifth v0.3.0 release candidate, consolidating the accepted Steam/Xbox runtime architecture and adding a conservative compatibility fallback for otherwise-unmatched builds in the verified `release_1_5` ABI family.
+
+- Removes the profiled translation-unit wrapper and compiles the shared native runtime normally for both ASI and standalone editions.
+- Makes environment/framework resolution and presentation behavior profile-driven rather than branching on storefront identity inside the Clean Pause core.
+- Replaces the Xbox writable-memory environment scan and historical `IGame[16]` framework adapter with exact runtime roots captured from the real Xbox / Microsoft Store 1.5.6 binary:
+  - `gEnv` RVA `0x049D6EF8`;
+  - static `IGameFramework` object RVA `0x056EC680`;
+  - framework vtable RVA `0x040DAF18`.
+- Keeps Steam 1.5.6 on its exact `gEnv` + anchor-validation path and canonical `CCryAction` framework pointer-storage root.
+- Preserves shared strong framework identity validation: exact expected vtable plus `IGameFramework::GetISystem() == gEnv->pSystem`.
+- Adds an explicitly conservative fallback for an otherwise-unmatched `release_1_5-<numeric assembly id>` build. The fallback derives `gEnv` from unique executable anchor evidence, performs full live ABI validation, and enables only the shared input/Menu path.
+- The compatibility fallback deliberately installs no version-specific framework/PauseGame observer and enables no exact-profile presentation quirks. Ambiguous evidence, malformed metadata, or another ABI branch fails closed.
+- Runtime smoke passed on the final exact-profile architecture for both Steam 1.5.6 and Xbox / Microsoft Store 1.5.6.
+- A diagnostic build also forced the known Xbox binary through the new compatibility fallback; it resolved the same `gEnv` RVA and completed repeated Clean Pause -> vanilla-menu -> resume cycles.
+- Keeps process-lifetime hook semantics and MinHook rollback contracts unchanged.
+- Leaves the residual one-frame Steam presentation issue tracked separately in #52.
+
+Public stable v0.3.0 remains blocked by Defender / Smart App Control investigation #38. RC5 is assembled as the next exact candidate for packaging/provenance and security-reputation review; users must not be instructed to disable platform security controls or add exclusions.
+
 ## v0.3.0-rc.4 — 2026-09-02
 
 Fourth release candidate for Steam 1.5.6 compatibility, focused on lifecycle hardening before the next in-game acceptance test.

@@ -211,7 +211,7 @@ Current exact captured identities include:
 
 GOG/Epic use storefront build-code identity plus independent canonical `gEnv` evidence as documented in [RUNTIME_COMPATIBILITY.md](RUNTIME_COMPATIBILITY.md).
 
-Unknown or mismatched builds install no version-specific Clean Pause hooks.
+Otherwise-unmatched builds may install only the conservative release_1_5 compatibility runtime after unique-anchor resolution and full live ABI validation. Other ABI branches and ambiguous evidence install no Clean Pause hooks.
 
 ## ABI boundary
 
@@ -227,7 +227,7 @@ SSystemGlobalEnvironment + 0x1B0     -> main thread id
 IInput::PostInputEvent               -> slot 13
 IGame::GetLongName                   -> slot 12
 IGame::GetName                       -> slot 13
-IGame[16]                            -> Xbox-only proven framework/root accessor; not used as Steam IGameFramework
+historical IGame[16]                 -> diagnostic history only; not a supported production framework accessor
 IGameFramework::PauseGame            -> slot 13
 IGameFramework::GetISystem           -> slot 19
 IScriptSystem::ExecuteBuffer         -> slot 6
@@ -270,7 +270,7 @@ Issue #45 remains open for the next behavior-preserving architecture stage:
 
 - separate storefront/build discovery and capability adapters from shared Clean Pause state/presentation code through a private internal API;
 - expose only the minimum core operations required by bootstrap/adapters rather than broad runtime globals;
-- keep Xbox legacy discovery/framework behavior isolated as an explicit adapter;
+- keep exact build/profile resolution and conservative fallback policy outside the shared Clean Pause presentation state machine;
 - preserve exact Steam/Xbox/GOG/Epic profile gates and fail-open semantics;
 - require focused Steam and current-source Xbox regression smoke before merging the deeper split.
 

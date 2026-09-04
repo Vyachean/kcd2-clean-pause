@@ -4,19 +4,21 @@ Clean Pause for **Kingdom Come: Deliverance II** on Windows.
 
 The current stable release, **v0.2.2**, was runtime-tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbox controller.
 
-The current published GitHub prerelease, **v0.3.0-rc.4**, introduced fail-closed KCD2 1.5.6 compatibility profiles for **Steam, GOG, Epic Games Store, and Xbox / Microsoft Store**. The source on `main` contains the later Steam acceptance fixes from PR #51; those changes have not been promoted to a new public native release because Defender / Smart App Control investigation #38 is still a release blocker.
+The current published GitHub prerelease is **v0.3.0-rc.4**. **v0.3.0-rc.5** is the current release candidate assembled from the accepted source architecture; public promotion remains blocked by Defender / Smart App Control investigation #38.
 
-Steam 1.5.6 `release_1_5-15693` is now runtime-accepted on the current source. The accepted path uses the exact Steam build fingerprint, canonical `gEnv`, the real `CCryAction` `IGameFramework` singleton, visible-menu gesture passthrough, and authoritative `C_UIHudMask` state for the fast gameplay HUD snapshot. GOG/Epic profiles are backed by distribution-specific reverse-engineering/runtime evidence but are not yet claimed as Clean Pause runtime-tested by this project.
+Steam 1.5.6 `release_1_5-15693` and Xbox / Microsoft Store 1.5.6 are runtime-accepted on the current source. Both now use exact build profiles and exact engine roots while sharing one Clean Pause input/state/presentation runtime. GOG/Epic profiles are backed by distribution-specific evidence but are not yet claimed as Clean Pause runtime-tested by this project.
 
 ## Release status
 
 - **Current stable release:** v0.2.2.
 - **Current published GitHub prerelease:** v0.3.0-rc.4.
-- **Current source runtime acceptance:** Xbox / Microsoft Store 1.5.6 baseline plus Steam 1.5.6 `release_1_5-15693` acceptance on `main`.
-- **GOG / Epic Games Store:** compatibility profiles implemented; Clean Pause-specific smoke QA still pending.
+- **Current prepared candidate:** v0.3.0-rc.5.
+- **Runtime acceptance:** Steam 1.5.6 `release_1_5-15693` and Xbox / Microsoft Store 1.5.6 exact-profile paths are accepted.
+- **Compatibility fallback:** otherwise-unmatched `release_1_5-<numeric id>` builds may use a conservative anchor-derived `gEnv` fallback after full live ABI validation; other ABI branches remain fail-closed.
+- **GOG / Epic Games Store:** exact environment profiles implemented; Clean Pause-specific smoke QA still pending.
 - **Published edition:** KCD2CleanPause.asi, using the upstream Ultimate ASI Loader.
 - **Standalone version.dll:** built and validated, but new publication remains withheld.
-- **Stable v0.3.0:** blocked by Defender / Smart App Control issue #38. The final `main` ASI is also detected by current ML/heuristic scanners, so the accepted runtime is not being promoted until that investigation is resolved.
+- **Stable v0.3.0 / public rc.5 publication:** blocked by Defender / Smart App Control issue #38 until the exact candidate receives the required security/reputation review.
 
 Use the GitHub Releases page as the source of truth for versions and assets that are actually published.
 
@@ -91,7 +93,7 @@ For a candidate built from current source, the core smoke contract is:
 
 Steam acceptance on `main` confirmed the exact Steam 1.5.6 profile and canonical `gEnv`, corrected the old `IGame[16]` framework assumption, and validated the canonical `CCryAction` PauseGame observer. The recurring pre-pause hitch was removed by taking the gameplay snapshot from authoritative `C_UIHudMask` state rather than synchronously walking 28 Flash clips on every pause press.
 
-The Xbox / Microsoft Store path keeps its independently runtime-tested legacy environment/framework adapter. The shared Clean Pause core is common, but the storefront-specific discovery adapters are intentionally not assumed to be identical. A current-source Xbox regression smoke remains appropriate before the next public native release because shared HUD/presentation code has changed since the original stable acceptance.
+The Xbox / Microsoft Store 1.5.6 path now uses exact runtime roots captured from the real retail binary: `gEnv` RVA `0x049D6EF8`, static `IGameFramework` object RVA `0x056EC680`, and expected framework vtable RVA `0x040DAF18`. The old writable-memory scanner and historical `IGame[16]` framework adapter are no longer part of production.
 
 ## Troubleshooting
 
@@ -139,18 +141,18 @@ The production architecture deliberately keeps KCD2 as the sole pause owner:
 - the shared Clean Pause state/presentation core is used by all supported profiles;
 - storefront, build identity, ABI, environment discovery and optional engine capabilities are modeled separately;
 - Steam 1.5.6 resolves IGameFramework from the documented CCryAction singleton instead of interpreting IGame[16] as framework, and acquires the optional observer lazily on validated Pause input;
-- Xbox / Microsoft Store 1.5.6 keeps its separately proven legacy environment/framework adapter instead of exporting that assumption to other storefronts;
+- Xbox / Microsoft Store 1.5.6 resolves exact `gEnv` and the exact static framework object captured from the retail binary;
 - known distribution-specific canonical gEnv/framework RVAs are used only behind the matching exact build profile and strong live identity checks;
 - pending Start/release correlation alone performs no HUD replay;
 - HUD/subtitle preservation is armed only for the real vanilla pause transition when the barrier is available, with Menu visibility providing the compatibility fallback;
 - Menu@0 remains logically visible while only its Render() is suppressed during Clean Pause;
 - authoritative C_UIHudMask visibility is retained for safe vanilla-menu handoff/fail-open and for the fast gameplay snapshot;
 - exact root HUD visibility, dialogue subtitles, NPC overhead subtitles and DoF state are preserved;
-- unknown or mismatched builds install no version-specific Clean Pause hooks.
+- otherwise-unmatched builds are accepted only through the conservative `release_1_5` compatibility fallback after unique-anchor resolution plus full live ABI validation; other ABI branches fail closed.
 
 No action-map replacement, replacement overlay, long-lived movieclip pointer, destructive borrowed-handle release, synthetic B-resume replay, or unguarded cross-store binary assumption is used.
 
-The translation-unit wrapper tracked in #45 has been removed in this refactor: production compiles `clean_pause_native.cpp` directly, with no macro bootstrap substitution and no textual `.cpp` inclusion. The remaining #45 work is a behavior-preserving private boundary between storefront/build bootstrap adapters and the shared Clean Pause state/presentation core; that deeper structural split remains gated on focused Steam and Xbox regression smoke.
+The translation-unit wrapper is removed: production compiles `clean_pause_native.cpp` directly, with no macro bootstrap substitution and no textual `.cpp` inclusion. Exact profile/capability decisions are also data-driven rather than storefront branches. Issue #45 now tracks only the remaining physical private C++ API split between bootstrap/profile resolution and the shared Clean Pause state/presentation core.
 
 See [Runtime compatibility](docs/RUNTIME_COMPATIBILITY.md) and [Design](docs/DESIGN.md) for the complete production architecture.
 
