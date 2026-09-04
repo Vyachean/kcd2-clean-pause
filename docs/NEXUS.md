@@ -1,8 +1,8 @@
 # Nexus Mods publication copy — KCD2 Clean Pause v0.2.2
 
-Prepared for the currently published ASI edition.
+Prepared for the currently published Nexus ASI edition.
 
-> Release-candidate note: v0.2.2 remains the immutable Xbox / Microsoft Store-tested Nexus/stable release. GitHub prerelease v0.3.0-rc.4 is the current lifecycle-hardened Steam acceptance candidate and contains fail-closed KCD2 1.5.6 profiles for Steam, GOG, Epic Games Store and Xbox / Microsoft Store. Do not promote the Nexus compatibility claim until the intended in-game smoke QA is complete and stable v0.3.0 is published.
+> Release-candidate note: v0.2.2 remains the immutable Nexus/stable release. GitHub prerelease v0.3.0-rc.5 is published after final Steam/Xbox exact-profile acceptance and a successful forced test of the conservative release_1_5 fallback. The rc.5 ASI has known heuristic/ML antivirus detections documented below; stable v0.3.0 and Nexus promotion remain deferred while #38 is under vendor review.
 
 ## Page metadata
 
@@ -28,7 +28,7 @@ Kingdom Come: Deliverance II 1.5.6 — PC Xbox Store / Xbox app version, tested 
 
 **Other storefronts**
 
-GitHub prerelease v0.3.0-rc.4 contains explicit 1.5.6 compatibility profiles for Steam, GOG and Epic Games Store backed by public reverse-engineering/runtime evidence and automated Windows validation. RC1 confirmed the reported Steam build/profile/canonical environment and eliminated the previous crash. Comparison with working libKCD2/KCSE native mods then identified the Steam framework-identity error: `IGame[16]` was being treated as `IGameFramework`, while the real framework is the `CCryAction` singleton. RC3 corrected that assumption and restored the PauseGame observer to optional capability status. RC4 removes the remaining startup-timing dependency by acquiring that canonical observer lazily on a real Pause input while the required input/Menu runtime remains independently active. Steam remains the current Clean Pause smoke-test target; GOG/Epic should not yet be described as Clean Pause runtime-tested by this project.
+The v0.3.0-rc.5 candidate uses one profile-driven runtime. Steam 1.5.6 and Xbox / Microsoft Store 1.5.6 are both runtime-accepted on exact build profiles. Xbox now uses exact captured `gEnv` and static `IGameFramework` roots instead of the old writable-memory scan / historical `IGame[16]` path. For an otherwise-unmatched build in the verified `release_1_5-<numeric id>` family, Clean Pause may use a conservative anchor-derived `gEnv` fallback only after full live ABI validation; fallback mode has no version-specific framework/PauseGame observer or presentation quirks. GOG/Epic exact environment profiles remain implemented but should not yet be described as Clean Pause runtime-tested by this project.
 
 ## Description
 
@@ -56,6 +56,14 @@ Xbox B intentionally reveals the normal pause menu rather than resuming directly
 - the ordinary KCD2 pause menu for settings, save, quit, and normal resume behavior.
 
 Clean Pause does not create a separate pause system. KCD2 remains the owner of the actual pause state; the mod changes presentation around the verified vanilla pause transition and falls back to the visible vanilla menu if required state cannot be resolved safely.
+
+## Antivirus / Smart App Control notice for v0.3.0-rc.5
+
+Reported heuristic/ML detections currently include Microsoft `Program:Win32/Wacapew.C!ml`, Cynet `Malicious (score: 100)`, and Symantec `ML.Attribute.HighConfidence`.
+
+These detections are not, by themselves, proof that the file is malicious. The source is public, the release is produced by the repository's GitHub Actions workflow, and the published package includes exact hashes/provenance. Vendor-review status is tracked in #38.
+
+For the public mod page, present the detections and provenance factually and let users make their own installation decision. Exact release hashes should be taken from the published `SHA256SUMS.txt`.
 
 ## Installation
 
@@ -115,7 +123,7 @@ If the game works with the loader alone but crashes after adding Clean Pause, re
 - whether the game starts with the loader present and Clean Pause removed;
 - `kcd2_clean_pause_native.log`, if one was created before the crash.
 
-For v0.3.0-rc.4, the native log records the detected fingerprint/storefront/build profile and core hook installation independently from the optional framework observer. On Steam the first real Pause input should normally report the canonical CCryAction PauseGame observer becoming active; failure of that optional observer alone must not disable the input/Menu fallback, and later Pause presses may retry it.
+For v0.3.0-rc.5, the native log records exact-profile or compatibility-fallback identity, environment/framework locator strategy, runtime capabilities, and core hook installation. Exact Steam/Xbox profiles normally report an active PauseGame observer; compatibility fallback intentionally reports no framework observer and uses the shared input/Menu path.
 
 Do not install the ASI edition together with an old standalone Clean Pause `version.dll` edition.
 
@@ -192,7 +200,7 @@ Do **not** upload a CI/development build as v0.2.2 and do **not** upload the CI-
 
 Before changing the Nexus compatibility claim for Steam/GOG/Epic:
 
-- test the published GitHub prerelease v0.3.0-rc.4 rather than an earlier RC/diagnostic build;
+- test the exact frozen v0.3.0-rc.5 candidate rather than an earlier RC/diagnostic build;
 - complete the intended Clean Pause in-game smoke QA for every storefront being claimed as runtime-tested;
 - if the Steam RC is accepted, publish stable v0.3.0 through the normal immutable GitHub release workflow;
 - update the Nexus page version/changelog and tested-storefront wording together;

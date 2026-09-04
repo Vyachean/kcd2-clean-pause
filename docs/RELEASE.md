@@ -2,106 +2,53 @@
 
 GitHub Releases are the canonical public distribution channel. Generated native binaries/ZIP files are not committed.
 
-## Versioning policy
+## Versioning
 
-The project follows Semantic Versioning with immutable tag-backed releases.
+The project follows Semantic Versioning (SemVer) with immutable tag-backed releases. Before 1.0, backward-compatible features increment **MINOR** and backward-compatible fixes increment **PATCH**. A release-candidate number increments only when another candidate for the same target release is needed. It is not incremented for every merged PR. The current target is stable v0.3.0. v0.3.0-rc.1 through rc.4 remain immutable history. v0.3.0-rc.5 is the current prerelease containing the accepted Steam/Xbox exact-profile architecture plus the conservative release_1_5 compatibility fallback.
 
-- Stable releases use vMAJOR.MINOR.PATCH.
-- Prereleases use vMAJOR.MINOR.PATCH-rc.N (or alpha / beta where appropriate).
-- Before 1.0, backward-compatible features increment **MINOR**; backward-compatible fixes increment **PATCH**.
-- A release candidate number increments only when another candidate for the same target release is needed. It is not incremented for every merged PR.
-- Published tags/releases are immutable and are never moved or recycled.
+## Required CI gates
 
-The current multi-store compatibility work targets stable v0.3.0. v0.3.0-rc.1 through v0.3.0-rc.3 remain immutable history; v0.3.0-rc.4 is the current Steam acceptance candidate after framework-identity correction plus lifecycle hardening of the optional Steam PauseGame observer.
+Release-affecting changes must pass repository tests, stable native contract validation, x64 MSVC builds for both editions, standalone export validation, runtime-profile executable tests, pinned Ultimate ASI Loader verification, and release-shaped package integrity checks.
 
-## Production source
+A PR builds release-shaped artifacts but never publishes a GitHub Release.
 
-Both native editions compile the same Clean Pause runtime. Edition-specific bootstrap files are native/src/asi_entry.cpp and native/src/version_proxy.cpp / native/src/version.def.
+## Preparing a candidate
 
-## Pull-request and main-branch gates
+1. Update `VERSION`.
+2. Add the target to `CHANGELOG.md`.
+3. Update `docs/RELEASE_NOTES.md` and current support/compatibility docs.
+4. Run release-shaped PR CI.
+5. Confirm the release notes accurately disclose known runtime/security-reputation caveats.
+6. Merge to `main` to publish the immutable prerelease when the prerelease gate is accepted.
 
-Release-affecting changes must pass:
+A qualifying main push with a previously unpublished VERSION automatically creates the exact `v<VERSION>` tag and matching GitHub Release.
 
-1. repository Python tests;
-2. tools/validate_native_contract.py;
-3. x64 MSVC builds of both native targets;
-4. complete standalone proxy-export validation;
-5. x64/static-runtime checks for both Clean Pause images;
-6. runtime-profile executable tests when enabled by Validate;
-7. pinned upstream Ultimate ASI Loader download, SHA-256 verification and x64 validation for the ASI package;
-8. release-shaped ZIP construction and integrity checks.
+## rc.5 runtime baseline
 
-A PR never publishes a GitHub Release. A release-preparation merge to main with a new VERSION reruns the same gates, creates the immutable matching tag if absent, and publishes only the edition assets currently approved for public distribution.
+Steam 1.5.6 exact-profile runtime is accepted with canonical `gEnv`, anchor validation, CCryAction framework root, lazy PauseGame observer, and repeated Clean Pause/menu/resume cycles.
 
-## Preparing a release
+Xbox / Microsoft Store 1.5.6 exact-profile runtime is accepted with `gEnv` RVA `0x049D6EF8`, static framework object RVA `0x056EC680`, vtable RVA `0x040DAF18`, and repeated Clean Pause/menu/resume cycles.
 
-1. Choose the next SemVer version.
-2. Set VERSION.
-3. Move CHANGELOG.md entries from Unreleased to the target version.
-4. Update docs/RELEASE_NOTES.md and current support/distribution documentation.
-5. If changing the bundled Ultimate ASI Loader, review an official tagged upstream release and update its pinned version, source commit and published asset SHA-256 together in .github/workflows/release.yml.
-6. Merge only after release-shaped CI is green.
-7. The successful main workflow automatically creates the exact `v<VERSION>` tag and GitHub Release.
+A diagnostic forced-fallback test on the real Xbox binary proved the conservative release_1_5 fallback resolves the same `gEnv` without borrowing exact framework roots or presentation capabilities.
 
-If a qualifying push event is intentionally unavailable or suppressed, workflow_dispatch on main is the supported recovery path. Dispatches from non-main refs cannot publish.
+GOG/Epic exact environment profiles remain implemented but are not yet runtime-tested by this project.
 
-## Release-candidate acceptance flow
+## Edition publication
 
-For compatibility work that still needs real game acceptance:
+- v0.2.2 ASI: current stable public release.
+- v0.3.0-rc.5 ASI: current published prerelease.
+- new standalone `version.dll`: CI-only while #38 is unresolved.
+- `SHA256SUMS.txt`: only intentionally public assets.
+- `CI_SHA256SUMS.txt`: both internally validated packages.
 
-1. publish an immutable GitHub prerelease through the normal main release workflow;
-2. test the published ASI artifact rather than an ad-hoc local/CI binary;
-3. if a runtime change is required, increment the RC number and publish a new immutable prerelease; never move/reuse an old RC tag;
-4. if accepted, prepare stable v0.3.0 from the same runtime implementation with only release/version/documentation promotion changes;
-5. publish the stable GitHub artifact first;
-6. use that stable GitHub artifact for Nexus Mods.
+## Antivirus / Smart App Control status (#38)
 
-## Bundled Ultimate ASI Loader
+rc.5 is allowed to publish as a prerelease with a clear factual warning about its known heuristic/ML detections and full source/build provenance.
 
-ASI release packages starting with v0.2.2 include a complete first-install loader path rather than requiring a separate download.
+Issue #38 remains the stable v0.3.0 gate. The exact published rc.5 ASI should be submitted to Microsoft Security Intelligence and its submission ID/verdict recorded before stable promotion.
 
-The loader is treated as a pinned third-party release input:
-
-- source: official ThirteenAG/Ultimate-ASI-Loader repository;
-- workflow pins a specific upstream release version and source commit;
-- it downloads the named x64 release asset from that exact tag;
-- the downloaded archive must match the reviewed SHA-256 digest;
-- exactly one dinput8.dll must be found and validate as x64;
-- ASI_LOADER_SOURCE.txt records provenance and hashes;
-- ULTIMATE_ASI_LOADER_LICENSE.txt carries the upstream MIT license.
-
-Users with an existing compatible ASI loader should keep it rather than blindly overwriting dinput8.dll.
-
-## Edition-gated publication
-
-Current policy:
-
-- v0.2.2 ASI is the current stable public release.
-- v0.3.0-rc.4 ASI is the current multi-store/Steam lifecycle-hardened prerelease candidate.
-- v0.3.0-rc.1 through v0.3.0-rc.3 remain immutable prerelease history.
-- New standalone version.dll builds remain CI-only while Defender investigation #38 is unresolved.
-- SHA256SUMS.txt covers only public release assets.
-- CI_SHA256SUMS.txt covers both internally validated ZIPs and remains an Actions artifact.
+No packing, obfuscation, payload renaming, or similar AV-evasion work is part of the release process.
 
 ## Publication flow
 
-For an unpublished version on a qualifying main push or manual dispatch from main, .github/workflows/release.yml:
-
-1. validates VERSION;
-2. reruns tests/native contract validation;
-3. builds both x64 Clean Pause editions;
-4. validates the complete 17-export standalone proxy surface and both Clean Pause PE/runtime properties;
-5. downloads and verifies the pinned official x64 Ultimate ASI Loader input;
-6. constructs both edition ZIPs for CI validation;
-7. writes internal checksums for both and public checksums for approved assets;
-8. downloads and re-verifies all CI packages before publication;
-9. creates the immutable matching tag on the exact workflow commit if absent;
-10. creates the GitHub Release with only approved public assets and --verify-tag;
-11. marks the release as a GitHub prerelease automatically when VERSION contains a prerelease suffix.
-
-## Current validation baseline
-
-- Xbox / Microsoft Store KCD2 1.5.6 remains the Clean Pause runtime-tested baseline.
-- Steam KCD2 1.5.6 release_1_5-15693 is the v0.3.0-rc.4 acceptance target. RC1 confirmed exact build/profile/canonical gEnv and eliminated the prior crash. RC3 corrected the `IGame[16]` framework assumption using the canonical Steam CCryAction singleton. RC4 removes the remaining bootstrap-timing dependency by acquiring the optional PauseGame observer lazily on validated Pause input while keeping the core input/Menu path independent.
-- GOG and Epic release_1_5-15693 profiles are implemented from distribution-specific evidence; their core input/Menu path no longer depends on the invalid slot-16 framework assumption, but Clean Pause-specific runtime acceptance is still pending.
-- Unknown or mismatched builds fail closed before core version-specific hooks.
+For an approved unpublished VERSION on `main`, the workflow reruns all tests/build/package checks, verifies the pinned ASI loader, creates the immutable tag if absent, and publishes only approved assets. Prerelease versions are marked as prereleases automatically.
