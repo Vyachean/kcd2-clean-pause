@@ -2,22 +2,20 @@
 
 Clean Pause for **Kingdom Come: Deliverance II** on Windows.
 
-The current stable release, **v0.2.2**, was runtime-tested with **KCD2 1.5.6 on the PC Xbox Store / Xbox app version**, using an Xbox controller.
+The current stable release is **v0.3.0**.
 
-The current GitHub prerelease is **v0.3.0-rc.5**. It contains the accepted Steam/Xbox architecture and the conservative `release_1_5` compatibility fallback. The prerelease is published with an explicit antivirus/Smart App Control notice; issue #38 tracks that compatibility/reputation concern but does not gate releases.
+Steam 1.5.6 `release_1_5-15693` and Xbox / Microsoft Store 1.5.6 are runtime-tested and accepted. Both use exact build profiles and proven engine roots while sharing one Clean Pause input/state/presentation runtime. GOG/Epic exact environment profiles are implemented from distribution-specific evidence but are not yet claimed as Clean Pause runtime-tested by this project.
 
-Steam 1.5.6 `release_1_5-15693` and Xbox / Microsoft Store 1.5.6 are runtime-accepted on the current source. Both now use exact build profiles and exact engine roots while sharing one Clean Pause input/state/presentation runtime. GOG/Epic profiles are backed by distribution-specific evidence but are not yet claimed as Clean Pause runtime-tested by this project.
+For otherwise-unmatched builds in the verified `release_1_5-<numeric id>` ABI family, v0.3.0 can use a conservative anchor-derived compatibility fallback after full live validation.
 
 ## Release status
 
-- **Current stable release:** v0.2.2.
-- **Current GitHub prerelease:** v0.3.0-rc.5.
+- **Current stable release:** v0.3.0.
 - **Runtime acceptance:** Steam 1.5.6 `release_1_5-15693` and Xbox / Microsoft Store 1.5.6 exact-profile paths are accepted.
 - **Compatibility fallback:** otherwise-unmatched `release_1_5-<numeric id>` builds may use a conservative anchor-derived `gEnv` fallback after full live ABI validation; other ABI branches remain fail-closed.
 - **GOG / Epic Games Store:** exact environment profiles implemented; Clean Pause-specific smoke QA still pending.
 - **Published edition:** KCD2CleanPause.asi, using the upstream Ultimate ASI Loader.
 - **Standalone version.dll:** built and validated; new publication is currently withheld by the project's ASI-first distribution policy, not by antivirus verdicts.
-- **Stable v0.3.0:** antivirus/Smart App Control detections are not a release gate; stable promotion depends on the project's own QA, compatibility scope, and release decision.
 
 Use the GitHub Releases page as the source of truth for versions and assets that are actually published.
 
@@ -41,7 +39,7 @@ Clean Pause keeps the retained frame sharp by removing the vanilla pause depth-o
 
 ### Antivirus / Smart App Control notice
 
-v0.3.0-rc.5 is currently flagged by several heuristic/ML scanners, including:
+v0.3.0 is currently reported by several heuristic/ML scanners, including:
 
 - Microsoft Defender: `Program:Win32/Wacapew.C!ml`;
 - Cynet: `Malicious (score: 100)`;
@@ -49,12 +47,12 @@ v0.3.0-rc.5 is currently flagged by several heuristic/ML scanners, including:
 
 These are heuristic/ML detections and are **not, by themselves, proof that the file is malicious**. The project is fully open source, the release is built by the public GitHub Actions workflow, third-party dependencies are pinned, and the release package contains provenance/checksum information for independent verification.
 
-Microsoft/vendor review is tracked in #38 as non-blocking reputation work. Exact hashes for the published assets are provided with the release in `SHA256SUMS.txt`. Users can evaluate the source, build provenance, scanner results, and their own security policy when deciding whether to install the prerelease.
+Microsoft/vendor review is tracked in #38 as non-blocking reputation work. Exact hashes for the published assets are provided with the release in `SHA256SUMS.txt`. Users can evaluate the source, build provenance, scanner results, and their own security policy when deciding whether to install the release.
 
 ### Known behavior
 
 - Xbox **B does not resume directly from Clean Pause**. It reveals the ordinary KCD2 pause menu; use the normal menu controls to resume.
-- The current Steam acceptance build can still show a single residual visual frame when the retained gameplay HUD becomes visible after the game is already paused. This is non-blocking and tracked in #52.
+- The current stable Steam path can still show a single residual visual frame when the retained gameplay HUD becomes visible after the game is already paused. This is non-blocking and tracked in #52.
 
 ## Editions
 
@@ -93,7 +91,7 @@ The package also contains ASI_LOADER_SOURCE.txt and ULTIMATE_ASI_LOADER_LICENSE.
 
 ## Runtime acceptance
 
-For a candidate built from current source, the core smoke contract is:
+For the current stable runtime, the core smoke contract is:
 
 1. launch the game and load into gameplay;
 2. press Escape / Start and confirm Clean Pause retains the gameplay frame, HUD and applicable subtitles;
