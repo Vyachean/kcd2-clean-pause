@@ -2,7 +2,24 @@
 
 ## Unreleased
 
-- Release policy: antivirus / Smart App Control heuristic detections are documented compatibility/reputation signals, not release blockers by themselves. Vendor reclassification is optional evidence rather than a prerequisite for stable publication.
+## v0.3.0 — 2026-09-04
+
+Stable multi-store release for the accepted KCD2 1.5.6 native runtime.
+
+- Promotes the runtime accepted through v0.3.0-rc.5 without changing the Clean Pause behavior validated on Steam and Xbox / Microsoft Store.
+- Runtime-tested exact profiles:
+  - Steam 1.5.6 `release_1_5-15693`;
+  - Xbox / Microsoft Store 1.5.6.
+- Uses profile-driven environment/framework resolution and presentation capabilities instead of storefront branching inside the shared Clean Pause core.
+- Xbox / Microsoft Store now uses exact retail-captured runtime roots instead of the old writable-memory environment scan and historical `IGame[16]` framework path.
+- Steam keeps its exact `gEnv` + anchor-validation path and canonical `CCryAction` framework root.
+- Adds the conservative compatibility fallback for otherwise-unmatched `release_1_5-<numeric assembly id>` builds: unique anchor-derived `gEnv`, full live ABI validation, shared input/Menu runtime only, and no borrowed exact-profile framework/presentation quirks.
+- Unknown or incompatible ABI branches remain fail-closed.
+- Removes the production translation-unit wrapper and keeps one shared native runtime for ASI and standalone targets.
+- Keeps process-lifetime hook semantics and MinHook rollback guarantees.
+- GOG/Epic exact environment profiles remain implemented but are not yet claimed as Clean Pause runtime-tested.
+- Residual one-frame Steam presentation artifact remains non-blocking and tracked in #52.
+- Antivirus / Smart App Control heuristic detections are disclosed as compatibility/reputation signals. They are not release blockers by themselves; source, CI provenance and release hashes remain available for independent verification.
 
 ## v0.3.0-rc.5 — 2026-09-04
 
@@ -23,7 +40,7 @@ Fifth v0.3.0 release candidate, consolidating the accepted Steam/Xbox runtime ar
 - Keeps process-lifetime hook semantics and MinHook rollback contracts unchanged.
 - Leaves the residual one-frame Steam presentation issue tracked separately in #52.
 
-Public stable v0.3.0 remains blocked by Defender / Smart App Control investigation #38. RC5 is assembled as the next exact candidate for packaging/provenance and security-reputation review; users must not be instructed to disable platform security controls or add exclusions.
+RC5 became the accepted runtime baseline for stable v0.3.0. Known antivirus / Smart App Control heuristic detections remain documented in #38 as non-blocking compatibility/reputation signals.
 
 ## v0.3.0-rc.4 — 2026-09-02
 
