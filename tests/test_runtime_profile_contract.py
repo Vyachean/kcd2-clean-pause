@@ -109,6 +109,7 @@ class RuntimeProfileContractTests(unittest.TestCase):
     def test_profiled_environment_resolution_is_one_time_and_evidence_specific(self):
         self.assertIn("EnvironmentLocatorStrategy::ExactEnvironmentRva", PROFILE)
         self.assertIn("EnvironmentLocatorStrategy::ExactEnvironmentRvaWithAnchorValidation", PROFILE)
+        self.assertIn("EnvironmentLocatorStrategy::AnchorDerivedEnvironment", PROFILE)
         self.assertIn('"exec autoexec.cfg"', PROFILE)
         self.assertIn("ResolveUniqueConsoleStorage", PROFILE)
         self.assertIn("ResolveProfileEnvironmentBase", PROFILE)
@@ -253,21 +254,23 @@ class RuntimeProfileContractTests(unittest.TestCase):
         self.assertNotIn("LegacyResolveGameFramework_Xbox156Only", RUNTIME)
         self.assertNotIn("for (std::size_t offset = 0; offset <= limit", RUNTIME)
 
-    def test_unknown_build_is_rejected_before_abi_or_runtime_discovery(self):
+    def test_unknown_build_uses_only_conservative_release15_fallback(self):
         marker = "DWORD WINAPI BootstrapThread(void*)"
         bootstrap = RUNTIME[RUNTIME.index(marker):]
-        read_identity = bootstrap.index("ReadBuildIdentity")
-        match = bootstrap.index("MatchSupportedBuild")
+        exact = bootstrap.index("MatchSupportedBuild")
+        fallback = bootstrap.index("BuildCompatibleRelease15Fallback")
         abi_gate = bootstrap.index("MatureRuntimeSupports")
         resolve = bootstrap.index("ResolveProfileEnvironmentBase")
-        poll = bootstrap.index("PollRuntimeEnvironment")
         install = bootstrap.index("InstallInputHook")
-        self.assertLess(read_identity, match)
-        self.assertLess(match, abi_gate)
+        self.assertLess(exact, fallback)
+        self.assertLess(fallback, abi_gate)
         self.assertLess(abi_gate, resolve)
-        self.assertLess(resolve, poll)
-        self.assertLess(poll, install)
-        self.assertIn("unsupported WHGame build; Clean Pause disabled; no hooks installed", bootstrap)
+        self.assertLess(resolve, install)
+        self.assertIn("unsupported WHGame build/release branch", bootstrap)
+        self.assertIn("conservative release_1_5 compatibility fallback", bootstrap)
+        self.assertIn("FrameworkLocatorStrategy::None", PROFILE)
+        self.assertIn("CompatibilityFallback", PROFILE_H)
+        self.assertIn("AnchorDerivedEnvironment", PROFILE_H)
 
     def test_required_candidate_identity_is_strongly_validated(self):
         self.assertIn("GetProcessIdOfThread", RUNTIME)
