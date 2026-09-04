@@ -11,7 +11,6 @@ BUBBLES = (ROOT / "native/src/clean_pause_bubbles.cpp").read_text(encoding="utf-
 class PauseBarrierContractTests(unittest.TestCase):
     def test_verified_framework_surface_is_declared(self):
         for needle in (
-            "kGameGetFrameworkSlot = 16",
             "kGameFrameworkPauseGameSlot = 13",
             "kGameFrameworkGetSystemSlot = 19",
             "using PauseGameFn =",
@@ -19,22 +18,20 @@ class PauseBarrierContractTests(unittest.TestCase):
             self.assertIn(needle, ABI)
 
     def test_framework_identity_is_not_shape_only(self):
-        xbox = NATIVE[
-            NATIVE.index("bool LegacyResolveGameFramework_Xbox156Only"):
-            NATIVE.index("} // namespace\n\n} // namespace clean_pause")
+        resolver = NATIVE[
+            NATIVE.index("bool ResolveProfileFramework"):
+            NATIVE.index("bool ShouldSuppressProfileHudRootVisibility")
         ]
-        self.assertIn("frameworkSystem == environment.system", xbox)
-        self.assertIn("kGameGetFrameworkSlot", xbox)
-        self.assertIn("kGameFrameworkGetSystemSlot", xbox)
-
-        steam = NATIVE[
-            NATIVE.index("bool ResolveSteamFrameworkSingleton"):
-            NATIVE.index("bool ResolveGameFramework")
-        ]
-        self.assertIn("frameworkSystem != environment.system", steam)
-        self.assertIn("kGameFrameworkGetSystemSlot", steam)
-        self.assertIn("kSteam156FrameworkVtableRva", steam)
-        self.assertNotIn("kGameGetFrameworkSlot", steam)
+        self.assertIn("FrameworkLocatorStrategy::ExactPointerStorageRva", resolver)
+        self.assertIn("FrameworkLocatorStrategy::ExactObjectRva", resolver)
+        self.assertIn("expectedFrameworkRva", resolver)
+        self.assertIn("expectedFrameworkVtableRva", resolver)
+        self.assertIn("frameworkSystem != environment.system", resolver)
+        self.assertIn("kGameFrameworkGetSystemSlot", resolver)
+        self.assertNotIn("kGameGetFrameworkSlot", ABI)
+        self.assertNotIn("GetGameFrameworkFn", ABI)
+        self.assertNotIn("kGameGetFrameworkSlot", resolver)
+        self.assertNotIn("LegacyResolveGameFramework_Xbox156Only", resolver)
 
     def test_pause_hook_keeps_exact_vanilla_ownership_and_scopes_pinning_to_pause_call(self):
         hook = NATIVE[NATIVE.index("void __fastcall HookPauseGame"):NATIVE.index("bool InstallPauseBarrierHook")]

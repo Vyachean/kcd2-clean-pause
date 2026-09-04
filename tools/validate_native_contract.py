@@ -47,7 +47,6 @@ required_abi = (
     "kUIElementGetMovieClipByNameSlot = 71",
     "kFlashVariableGetDisplayInfoSlot = 26",
     "kFlashVariableSetVisibleSlot = 33",
-    "kGameGetFrameworkSlot = 16",
     "kGameFrameworkPauseGameSlot = 13",
     "kGameFrameworkGetSystemSlot = 19",
     "XiStart = 516",
@@ -57,6 +56,9 @@ required_abi = (
 for needle in required_abi:
     if needle not in abi:
         raise SystemExit(f"missing verified ABI contract: {needle}")
+
+if "kGameGetFrameworkSlot" in abi or "GetGameFrameworkFn" in abi:
+    raise SystemExit("legacy IGame[16] framework ABI must not remain in production")
 
 required_runtime = (
     'getElement(g_flashUI, "Menu@0")',
@@ -276,43 +278,46 @@ if pause_hook.index("g_pauseTransitionActive.store(true") > pause_hook.index("g_
 if "g_pendingPauseAttempt.load" not in pause_hook or "framework == g_gameFramework" not in pause_hook:
     raise SystemExit("PauseGame observer must be scoped to target framework + pending physical pause")
 
-xbox_resolver = native[
-    native.index("bool LegacyResolveGameFramework_Xbox156Only"):
-    native.index("} // namespace\n\n} // namespace clean_pause")
-]
-for needle in (
-    "kGameGetFrameworkSlot",
-    "kGameFrameworkGetSystemSlot",
-    "frameworkSystem == environment.system",
-):
-    if needle not in xbox_resolver:
-        raise SystemExit(f"Xbox framework identity adapter contract missing: {needle}")
-
-steam_resolver = native[
-    native.index("bool ResolveSteamFrameworkSingleton"):
+profile_framework_resolver = native[
+    native.index("bool ResolveProfileFramework"):
     native.index("bool ResolveGameFramework")
 ]
 for needle in (
-    "kSteam156FrameworkStorageRva",
-    "kSteam156FrameworkVtableRva",
+    "FrameworkLocatorStrategy::ExactPointerStorageRva",
+    "expectedFrameworkRva",
+    "expectedFrameworkVtableRva",
     "kGameFrameworkGetSystemSlot",
     "frameworkSystem != environment.system",
 ):
-    if needle not in steam_resolver:
-        raise SystemExit(f"Steam framework identity adapter contract missing: {needle}")
-if "kGameGetFrameworkSlot" in steam_resolver:
-    raise SystemExit("Steam framework adapter must not fall back to Xbox IGame[16]")
+    if needle not in profile_framework_resolver:
+        raise SystemExit(f"profile framework identity contract missing: {needle}")
+if "Storefront::Steam" in profile_framework_resolver:
+    raise SystemExit("profile framework resolver must not branch on storefront")
+if "kGameGetFrameworkSlot" in profile_framework_resolver:
+    raise SystemExit("profile framework resolver must not use legacy IGame[16]")
+
+for needle in (
+    "FrameworkLocatorStrategy::ExactPointerStorageRva",
+    "FrameworkLocatorStrategy::ExactObjectRva",
+    "FrameworkLocatorStrategy::None",
+):
+    if needle not in profile_framework_resolver:
+        raise SystemExit(f"framework locator strategy contract missing: {needle}")
 
 dispatcher = native[
     native.index("bool ResolveGameFramework"):
-    native.index("bool ShouldSuppressSteamHudRootVisibility")
+    native.index("bool ShouldSuppressProfileHudRootVisibility")
 ]
-if "ResolveSteamFrameworkSingleton" not in dispatcher:
-    raise SystemExit("framework dispatcher must route Steam through CCryAction singleton")
-if "LegacyResolveGameFramework_Xbox156Only" not in dispatcher:
-    raise SystemExit("framework dispatcher must retain the isolated Xbox adapter")
-if "Storefront::XboxMicrosoftStore" not in dispatcher:
-    raise SystemExit("framework dispatcher must scope legacy fallback to Xbox")
+if "return ResolveProfileFramework(environment, framework);" not in dispatcher:
+    raise SystemExit("framework dispatcher must delegate to the unified profile resolver")
+for storefront in (
+    "Storefront::Steam",
+    "Storefront::XboxMicrosoftStore",
+    "Storefront::GOG",
+    "Storefront::EpicGamesStore",
+):
+    if storefront in profile_framework_resolver or storefront in dispatcher:
+        raise SystemExit(f"framework resolution must not branch on storefront: {storefront}")
 
 post = native[native.index("void __fastcall HookPostInputEvent"):native.index("bool ResolveGameFramework")]
 barrier_exchange = post.index("g_pauseBarrierObserved.exchange(false")

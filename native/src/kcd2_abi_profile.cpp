@@ -24,7 +24,6 @@ constexpr AbiProfile kRelease15Abi{
         13, // IInput::PostInputEvent
         12, // IGame::GetLongName
         13, // IGame::GetName
-        16, // IGame::GetIGameFramework
         13, // IGameFramework::PauseGame
         19, // IGameFramework::GetISystem
         6,  // IScriptSystem::ExecuteBuffer
@@ -106,7 +105,6 @@ bool MatureRuntimeSupports(const AbiProfile& profile)
     if (slots.inputPostInputEvent != kInputPostInputEventSlot
         || slots.gameGetLongName != kGameGetLongNameSlot
         || slots.gameGetName != kGameGetNameSlot
-        || slots.gameGetFramework != kGameGetFrameworkSlot
         || slots.gameFrameworkPauseGame != kGameFrameworkPauseGameSlot
         || slots.gameFrameworkGetSystem != kGameFrameworkGetSystemSlot
         || slots.scriptExecuteBuffer != kScriptExecuteBufferSlot
